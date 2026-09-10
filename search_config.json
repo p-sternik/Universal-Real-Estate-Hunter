@@ -114,7 +114,29 @@
           "required_parent": null
         }
       ],
-      "blacklist_keywords": [],
+      "blacklist_keywords": [
+        "matysówka",
+        "matysowka",
+        "matysowska",
+        "tyczyn",
+        "chmielnik",
+        "biała",
+        "biala",
+        "zwięczyca",
+        "zwieczyca",
+        "kielanówka",
+        "kielanowka",
+        "górna słocina",
+        "gorna slocina",
+        "św. rocha",
+        "sw. rocha",
+        "sw rocha",
+        "św rocha",
+        "skarpie",
+        "na skarpie",
+        "teren osuwiskowy",
+        "osuwisko"
+      ],
       "enabled_portals": null,
       "discord_webhook_url": null,
       "otodom_path": null

@@ -49,28 +49,32 @@ class QualificationEngine:
         # Step 1: Stage I (Hard rules & Geo)
         passed_stage1, stage1_reasons, matched_wl = self.stage1.evaluate(listing, profile=p)
 
+        borderline_reasons: list[str] = []
         if not passed_stage1:
-            return FilterResult(
-                is_qualified=False,
-                status=QualificationStatus.REJECTED_STAGE1,
-                score=0.0,
-                passed_stage1=False,
-                stage1_reasons=stage1_reasons,
-                passed_stage2=False,
-                stage2_reasons=[],
-                pros=[],
-                cons=[],
-                is_corner=False,
-                has_parking_or_garage=False,
-                matched_whitelist_area=None,
-                finish_condition=listing.finish_condition,
-                has_visualisations=listing.has_visualisations,
-                sewerage=listing.sewerage,
-                heating=listing.heating,
-                has_fiber=listing.has_fiber,
-            )
+            borderline_reasons = self.stage1.borderline_margins(listing, profile=p)
+            if not borderline_reasons:
+                return FilterResult(
+                    is_qualified=False,
+                    status=QualificationStatus.REJECTED_STAGE1,
+                    score=0.0,
+                    passed_stage1=False,
+                    stage1_reasons=stage1_reasons,
+                    passed_stage2=False,
+                    stage2_reasons=[],
+                    pros=[],
+                    cons=[],
+                    is_corner=False,
+                    has_parking_or_garage=False,
+                    matched_whitelist_area=None,
+                    finish_condition=listing.finish_condition,
+                    has_visualisations=listing.has_visualisations,
+                    sewerage=listing.sewerage,
+                    heating=listing.heating,
+                    has_fiber=listing.has_fiber,
+                )
 
-        # Step 2: Stage II (Semantic analysis)
+        # Step 2: Stage II (Semantic analysis) — runs before the LLM so that listings
+        # rejected by cheap regex rules never consume LLM calls.
         (
             passed_stage2,
             stage2_reasons,
@@ -98,7 +102,43 @@ class QualificationEngine:
             listing.heating = detected_heating
         listing.has_fiber = has_fiber
 
-        # Step 3: Optional LLM Enrichment
+        # Borderline handling: an offer is borderline when it fails Stage I only by
+        # small margins, or when its only Stage II failure is a "do remontu" finish.
+        finish_only_borderline = False
+        if not passed_stage2:
+            finish_only_borderline = (
+                detected_finish == FinishCondition.DO_REMONTU
+                and bool(stage2_reasons)
+                and all(r.startswith("Stan wykończenia") for r in stage2_reasons)
+            )
+
+        # Hard Stage II failures (road access, terrain, plot size, visualisations)
+        # reject the offer outright — no LLM call, even for Stage I borderline.
+        if not passed_stage2 and not finish_only_borderline:
+            return FilterResult(
+                is_qualified=False,
+                status=QualificationStatus.REJECTED_STAGE2,
+                score=10.0,
+                passed_stage1=passed_stage1,
+                stage1_reasons=borderline_reasons,
+                passed_stage2=False,
+                stage2_reasons=stage2_reasons,
+                pros=pros,
+                cons=cons,
+                is_corner=is_corner,
+                has_parking_or_garage=has_parking,
+                matched_whitelist_area=matched_wl,
+                finish_condition=listing.finish_condition,
+                has_visualisations=listing.has_visualisations,
+                sewerage=listing.sewerage,
+                heating=listing.heating,
+                has_fiber=listing.has_fiber,
+            )
+
+        is_borderline = bool(borderline_reasons) or finish_only_borderline
+
+        # Step 3: Optional LLM Enrichment (only for listings that passed Stage II or
+        # are borderline — never for definitive rejections)
         ai_summary = None
         ai_verdict = None
         worth_interest = None
@@ -207,6 +247,34 @@ class QualificationEngine:
             if phone_match:
                 digits = phone_match.group(1) + phone_match.group(2) + phone_match.group(3)
                 contact_phone = f"+48{digits}"
+
+        # Borderline offers land in a dedicated review category (no notifications).
+        if is_borderline:
+            return FilterResult(
+                is_qualified=False,
+                status=QualificationStatus.NEEDS_REVIEW_BORDERLINE,
+                score=10.0,
+                passed_stage1=passed_stage1,
+                stage1_reasons=borderline_reasons if borderline_reasons else stage1_reasons,
+                passed_stage2=passed_stage2,
+                stage2_reasons=stage2_reasons,
+                pros=pros,
+                cons=cons,
+                is_corner=is_corner,
+                has_parking_or_garage=has_parking,
+                matched_whitelist_area=matched_wl,
+                finish_condition=listing.finish_condition,
+                has_visualisations=listing.has_visualisations,
+                sewerage=listing.sewerage,
+                heating=listing.heating,
+                has_fiber=listing.has_fiber,
+                ai_summary=ai_summary,
+                ai_verdict=ai_verdict,
+                worth_interest=worth_interest,
+                ai_questions=ai_questions,
+                contact_phone=contact_phone,
+                contact_person=contact_person,
+            )
 
         if not passed_stage2:
             return FilterResult(

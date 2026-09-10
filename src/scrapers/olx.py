@@ -439,13 +439,16 @@ class OLXScraper(BaseScraper):
                 await self._emit_progress(
                     page=page, total_pages=self.max_pages, items_done=len(cards), items_total=len(cards)
                 )
-                for card in cards:
+
+                semaphore = asyncio.Semaphore(settings.CONCURRENT_REQUESTS)
+
+                async def parse_card(card, sem=semaphore):
                     try:
                         link_tag = card.select_one("a")
                         title_tag = card.select_one("h6") or card.select_one("h4")
                         price_tag = card.select_one('p[data-testid="ad-price"]')
                         if not link_tag or not title_tag:
-                            continue
+                            return None
 
                         rel_url = str(link_tag.get("href") or "")
                         abs_url = f"https://www.olx.pl{rel_url}" if rel_url.startswith("/") else rel_url
@@ -488,47 +491,53 @@ class OLXScraper(BaseScraper):
                         )
 
                         if settings.FETCH_DETAILS and abs_url not in self.skip_detail_urls:
-                            await asyncio.sleep(self.delay(0.3))
-                            det_ad = await self.fetch_ad_detail(abs_url)
-                            if det_ad and isinstance(det_ad, dict):
-                                if det_ad.get("params"):
-                                    det_params = self._parse_params_dict(det_ad.get("params", []))
-                                    if det_params.get("m"):
-                                        try:
-                                            item.area_home = float(
-                                                str(det_params["m"])
-                                                .replace(",", ".")
-                                                .replace("m²", "")
-                                                .replace("m2", "")
-                                                .strip()
+                            async with sem:
+                                await asyncio.sleep(self.delay(0.3))
+                                det_ad = await self.fetch_ad_detail(abs_url)
+                                if det_ad and isinstance(det_ad, dict):
+                                    if det_ad.get("params"):
+                                        det_params = self._parse_params_dict(det_ad.get("params", []))
+                                        if det_params.get("m"):
+                                            try:
+                                                item.area_home = float(
+                                                    str(det_params["m"])
+                                                    .replace(",", ".")
+                                                    .replace("m²", "")
+                                                    .replace("m2", "")
+                                                    .strip()
+                                                )
+                                                if item.price > 0 and item.area_home > 0:
+                                                    item.price_per_m2 = round(item.price / item.area_home, 2)
+                                            except ValueError:
+                                                pass
+                                        if det_params.get("stan_wykonczenia") or det_params.get("construction_status"):
+                                            item.finish_condition = self._map_finish_condition(
+                                                det_params.get("stan_wykonczenia")
+                                                or det_params.get("construction_status")
                                             )
-                                            if item.price > 0 and item.area_home > 0:
-                                                item.price_per_m2 = round(item.price / item.area_home, 2)
-                                        except ValueError:
-                                            pass
-                                    if det_params.get("stan_wykonczenia") or det_params.get("construction_status"):
-                                        item.finish_condition = self._map_finish_condition(
-                                            det_params.get("stan_wykonczenia") or det_params.get("construction_status")
+                                    if det_ad.get("description"):
+                                        item.raw_description = (
+                                            BeautifulSoup(det_ad["description"], "html.parser")
+                                            .get_text(separator="\n")
+                                            .strip()
                                         )
-                                if det_ad.get("description"):
-                                    item.raw_description = (
-                                        BeautifulSoup(det_ad["description"], "html.parser")
-                                        .get_text(separator="\n")
-                                        .strip()
-                                    )
-                                if det_ad.get("photos"):
-                                    det_gallery = [
-                                        str(p.get("link") or p.get("url"))
-                                        for p in det_ad["photos"]
-                                        if isinstance(p, dict) and (p.get("link") or p.get("url"))
-                                    ]
-                                    item.gallery_images = det_gallery[:15]
-                                    if det_gallery and not item.main_image_url:
-                                        item.main_image_url = det_gallery[0]
+                                    if det_ad.get("photos"):
+                                        det_gallery = [
+                                            str(p.get("link") or p.get("url"))
+                                            for p in det_ad["photos"]
+                                            if isinstance(p, dict) and (p.get("link") or p.get("url"))
+                                        ]
+                                        item.gallery_images = det_gallery[:15]
+                                        if det_gallery and not item.main_image_url:
+                                            item.main_image_url = det_gallery[0]
 
-                        listings.append(item)
+                        return item
                     except Exception as e:
                         logger.debug(f"[OLXScraper] Failed to parse card: {e}")
+                        return None
+
+                results = await asyncio.gather(*[parse_card(card) for card in cards])
+                listings.extend(item for item in results if item is not None)
 
             await asyncio.sleep(self.delay(1.0))
 

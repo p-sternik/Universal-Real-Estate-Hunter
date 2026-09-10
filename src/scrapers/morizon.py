@@ -411,35 +411,42 @@ class MorizonScraper(BaseScraper):
             await self._emit_progress(
                 page=page, total_pages=self.max_pages, items_done=len(valid_cards), items_total=len(valid_cards)
             )
-            for card in valid_cards:
+
+            semaphore = asyncio.Semaphore(settings.CONCURRENT_REQUESTS)
+
+            async def process_card(card, sem=semaphore):
                 item = self._parse_card(card)
                 if not item:
-                    continue
+                    return None
                 if settings.FETCH_DETAILS and item.url not in self.skip_detail_urls:
-                    await asyncio.sleep(self.delay(0.3))
-                    try:
-                        det = await self.fetch_listing_detail(item.url)
-                        if det:
-                            if det.get("description"):
-                                item.raw_description = det["description"]
-                            if det.get("finish_condition"):
-                                item.finish_condition = det["finish_condition"]
-                            if det.get("heating"):
-                                item.heating = det["heating"]
-                            if det.get("sewerage"):
-                                item.sewerage = det["sewerage"]
-                            if det.get("access_road_type"):
-                                item.access_road_type = det["access_road_type"]
-                            if det.get("gallery_images"):
-                                for g_img in det["gallery_images"]:
-                                    if g_img not in item.gallery_images:
-                                        item.gallery_images.append(g_img)
-                                item.gallery_images = item.gallery_images[:15]
-                                if not item.main_image_url and item.gallery_images:
-                                    item.main_image_url = item.gallery_images[0]
-                    except Exception as err:
-                        logger.debug(f"[{self.name}] Detail enrichment failed for {item.url}: {err}")
-                listings.append(item)
+                    async with sem:
+                        await asyncio.sleep(self.delay(0.3))
+                        try:
+                            det = await self.fetch_listing_detail(item.url)
+                            if det:
+                                if det.get("description"):
+                                    item.raw_description = det["description"]
+                                if det.get("finish_condition"):
+                                    item.finish_condition = det["finish_condition"]
+                                if det.get("heating"):
+                                    item.heating = det["heating"]
+                                if det.get("sewerage"):
+                                    item.sewerage = det["sewerage"]
+                                if det.get("access_road_type"):
+                                    item.access_road_type = det["access_road_type"]
+                                if det.get("gallery_images"):
+                                    for g_img in det["gallery_images"]:
+                                        if g_img not in item.gallery_images:
+                                            item.gallery_images.append(g_img)
+                                    item.gallery_images = item.gallery_images[:15]
+                                    if not item.main_image_url and item.gallery_images:
+                                        item.main_image_url = item.gallery_images[0]
+                        except Exception as err:
+                            logger.debug(f"[{self.name}] Detail enrichment failed for {item.url}: {err}")
+                return item
+
+            results = await asyncio.gather(*[process_card(card) for card in valid_cards])
+            listings.extend(item for item in results if item is not None)
 
             await asyncio.sleep(self.delay(self.delay_seconds))
 

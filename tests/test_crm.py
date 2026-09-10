@@ -1,5 +1,3 @@
-import os
-
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
@@ -179,46 +177,6 @@ async def test_live_dashboard_listings_includes_gallery():
         if len(listings) > 0:
             assert "gallery_images" in listings[0]
             assert isinstance(listings[0]["gallery_images"], list)
-
-
-@pytest.mark.asyncio
-async def test_generate_html_dashboard_with_gallery(tmp_path):
-    from src.services.report_generator import generate_html_dashboard
-    from src.storage.database import get_session, init_db
-
-    await init_db()
-
-    async with get_session() as session:
-        repo = ListingRepository(session)
-        listing = ListingSchema(
-            id="test-rpt-1",
-            portal="Otodom",
-            portal_id="test_rpt_1",
-            url="https://otodom.pl/oferta/test-rpt-1",
-            title="Dom do raportu HTML",
-            price=920_000,
-            price_per_m2=7_666,
-            area_home=120.0,
-            area_plot=300.0,
-            location_raw="Rzeszów",
-            gallery_images=["https://example.com/1.jpg", "https://example.com/2.jpg"],
-        )
-        filt_res = FilterResult(
-            is_qualified=True,
-            status=QualificationStatus.QUALIFIED,
-            score=80.0,
-            passed_stage1=True,
-            passed_stage2=True,
-        )
-        await repo.save_or_update(listing, filt_res)
-        await session.commit()
-
-    out_file = str(tmp_path / "test_report.html")
-    path = await generate_html_dashboard(output_path=out_file, auto_open=False)
-    assert os.path.exists(path)
-    with open(path, encoding="utf-8") as f:
-        content = f.read()
-    assert "<!DOCTYPE html>" in content
 
 
 @pytest.mark.asyncio

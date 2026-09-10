@@ -85,7 +85,7 @@ Universal-Real-Estate-Hunter/
 │   │   ├── discord_notifier.py# Rich Discord embed notifier
 │   │   ├── telegram_notifier.py # HTML Telegram bot notifier
 │   │   ├── progress.py        # Live scraping progress tracker
-│   │   └── report_generator.py# Static standalone HTML dashboard generator
+│   │   └── terminal_view.py   # Rich terminal listing table (CLI `view` command)
 │   ├── scheduler/             # Periodic runner with day/night adaptive loop
 │   └── version.py             # Version (managed by semantic-release)
 ├── tests/                     # Automated pytest suite
@@ -175,7 +175,6 @@ The application provides a unified CLI via [`main.py`](main.py):
 | `once` | Run a single scraping and qualification pass | `python main.py once` or `python main.py once --profile "Domy Rzeszów"` |
 | `dashboard` | Launch real-time web UI CRM & Leaflet map | `python main.py dashboard --port 8080` (`server` is an alias) |
 | `geoportal` | Audit saved listings with GUGiK Geoportal | `python main.py geoportal --limit 50` (`--all` to include non-qualified) |
-| `report` | Generate standalone HTML analytical report | `python main.py report` (opens in browser) |
 | `view` | View qualified listings in formatted terminal table | `python main.py view --status QUALIFIED --limit 15` |
 | `reindex` | Re-evaluate all database listings with latest filters | `python main.py reindex` |
 | `geocode` | Backfill missing GPS coordinates via Nominatim | `python main.py geocode` |

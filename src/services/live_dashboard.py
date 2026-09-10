@@ -2,6 +2,7 @@ import asyncio
 import gzip
 import hashlib
 import json
+import time
 import webbrowser
 from datetime import UTC, datetime
 from pathlib import Path
@@ -69,6 +70,15 @@ else:
     INDEX_HTML = "<!DOCTYPE html><html><body><h1>Dashboard template not found</h1></body></html>"
 
 
+MEDIANS_CACHE_TTL_SECONDS = 60.0
+_medians_cache: dict[str, Any] = {"computed_at": 0.0, "data": {}}
+
+
+def invalidate_market_medians_cache() -> None:
+    _medians_cache["computed_at"] = 0.0
+    _medians_cache["data"] = {}
+
+
 class LiveDashboardServer:
     def __init__(self, host: str = "0.0.0.0", port: int = 8080):
         self.host = host
@@ -76,6 +86,15 @@ class LiveDashboardServer:
         self.app = web.Application(middlewares=[gzip_middleware])
         self._active_scrape_task: asyncio.Task[Any] | None = None
         self._setup_routes()
+
+    async def _get_market_medians_cached(self, repo: ListingRepository) -> dict[str, float]:
+        now = time.monotonic()
+        if _medians_cache["data"] and now - _medians_cache["computed_at"] < MEDIANS_CACHE_TTL_SECONDS:
+            return _medians_cache["data"]
+        data = await repo.get_market_medians()
+        _medians_cache["computed_at"] = now
+        _medians_cache["data"] = data
+        return data
 
     def _setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
@@ -294,7 +313,7 @@ class LiveDashboardServer:
             items = res.scalars().all()
 
             repo = ListingRepository(session)
-            market_medians = await repo.get_market_medians()
+            market_medians = await self._get_market_medians_cached(repo)
 
             now_utc = datetime.now(UTC)
             max_scraped_at = None
@@ -383,6 +402,14 @@ class LiveDashboardServer:
                         "mpzp_zone": item.mpzp_zone,
                         "mpzp_status": item.mpzp_status,
                         "flood_risk_zone": item.flood_risk_zone,
+                        "landslide_risk": item.landslide_risk,
+                        "egib_building_status": item.egib_building_status,
+                        "egib_soil_class": item.egib_soil_class,
+                        "noise_level_db": item.noise_level_db,
+                        "noise_zone": item.noise_zone,
+                        "nature_protected_zone": item.nature_protected_zone,
+                        "monument_zone": item.monument_zone,
+                        "cemetery_buffer_zone": item.cemetery_buffer_zone,
                         "user_status": item.user_status or "NEW",
                         "user_notes": item.user_notes or "",
                         "access_road_type": item.access_road_type,
@@ -428,6 +455,7 @@ class LiveDashboardServer:
                         # Negotiation & Market Intelligence
                         "market_median_m2": neg_advice.market_median_m2,
                         "price_deviation_pct": neg_advice.price_deviation_pct,
+                        "price_deviation_adjusted_pct": neg_advice.price_deviation_adjusted_pct,
                         "days_on_market": neg_advice.days_on_market,
                         "negotiation_leverage": neg_advice.negotiation_leverage,
                         "fair_market_value": neg_advice.fair_market_value,
@@ -493,6 +521,7 @@ class LiveDashboardServer:
             global_tracker.complete_session({"error": str(e)})
         finally:
             self._active_scrape_task = None
+            invalidate_market_medians_cache()
 
     async def handle_trigger_scrape(self, request: web.Request) -> web.Response:
         from src.services.progress import global_tracker

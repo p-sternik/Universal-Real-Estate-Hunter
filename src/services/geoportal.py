@@ -1,10 +1,12 @@
 import asyncio
+import io
 import math
 import re
 from typing import Any
 
 import httpx
 from loguru import logger
+from PIL import Image
 
 
 class GeoportalService:
@@ -27,6 +29,28 @@ class GeoportalService:
         "https://mapy.geoportal.gov.pl/wss/ext/KrajowaIntegracjaMiejscowychPlanowZagospodarowaniaPrzestrzennego"
     )
     ISOK_FLOOD_WMS = "https://wody.isok.gov.pl/wss/INSPIRE/INSPIRE_NZ_HY_MZPMRP_WMS"
+    SOPO_LANDSLIDE_WMS = "https://cbdgmapa.pgi.gov.pl/arcgis/services/geozagrozenia/sopo_obszary/MapServer/WMSServer"
+    GDOS_PROTECTED_WMS = "https://sdi.gdos.gov.pl/wms"
+    NID_MONUMENTS_WMS = "https://usluga.zabytek.gov.pl/INSPIRE_IMD/service.svc/get"
+    GIOS_NOISE_API = "https://dane.gios.gov.pl/api/halas/v1/zasiegi-halasu"
+
+    # Powiat-level GESUT WMS services (pixel-based detection, see get_gesut_networks).
+    # Layer names follow the Rozporządzenie MRPiT z 23.07.2021 (GESUT) specification.
+    GESUT_WMS_SERVICES = [
+        {"name": "Miasto Rzeszów", "url": "https://osrodek.erzeszow.pl/map/geoportal/wmsg.php"},
+        {"name": "Powiat rzeszowski", "url": "https://powiatrzeszowski.geoportal2.pl/map/geoportal/wmsg.php"},
+    ]
+    GESUT_LAYERS = [
+        ("woda", "siec_wodociagowa", (0, 0, 255)),
+        ("kanalizacja", "siec_kanalizacyjna", (128, 51, 0)),
+        ("gaz", "siec_gazowa", (255, 255, 0)),
+        ("prad", "siec_elektroenergetyczna", (255, 0, 0)),
+        ("cieplo", "siec_cieplownicza", (255, 145, 0)),
+        ("telekomunikacja", "siec_telekomunikacyjna", (128, 0, 255)),
+    ]
+    GESUT_COLOR_TOLERANCE = 45
+    GESUT_MIN_PIXELS = 30
+    GESUT_CHECK_RADIUS_M = 20.0
 
     def __init__(self, request_timeout: float = 6.0):
         self.timeout = request_timeout
@@ -279,6 +303,538 @@ class GeoportalService:
         self._cache[cache_key] = default_flood
         return default_flood
 
+    async def get_landslide_risk_sopo(
+        self,
+        client: httpx.AsyncClient,
+        cx: float,
+        cy: float,
+    ) -> dict[str, Any]:
+        """
+        Queries PIG-PIB SOPO WMS GetFeatureInfo (EPSG:2180) for active landslides
+        and mass movement hazard areas.
+        """
+        cache_key = f"sopo:{round(cx, 1)},{round(cy, 1)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        params = {
+            "SERVICE": "WMS",
+            "VERSION": "1.3.0",
+            "REQUEST": "GetFeatureInfo",
+            "BBOX": f"{cy - 10:.1f},{cx - 10:.1f},{cy + 10:.1f},{cx + 10:.1f}",
+            "CRS": "EPSG:2180",
+            "WIDTH": "10",
+            "HEIGHT": "10",
+            "LAYERS": "0,13",
+            "QUERY_LAYERS": "0,13",
+            "I": "5",
+            "J": "5",
+            "INFO_FORMAT": "application/geo+json",
+        }
+        try:
+            resp = await client.get(
+                self.SOPO_LANDSLIDE_WMS,
+                params=params,
+                headers=self.headers,
+                timeout=self.timeout,
+                follow_redirects=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                features = data.get("features", [])
+                if features:
+                    ids_clean = [
+                        str(p.get("Numer identyfikacyjny") or p.get("ID") or "")
+                        for f in features
+                        if (p := f.get("properties")) and (p.get("Numer identyfikacyjny") or p.get("ID"))
+                    ]
+                    ids_str = f" id: {', '.join(ids_clean)}" if ids_clean else ""
+                    res = {
+                        "risk": "OSUWISKO",
+                        "landslide_zone": "OSUWISKO",
+                        "has_risk": True,
+                        "has_landslide": True,
+                        "description": f"Obszar osuwiska / teren zagrożony ruchami masowymi (PIG-PIB SOPO{ids_str})",
+                        "features_count": len(features),
+                    }
+                    self._cache[cache_key] = res
+                    return res
+
+                res = {
+                    "risk": "BRAK",
+                    "landslide_zone": "BRAK",
+                    "has_risk": False,
+                    "has_landslide": False,
+                    "description": "Brak osuwisk i terenów zagrożonych ruchami masowymi (SOPO PIG-PIB)",
+                    "features_count": 0,
+                }
+                self._cache[cache_key] = res
+                return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] SOPO Landslide GetFeatureInfo failed: {e}")
+
+        default_res: dict[str, Any] = {
+            "risk": "NIEZNANY",
+            "landslide_zone": "NIEZNANY",
+            "has_risk": False,
+            "has_landslide": False,
+            "description": None,
+            "features_count": 0,
+        }
+        self._cache[cache_key] = default_res
+        return default_res
+
+    async def get_egib_full_audit(
+        self,
+        client: httpx.AsyncClient,
+        cx: float,
+        cy: float,
+    ) -> dict[str, Any]:
+        """
+        Queries KIEG WMS GetFeatureInfo (EPSG:2180) to inspect:
+        1. Whether building is disclosed in cadastre (B / Br vs unbuilt Bp or pure agricultural R).
+        2. Soil classification and whether agricultural soil is protected (RIIIa/RIIIb/RI/RII/ŁIII/PsIII).
+        """
+        cache_key = f"egib_full:{round(cx, 1)},{round(cy, 1)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        query_url = (
+            f"{self.KIEG_WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&"
+            f"BBOX={cy - 5:.1f},{cx - 5:.1f},{cy + 5:.1f},{cx + 5:.1f}&CRS=EPSG:2180&"
+            f"WIDTH=10&HEIGHT=10&LAYERS=dzialki,budynki,kontury,uzytki&QUERY_LAYERS=dzialki,budynki,kontury,uzytki&"
+            f"I=5&J=5&INFO_FORMAT=text/html"
+        )
+        try:
+            resp = await client.get(query_url, headers=self.headers, timeout=self.timeout)
+            if resp.status_code == 200:
+                text = resp.text
+                found_values: list[str] = []
+                for label in ("Oznaczenie konturu", "Oznaczenie u[zż]ytku", "Klasou[zż]ytek", "U[zż]ytek", "Klasa"):
+                    for m in re.finditer(rf"{label}[^<]*</td>\s*<td[^>]*>(.*?)</td>", text, re.IGNORECASE):
+                        v = m.group(1).strip()
+                        if v and v not in found_values:
+                            found_values.append(v)
+
+                combined = ",".join(found_values) if found_values else ""
+                tokens = re.findall(r"\b[A-Za-z0-9/_-]+\b", combined or text)
+                tokens_upper = {t.upper() for t in tokens}
+
+                # Building presence analysis:
+                # B = tereny mieszkaniowe, Br = rolne zabudowane, Ba = przemysł, Bi = inne zabudowane
+                # Bp = zurbanizowane niezabudowane lub w trakcie budowy
+                if any(tag in tokens_upper for tag in ("B", "BR", "BI", "BA")):
+                    building_status = "UJAWNIONY"
+                elif "BP" in tokens_upper:
+                    building_status = "W_TRAKCIE_BUDOWY"
+                elif combined:
+                    building_status = "BRAK_W_EWIDENCJI"
+                else:
+                    building_status = "NIEZNANY"
+
+                # Soil classification & protection analysis
+                soil_classes = re.findall(
+                    r"\b((?:R|Ł|Ps|S|Lzr)(?:I{1,3}[ab]?|IV[ab]?|V|VI[z]?))\b",
+                    combined or text,
+                    re.IGNORECASE,
+                )
+                soil_classes_unique = sorted(set(soil_classes), key=lambda s: s.upper())
+                protected_matches = [
+                    s for s in soil_classes_unique if re.search(r"^(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)$", s, re.IGNORECASE)
+                ]
+                is_protected_soil = len(protected_matches) > 0
+                if soil_classes_unique:
+                    soil_class_str: str | None = ", ".join(soil_classes_unique)
+                elif combined:
+                    soil_class_str = combined
+                else:
+                    soil_class_str = None
+
+                res = {
+                    "contour": combined,
+                    "building_status": building_status,
+                    "soil_class": soil_class_str,
+                    "is_protected_soil": is_protected_soil,
+                    "protected_classes": protected_matches,
+                }
+                self._cache[cache_key] = res
+                return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] KIEG full audit failed: {e}")
+
+        default_res: dict[str, Any] = {
+            "contour": "",
+            "building_status": "NIEZNANY",
+            "soil_class": None,
+            "is_protected_soil": False,
+            "protected_classes": [],
+        }
+        self._cache[cache_key] = default_res
+        return default_res
+
+    async def get_gdos_protected_areas(
+        self,
+        client: httpx.AsyncClient,
+        cx: float,
+        cy: float,
+    ) -> dict[str, Any]:
+        """
+        Queries GDOŚ WMS GetFeatureInfo (EPSG:2180) for Natura 2000,
+        nature reserves, landscape parks, and ecological grounds.
+        """
+        cache_key = f"gdos:{round(cx, 1)},{round(cy, 1)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        layers = (
+            "GDOS:ObszarySpecjalnejOchrony,GDOS:SpecjalneObszaryOchrony,"
+            "GDOS:ParkiNarodowe,GDOS:Rezerwaty,GDOS:ParkiKrajobrazowe,"
+            "GDOS:ObszaryChronionegoKrajobrazu,GDOS:UzytkiEkologiczne"
+        )
+        params = {
+            "SERVICE": "WMS",
+            "VERSION": "1.3.0",
+            "REQUEST": "GetFeatureInfo",
+            "BBOX": f"{cy - 10:.1f},{cx - 10:.1f},{cy + 10:.1f},{cx + 10:.1f}",
+            "CRS": "EPSG:2180",
+            "WIDTH": "10",
+            "HEIGHT": "10",
+            "LAYERS": layers,
+            "QUERY_LAYERS": layers,
+            "I": "5",
+            "J": "5",
+            "INFO_FORMAT": "application/json",
+        }
+        try:
+            resp = await client.get(
+                self.GDOS_PROTECTED_WMS,
+                params=params,
+                headers=self.headers,
+                timeout=self.timeout,
+                follow_redirects=True,
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                features = data.get("features", [])
+                if features:
+                    names = []
+                    for f in features:
+                        props = f.get("properties") or {}
+                        n = props.get("nazwa") or props.get("kodinspire")
+                        if n:
+                            names.append(str(n))
+                    names_str = ", ".join(sorted(set(names))) if names else "Obszar chroniony"
+                    res = {
+                        "is_protected": True,
+                        "zone_type": names_str,
+                        "description": f"Obszar chroniony przyrodniczo (GDOŚ: {names_str})",
+                        "features_count": len(features),
+                    }
+                    self._cache[cache_key] = res
+                    return res
+
+                res = {
+                    "is_protected": False,
+                    "zone_type": None,
+                    "description": "Brak form ochrony przyrody (poza strefą GDOŚ)",
+                    "features_count": 0,
+                }
+                self._cache[cache_key] = res
+                return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] GDOŚ GetFeatureInfo failed: {e}")
+
+        default_res = {
+            "is_protected": False,
+            "zone_type": None,
+            "description": None,
+            "features_count": 0,
+        }
+        self._cache[cache_key] = default_res
+        return default_res
+
+    async def get_nid_monuments(
+        self,
+        client: httpx.AsyncClient,
+        cx: float,
+        cy: float,
+    ) -> dict[str, Any]:
+        """
+        Queries NID WMS GetFeatureInfo (EPSG:2180) for immovable historical monuments
+        and conservatory protection zones.
+        """
+        cache_key = f"nid:{round(cx, 1)},{round(cy, 1)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        params = {
+            "SERVICE": "WMS",
+            "VERSION": "1.3.0",
+            "REQUEST": "GetFeatureInfo",
+            "BBOX": f"{cy - 10:.1f},{cx - 10:.1f},{cy + 10:.1f},{cx + 10:.1f}",
+            "CRS": "EPSG:2180",
+            "WIDTH": "10",
+            "HEIGHT": "10",
+            "LAYERS": "Immovable_Monuments",
+            "QUERY_LAYERS": "Immovable_Monuments",
+            "I": "5",
+            "J": "5",
+            "INFO_FORMAT": "text/html",
+        }
+        try:
+            resp = await client.get(
+                self.NID_MONUMENTS_WMS,
+                params=params,
+                headers=self.headers,
+                timeout=self.timeout,
+                follow_redirects=True,
+            )
+            if resp.status_code == 200 and ("<TABLE" in resp.text.upper() or "SITENAME" in resp.text.upper()):
+                site_m = re.search(r"SITENAME.*?<TD[^>]*>(.*?)</TD>", resp.text, re.IGNORECASE | re.DOTALL)
+                doc_m = re.search(
+                    r"LEGALFOUNDATIONDOCUMENT.*?<TD[^>]*>(.*?)</TD>", resp.text, re.IGNORECASE | re.DOTALL
+                )
+                site_name = re.sub(r"[\s]+", " ", site_m.group(1)).strip() if site_m else "Zabytek nieruchomy"
+                doc_name = re.sub(r"[\s]+", " ", doc_m.group(1)).strip() if doc_m else ""
+                desc = f"Zabytek nieruchomy / strefa konserwatorska (NID: {site_name}{f', {doc_name}' if doc_name else ''})"
+                res = {
+                    "is_monument": True,
+                    "name": site_name,
+                    "document": doc_name,
+                    "description": desc,
+                }
+                self._cache[cache_key] = res
+                return res
+
+            res = {
+                "is_monument": False,
+                "name": None,
+                "document": None,
+                "description": "Brak wpisu w rejestrze zabytków NID",
+            }
+            self._cache[cache_key] = res
+            return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] NID GetFeatureInfo failed: {e}")
+
+        default_res = {
+            "is_monument": False,
+            "name": None,
+            "document": None,
+            "description": None,
+        }
+        self._cache[cache_key] = default_res
+        return default_res
+
+    async def get_noise_level_audit(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        voivodeship: str = "PODKARPACKIE",
+    ) -> dict[str, Any]:
+        """
+        Acoustic audit: queries GIOŚ EHAŁAS REST API (strategic noise maps Lden/Lnight)
+        and evaluates proximity buffers to major expressways (S19/A4), DK94, and active railway lines.
+        Threshold: >65 dB Lden triggers a warning and score penalty.
+        """
+        cache_key = f"noise:{round(lat, 4)},{round(lon, 4)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        # 1. Check GIOŚ EHAŁAS API with short timeout
+        try:
+            api_url = (
+                f"{self.GIOS_NOISE_API}?numerStrony=0&liczbaElementowNaStronie=10&"
+                f"wojewodztwo={voivodeship}&rundaMapowania=4%20Runda%20Mapowania&"
+                f"zrodloHalasu=Ha%C5%82as%20drogowy%20poza%20aglomeracj%C4%85"
+            )
+            resp = await client.get(api_url, headers=self.headers, timeout=2.5)
+            if resp.status_code == 200:
+                data = resp.json()
+                for feat in data.get("features", []):
+                    props = feat.get("properties") or {}
+                    interval = str(props.get("przedzial") or "")
+                    if any(t in interval for t in ("6569", "7074", "7579", "Lden65", "Lden70", "Lden75")):
+                        res = {
+                            "noise_level_db": 68.0,
+                            "exceeds_threshold": True,
+                            "zone": "WYSOKI_HAŁAS (>65 dB)",
+                            "description": f"Podwyższony poziom hałasu komunikacyjnego (>65 dB Lden, GIOŚ: {interval})",
+                        }
+                        self._cache[cache_key] = res
+                        return res
+        except Exception as e:
+            logger.debug(f"[Geoportal] GIOŚ noise API query failed or timed out: {e}")
+
+        # 2. Highway / transit corridor acoustic proximity model (S19, A4, DK94)
+        from src.services.market_analyzer import EXPRESSWAY_HUBS, haversine_km
+
+        min_hub_dist_km = min(haversine_km(lat, lon, h_lat, h_lon) for _, h_lat, h_lon in EXPRESSWAY_HUBS)
+
+        if min_hub_dist_km < 0.40:
+            level = 68.0 if min_hub_dist_km >= 0.20 else 72.0
+            res = {
+                "noise_level_db": level,
+                "exceeds_threshold": True,
+                "zone": "WYSOKI_HAŁAS (>65 dB)",
+                "description": f"Podwyższony poziom hałasu komunikacyjnego ({level:.0f} dB Lden) — sąsiedztwo węzła S19/A4/DK94 (<400m)",
+            }
+            self._cache[cache_key] = res
+            return res
+
+        res = {
+            "noise_level_db": 52.0,
+            "exceeds_threshold": False,
+            "zone": "NORMATYWNY",
+            "description": "Poziom hałasu w normie środowiskowej (<55 dB Lden)",
+        }
+        self._cache[cache_key] = res
+        return res
+
+    def get_cemetery_proximity(
+        self,
+        cx: float,
+        cy: float,
+        mpzp_zone: str | None = None,
+        surrounding_risks: list[str] | None = None,
+        kieg_contours: list[str] | None = None,
+    ) -> dict[str, Any]:
+        """
+        Evaluates proximity to cemeteries based on MPZP (symbol ZC / cmentarz)
+        and cadastre contours (Tc / cmentarz).
+        Zone <50m: statutory prohibition on building/window placement.
+        Zone 50-150m: water supply and sanitary restrictions.
+        """
+        _ = (cx, cy)
+        risks_joined = " ".join(surrounding_risks or []).lower()
+        contours_joined = " ".join(kieg_contours or []).lower()
+        mpzp_lower = (mpzp_zone or "").lower()
+
+        is_cemetery_immediate = "zc" in mpzp_lower or "cmentarz" in mpzp_lower
+        is_cemetery_surrounding = "cmentarz" in risks_joined or "cmentarz" in contours_joined or "tc" in contours_joined
+
+        if is_cemetery_immediate:
+            return {
+                "has_cemetery_risk": True,
+                "zone": "<50m",
+                "distance_m": 50.0,
+                "description": "Działka w bezpośredniej strefie cmentarza (<50m) — zakaz rozbudowy i okien mieszkalnych",
+            }
+        if is_cemetery_surrounding:
+            return {
+                "has_cemetery_risk": True,
+                "zone": "50-150m",
+                "distance_m": 150.0,
+                "description": "Działka w strefie ochronnej cmentarza (50–150m) — ograniczenia ujęć wody i sanitarne",
+            }
+
+        return {
+            "has_cemetery_risk": False,
+            "zone": "BRAK",
+            "distance_m": None,
+            "description": "Brak cmentarza w strefie ochronnej 150m",
+        }
+
+    @staticmethod
+    def count_gesut_pixels(png_bytes: bytes) -> dict[str, int]:
+        """Counts pixels of each GESUT network color in a transparent WMS map image."""
+        img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        counts: dict[str, int] = {key: 0 for key, _, _ in GeoportalService.GESUT_LAYERS}
+        pix = img.load()
+        if pix is None:
+            return counts
+        width, height = img.size
+        for y in range(height):
+            for x in range(width):
+                pixel = pix[x, y]
+                if not isinstance(pixel, tuple) or len(pixel) < 4:
+                    continue
+                r, g, b, a = pixel[0], pixel[1], pixel[2], pixel[3]
+                if a < 128:
+                    continue
+                for key, _layer, (tr, tg, tb) in GeoportalService.GESUT_LAYERS:
+                    if (
+                        abs(r - tr) <= GeoportalService.GESUT_COLOR_TOLERANCE
+                        and abs(g - tg) <= GeoportalService.GESUT_COLOR_TOLERANCE
+                        and abs(b - tb) <= GeoportalService.GESUT_COLOR_TOLERANCE
+                    ):
+                        counts[key] += 1
+                        break
+        return counts
+
+    async def get_gesut_networks(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        radius_m: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Detects utility networks (water, sewerage, gas, power, heating, telecom)
+        near the given coordinates by rendering the powiat GESUT WMS and counting
+        colored network pixels within a ~radius_m box.
+
+        Returns:
+            {"coverage": bool, "checked_radius_m": float, "sources": [...],
+             "networks": {"woda": bool, ...}}
+        """
+        radius = radius_m or self.GESUT_CHECK_RADIUS_M
+        cache_key = f"gesut:{round(lat, 3)},{round(lon, 3)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        half = radius / 111139.0
+        bbox = f"{lat - half:.7f},{lon - half:.7f},{lat + half:.7f},{lon + half:.7f}"
+        layer_names = [layer for _, layer, _ in self.GESUT_LAYERS]
+        detected: dict[str, bool] = {key: False for key, _, _ in self.GESUT_LAYERS}
+        sources: list[str] = []
+        coverage = False
+
+        for service in self.GESUT_WMS_SERVICES:
+            params = {
+                "SERVICE": "WMS",
+                "VERSION": "1.3.0",
+                "REQUEST": "GetMap",
+                "BBOX": bbox,
+                "CRS": "EPSG:4326",
+                "WIDTH": "200",
+                "HEIGHT": "200",
+                "LAYERS": ",".join(layer_names),
+                "STYLES": "",
+                "FORMAT": "image/png",
+                "TRANSPARENT": "true",
+            }
+            try:
+                resp = await client.get(service["url"], params=params, headers=self.headers, timeout=self.timeout)
+                if resp.status_code != 200:
+                    logger.debug(f"[Geoportal] GESUT WMS {service['name']} HTTP {resp.status_code}")
+                    continue
+                content = resp.content
+                if not content or not content.startswith(b"\x89PNG"):
+                    logger.debug(f"[Geoportal] GESUT WMS {service['name']} returned non-PNG data")
+                    continue
+                counts = self.count_gesut_pixels(content)
+                hit_any = any(c >= self.GESUT_MIN_PIXELS for c in counts.values())
+                if not hit_any:
+                    continue
+                coverage = True
+                sources.append(service["name"])
+                for key in detected:
+                    if counts.get(key, 0) >= self.GESUT_MIN_PIXELS:
+                        detected[key] = True
+            except Exception as e:
+                logger.debug(f"[Geoportal] GESUT WMS {service['name']} query failed: {e}")
+
+        result: dict[str, Any] = {
+            "coverage": coverage,
+            "checked_radius_m": radius,
+            "sources": sources,
+            "networks": detected,
+        }
+        self._cache[cache_key] = result
+        return result
+
     async def audit_location(
         self,
         lat: float,
@@ -301,6 +857,7 @@ class GeoportalService:
             "geoportal_url": self.generate_geoportal_url(lat=lat, lon=lon),
             "gunb_url": self.generate_gunb_url(),
             "gesut_url": self.generate_geoportal_url(lat=lat, lon=lon),
+            "gesut_networks": None,
             "surrounding_risks": [],
             "surrounding_parcels_count": 0,
             "mpzp_zone": None,
@@ -309,6 +866,14 @@ class GeoportalService:
             "flood_risk_zone": None,
             "flood_risk_level": None,
             "flood_risk_desc": None,
+            "landslide_risk": None,
+            "egib_building_status": None,
+            "egib_soil_class": None,
+            "noise_level_db": None,
+            "noise_zone": None,
+            "nature_protected_zone": None,
+            "monument_zone": None,
+            "cemetery_buffer_zone": None,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
@@ -327,9 +892,19 @@ class GeoportalService:
             main_area, main_centroid = await self.get_parcel_geometry_and_area(client, main_pid)
             result["cadastral_area"] = main_area
 
-            # Step 2: MPZP & Flood risk queries (concurrent with surrounding search)
+            # Step 2: MPZP, Flood, SOPO, EGiB, GDOŚ, NID, Noise & GESUT queries (concurrent)
             mpzp_task = self.get_mpzp_info(client, main_centroid[0], main_centroid[1]) if main_centroid else None
             flood_task = self.get_flood_risk_isok(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+            sopo_task = (
+                self.get_landslide_risk_sopo(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+            )
+            egib_task = self.get_egib_full_audit(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+            gdos_task = (
+                self.get_gdos_protected_areas(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+            )
+            nid_task = self.get_nid_monuments(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+            noise_task = self.get_noise_level_audit(client, lat, lon)
+            gesut_task = self.get_gesut_networks(client, lat, lon)
 
             # Step 3: Surrounding search points (8 directions)
             d_lat = radius_meters / 111139.0
@@ -351,53 +926,101 @@ class GeoportalService:
 
             result["surrounding_parcels_count"] = len(surround_pids)
 
-            # Await MPZP & Flood tasks
-            if mpzp_task:
-                mpzp_info = await mpzp_task
-                result["mpzp_zone"] = mpzp_info.get("zone")
-                result["mpzp_status"] = mpzp_info.get("status")
-                result["mpzp_plan_name"] = mpzp_info.get("plan_name")
-            if flood_task:
-                flood_info = await flood_task
-                result["flood_risk_zone"] = flood_info.get("flood_zone")
-                result["flood_risk_level"] = flood_info.get("risk_level")
-                result["flood_risk_desc"] = flood_info.get("description")
-                if flood_info.get("flood_zone") == "ZAGROŻENIE_POWODZIOWE":
-                    result["surrounding_risks"].append(
-                        flood_info.get("description") or "Strefa zagrożenia powodziowego"
-                    )
+            # Await environmental and zoning tasks concurrently
+            env_results = await asyncio.gather(
+                mpzp_task or asyncio.sleep(0, result={}),
+                flood_task or asyncio.sleep(0, result={}),
+                sopo_task or asyncio.sleep(0, result={}),
+                egib_task or asyncio.sleep(0, result={}),
+                gdos_task or asyncio.sleep(0, result={}),
+                nid_task or asyncio.sleep(0, result={}),
+                noise_task,
+                gesut_task,
+            )
+            mpzp, flood, sopo, egib, gdos, nid, noise, gesut = env_results
 
-            if not surround_pids:
-                return result
+            result["mpzp_zone"] = mpzp.get("zone")
+            result["mpzp_status"] = mpzp.get("status")
+            result["mpzp_plan_name"] = mpzp.get("plan_name")
+            result["flood_risk_zone"] = flood.get("flood_zone")
+            result["flood_risk_level"] = flood.get("risk_level")
+            result["flood_risk_desc"] = flood.get("description")
+            if flood.get("flood_zone") == "ZAGROŻENIE_POWODZIOWE":
+                result["surrounding_risks"].append(flood.get("description") or "Strefa zagrożenia powodziowego")
+
+            result["gesut_networks"] = gesut
+            result["landslide_risk"] = sopo.get("risk")
+            if sopo.get("risk") in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
+                result["surrounding_risks"].append(
+                    sopo.get("description") or "Obszar zagrożony osuwiskami (SOPO PIG-PIB)"
+                )
+
+            result["egib_building_status"] = egib.get("building_status")
+            result["egib_soil_class"] = egib.get("soil_class")
+            if egib.get("is_protected_soil") and egib.get("soil_class"):
+                result["surrounding_risks"].append(f"Gleba chroniona w EGiB ({egib.get('soil_class')})")
+
+            if gdos.get("is_protected"):
+                result["nature_protected_zone"] = gdos.get("zone_type")
+                result["surrounding_risks"].append(gdos.get("description") or "Obszar chroniony przyrodniczo (GDOŚ)")
+
+            if nid.get("is_monument"):
+                result["monument_zone"] = nid.get("name")
+                result["surrounding_risks"].append(nid.get("description") or "Zabytek / strefa konserwatorska (NID)")
+
+            result["noise_level_db"] = noise.get("noise_level_db")
+            result["noise_zone"] = noise.get("zone")
+            if noise.get("exceeds_threshold"):
+                result["surrounding_risks"].append(noise.get("description") or "Przekroczenie norm hałasu (>65 dB)")
 
             # Step 4: Check geometry and contours for surrounding parcels concurrently
-            geom_tasks = [self.get_parcel_geometry_and_area(client, pid) for pid in surround_pids]
-            geom_results = await asyncio.gather(*geom_tasks, return_exceptions=True)
+            all_contours: list[str] = []
+            if surround_pids:
+                geom_tasks = [self.get_parcel_geometry_and_area(client, pid) for pid in surround_pids]
+                geom_results = await asyncio.gather(*geom_tasks, return_exceptions=True)
 
-            kieg_tasks = []
-            pid_list = list(surround_pids)
-            for i, gr in enumerate(geom_results):
-                if isinstance(gr, tuple) and gr[1] is not None:
-                    cx, cy = gr[1]
-                    kieg_tasks.append((pid_list[i], self.get_parcel_contours_kieg(client, cx, cy)))
+                kieg_tasks = []
+                pid_list = list(surround_pids)
+                for i, gr in enumerate(geom_results):
+                    if isinstance(gr, tuple) and gr[1] is not None:
+                        cx, cy = gr[1]
+                        kieg_tasks.append((pid_list[i], self.get_parcel_contours_kieg(client, cx, cy)))
 
-            if kieg_tasks:
-                kieg_results = await asyncio.gather(*[t[1] for t in kieg_tasks], return_exceptions=True)
-                for j, contour in enumerate(kieg_results):
-                    pid = kieg_tasks[j][0]
-                    if isinstance(contour, str) and contour:
-                        short_nr = pid.split(".")[-1]
-                        contour_upper = contour.upper()
-                        if "BA" in contour_upper:
-                            result["surrounding_risks"].append(
-                                f"Działka {short_nr} ma przeznaczenie przemysłowe (Ba): {contour}"
-                            )
-                        elif "BI" in contour_upper:
-                            result["surrounding_risks"].append(
-                                f"Działka {short_nr} ma użytek komercyjny/składowy (Bi): {contour}"
-                            )
-                        elif "TK" in contour_upper:
-                            result["surrounding_risks"].append(f"Działka {short_nr} to tereny kolejowe (Tk): {contour}")
+                if kieg_tasks:
+                    kieg_results = await asyncio.gather(*[t[1] for t in kieg_tasks], return_exceptions=True)
+                    for j, contour in enumerate(kieg_results):
+                        pid = kieg_tasks[j][0]
+                        if isinstance(contour, str) and contour:
+                            all_contours.append(contour)
+                            short_nr = pid.split(".")[-1]
+                            contour_upper = contour.upper()
+                            if "BA" in contour_upper:
+                                result["surrounding_risks"].append(
+                                    f"Działka {short_nr} ma przeznaczenie przemysłowe (Ba): {contour}"
+                                )
+                            elif "BI" in contour_upper:
+                                result["surrounding_risks"].append(
+                                    f"Działka {short_nr} ma użytek komercyjny/składowy (Bi): {contour}"
+                                )
+                            elif "TK" in contour_upper:
+                                result["surrounding_risks"].append(
+                                    f"Działka {short_nr} to tereny kolejowe (Tk): {contour}"
+                                )
+
+            # Check cemetery proximity
+            if main_centroid:
+                cemetery_info = self.get_cemetery_proximity(
+                    main_centroid[0],
+                    main_centroid[1],
+                    mpzp_zone=result.get("mpzp_zone"),
+                    surrounding_risks=result.get("surrounding_risks"),
+                    kieg_contours=all_contours,
+                )
+                result["cemetery_buffer_zone"] = cemetery_info.get("zone")
+                if cemetery_info.get("has_cemetery_risk"):
+                    result["surrounding_risks"].append(
+                        cemetery_info.get("description") or f"Strefa cmentarna ({cemetery_info.get('zone')})"
+                    )
 
         return result
 

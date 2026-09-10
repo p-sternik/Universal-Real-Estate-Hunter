@@ -155,6 +155,21 @@ class DiscordNotifier:
             if getattr(listing, "flood_risk_zone", None):
                 flood_icon = "🌊" if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE" else "🛡️"
                 geo_lines.append(f"{flood_icon} **Zagrożenie powodziowe:** {listing.flood_risk_zone}")
+            if getattr(listing, "landslide_risk", None) and listing.landslide_risk in (
+                "OSUWISKO",
+                "ZAGROŻENIE_OSUWISKIEM",
+            ):
+                geo_lines.append(f"🚨 **Osuwisko (SOPO):** {listing.landslide_risk}")
+            nz = getattr(listing, "noise_zone", None)
+            if nz and "WYSOKI" in nz:
+                db_val = (
+                    f"{listing.noise_level_db:.0f}" if getattr(listing, "noise_level_db", None) is not None else ">65"
+                )
+                geo_lines.append(f"🔊 **Hałas:** {db_val} dB Lden")
+            if getattr(listing, "cemetery_buffer_zone", None) and listing.cemetery_buffer_zone in ("<50m", "50-150m"):
+                geo_lines.append(f"⚰️ **Strefa cmentarna:** {listing.cemetery_buffer_zone}")
+            if getattr(listing, "monument_zone", None):
+                geo_lines.append(f"🏛️ **Zabytek (NID):** {listing.monument_zone}")
             fields.append(
                 {
                     "name": "🗺️ Geoportal / Ewidencja Gruntów",
@@ -211,7 +226,12 @@ class DiscordNotifier:
             neg_lines = [f"**Pozycja:** {leverage_icon} {negotiation_advice.negotiation_leverage}"]
             if negotiation_advice.market_median_m2 and negotiation_advice.price_deviation_pct is not None:
                 med_fmt = f"{negotiation_advice.market_median_m2:,.0f} zł/m²".replace(",", " ")
-                neg_lines.append(f"**Mediana rynku:** {med_fmt} ({negotiation_advice.price_deviation_pct:+.1f}%)")
+                dev = (
+                    negotiation_advice.price_deviation_adjusted_pct
+                    if negotiation_advice.price_deviation_adjusted_pct is not None
+                    else negotiation_advice.price_deviation_pct
+                )
+                neg_lines.append(f"**Mediana rynku:** {med_fmt} ({dev:+.1f}% po korekcie o stan)")
             if negotiation_advice.suggested_opening_offer:
                 offer_fmt = f"{negotiation_advice.suggested_opening_offer:,.0f} zł".replace(",", " ")
                 neg_lines.append(f"**Sugerowane otwarcie:** {offer_fmt}")

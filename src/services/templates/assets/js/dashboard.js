@@ -816,6 +816,7 @@
             const wl = viewItems.filter(i => i.qualification_status === 'QUALIFIED_WHITELIST').length;
             const qual = viewItems.filter(i => i.is_qualified).length;
             const rev = viewItems.filter(i => i.qualification_status === 'NEEDS_REVIEW').length;
+            const border = viewItems.filter(i => i.qualification_status === 'NEEDS_REVIEW_BORDERLINE').length;
             const rej = viewItems.filter(i => i.user_status === 'REJECTED' || i.qualification_status.startsWith('REJECTED')).length;
             const newCnt = viewItems.filter(i => i.is_new_cycle).length;
 
@@ -832,6 +833,7 @@
             safeSet('stQualified', qual);
             safeSet('cntQual', qual);
             safeSet('cntRev', rev);
+            safeSet('cntBorder', border);
             safeSet('cntRej', rej);
 
             safeSet('vpbCountAll', countAll);
@@ -901,6 +903,7 @@
                 if (currentFilter === 'QUALIFIED_WHITELIST' && item.qualification_status !== 'QUALIFIED_WHITELIST') return false;
                 if (currentFilter === 'QUALIFIED' && !item.is_qualified) return false;
                 if (currentFilter === 'NEEDS_REVIEW' && item.qualification_status !== 'NEEDS_REVIEW') return false;
+                if (currentFilter === 'NEEDS_REVIEW_BORDERLINE' && item.qualification_status !== 'NEEDS_REVIEW_BORDERLINE') return false;
                 if (currentFilter === 'REJECTED' && item.user_status !== 'REJECTED' && !item.qualification_status.startsWith('REJECTED')) return false;
                 if (currentFilter === 'NEW' && !item.is_new_cycle) return false;
 
@@ -1089,6 +1092,9 @@
             } else if (item.qualification_status === 'NEEDS_REVIEW') {
                 pinClass = "pin-orange";
                 pinChar = "?";
+            } else if (item.qualification_status === 'NEEDS_REVIEW_BORDERLINE') {
+                pinClass = "pin-orange";
+                pinChar = "≈";
             }
 
             if (!item.is_exact_coords) {
@@ -1422,6 +1428,9 @@
             } else if (item.qualification_status === 'NEEDS_REVIEW') {
                 badgeClass = "badge-review";
                 badgeLabel = "Do weryfikacji";
+            } else if (item.qualification_status === 'NEEDS_REVIEW_BORDERLINE') {
+                badgeClass = "badge-review";
+                badgeLabel = "Graniczna";
             }
 
             let cardCrmClass = "";
@@ -1529,17 +1538,23 @@
                 galleryThumbnailsHtml = `<div class="card-gallery-strip">${thumbs}${moreHtml}</div>`;
             }
 
-            // Market delta (technical label)
+            // Market delta (technical label, normalized for finish condition)
             let devBadge = '';
             if (item.price_deviation_pct !== null && item.price_deviation_pct !== undefined && item.market_median_m2) {
-                const dev = item.price_deviation_pct;
+                const devRaw = item.price_deviation_pct;
+                const dev = (item.price_deviation_adjusted_pct !== null && item.price_deviation_adjusted_pct !== undefined)
+                    ? item.price_deviation_adjusted_pct
+                    : devRaw;
                 const medFmt = Math.round(item.market_median_m2).toLocaleString('pl-PL');
+                const corrNote = (dev !== devRaw)
+                    ? ` — po korekcie o stan wykończenia: ${dev > 0 ? '+' : ''}${dev}% (surowe: ${devRaw > 0 ? '+' : ''}${devRaw}%)`
+                    : '';
                 if (dev <= -4.0) {
-                    devBadge = `<span class="market-delta dev-low" title="Mediana rynku: ${medFmt} zł/m² — wycena poniżej mediany">${dev > 0 ? '+' : ''}${dev}% vs rynek</span>`;
+                    devBadge = `<span class="market-delta dev-low" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena poniżej mediany">${dev > 0 ? '+' : ''}${dev}% vs rynek</span>`;
                 } else if (dev >= 8.0) {
-                    devBadge = `<span class="market-delta dev-high" title="Mediana rynku: ${medFmt} zł/m² — wycena powyżej mediany">+${dev}% vs rynek</span>`;
+                    devBadge = `<span class="market-delta dev-high" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena powyżej mediany">+${dev}% vs rynek</span>`;
                 } else {
-                    devBadge = `<span class="market-delta dev-fair" title="Mediana rynku: ${medFmt} zł/m² — wycena w normie">${dev > 0 ? '+' : ''}${dev}% vs rynek</span>`;
+                    devBadge = `<span class="market-delta dev-fair" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena w normie">${dev > 0 ? '+' : ''}${dev}% vs rynek</span>`;
                 }
             }
 
@@ -1997,6 +2012,28 @@
                     </tr>
                 `).join('');
 
+                let negoNoteHtml = '';
+                if (tco && tco.hidden_costs_total !== undefined && tco.hidden_costs_total !== null) {
+                    const finCost = (typeof tco.finishing_cost === 'number') ? tco.finishing_cost : 0;
+                    const txCost = (typeof tco.transaction_costs === 'number')
+                        ? tco.transaction_costs
+                        : Math.max(0, tco.hidden_costs_total - finCost);
+                    if (finCost > 0) {
+                        negoNoteHtml = `
+                            <strong>Czynniki korygujące wycenę:</strong>
+                            wykończenie wnętrz <strong class="num">+${formatPrice(finCost)}</strong>,
+                            koszty transakcyjne (PCC, notariusz, prowizja) <strong class="num">+${formatPrice(txCost)}</strong>
+                            — łącznie <strong class="num">+${formatPrice(tco.hidden_costs_total)}</strong> (+${tco.hidden_costs_pct}% ceny ofertowej).
+                            Dane te stanowią podstawę argumentacji cenowej w negocjacjach.`;
+                    } else {
+                        negoNoteHtml = `
+                            <strong>Brak nakładów na wykończenie</strong> (stan do zamieszkania) — koszty wejścia to wyłącznie
+                            koszty transakcyjne (PCC, notariusz, prowizja): <strong class="num">+${formatPrice(txCost)}</strong>
+                            (+${tco.hidden_costs_pct}% ceny ofertowej).
+                            Dane te stanowią podstawę argumentacji cenowej w negocjacjach.`;
+                    }
+                }
+
                 tcoHtml = `
                     <div class="audit-block">
                         <div class="audit-block-head">
@@ -2016,11 +2053,7 @@
                                 </tr>
                             </tbody>
                         </table>
-                        <div class="nego-note">
-                            <strong>Czynniki korygujące wycenę:</strong> łączne koszty doprowadzenia do stanu zamieszkania to
-                            <strong class="num">+${formatPrice(tco.hidden_costs_total)}</strong> (+${tco.hidden_costs_pct}%).
-                            Dane te stanowią podstawę argumentacji cenowej w negocjacjach.
-                        </div>
+                        <div class="nego-note">${negoNoteHtml}</div>
                     </div>
                 `;
             }
@@ -2107,6 +2140,9 @@
                 `).join('');
 
                 const gesutUrl = item.gesut_url || geoUrlOf(item);
+                const gesutSource = gesut.source
+                    ? `<div class="gesut-source"><span class="audit-dot d-info"></span>${escapeHtml(gesut.source)}</div>`
+                    : '';
 
                 gesutHtml = `
                     <div class="audit-block">
@@ -2115,6 +2151,7 @@
                             <span class="audit-verdict-badge ${getSeverityBadgeClass(gesut.severity)}">${escapeHtml(gesut.verdict)}</span>
                         </div>
                         <div class="audit-finding-list">${gesutFindings}</div>
+                        ${gesutSource}
                         <div class="audit-actions">
                             ${gesutUrl ? `
                             <a href="${escapeHtml(gesutUrl)}" target="_blank" rel="noopener noreferrer" class="audit-link-btn" title="Otwórz Geoportal z warstwami uzbrojenia terenu KIUT">

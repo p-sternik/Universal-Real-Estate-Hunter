@@ -16,6 +16,7 @@ class NegotiationAdvice:
     negotiation_leverage: str  # "WYSOKA" | "ŚREDNIA" | "NISKA"
     fair_market_value: float | None
     suggested_opening_offer: float | None
+    price_deviation_adjusted_pct: float | None = None
     arguments: list[str] = field(default_factory=list)
 
 
@@ -46,6 +47,12 @@ def resolve_local_median(
     return medians.get(key_city)
 
 
+def _prop(obj: Any, field: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(field, default)
+    return getattr(obj, field, default)
+
+
 def analyze_negotiation(
     listing: ListingSchema | Any,
     filter_result: FilterResult | None = None,
@@ -59,7 +66,7 @@ def analyze_negotiation(
     and spatial defects into concrete negotiation advice.
     """
     # 1. Days on market
-    created_at = getattr(listing, "created_at", None)
+    created_at = _prop(listing, "created_at", None)
     if isinstance(created_at, datetime):
         if created_at.tzinfo is None:
             created_at = created_at.replace(tzinfo=UTC)
@@ -69,9 +76,9 @@ def analyze_negotiation(
         days_on_market = 1
 
     # 2. Price deviation from market median
-    price_per_m2 = float(getattr(listing, "price_per_m2", 0.0) or 0.0)
-    price = float(getattr(listing, "price", 0.0) or 0.0)
-    area_home = float(getattr(listing, "area_home", 0.0) or 0.0)
+    price_per_m2 = float(_prop(listing, "price_per_m2", 0.0) or 0.0)
+    price = float(_prop(listing, "price", 0.0) or 0.0)
+    area_home = float(_prop(listing, "area_home", 0.0) or 0.0)
 
     price_deviation_pct: float | None = None
     if market_median_m2 and market_median_m2 > 0 and price_per_m2 > 0:
@@ -79,11 +86,36 @@ def analyze_negotiation(
 
     # 3. Fair Market Value (FMV) calculation
     fair_market_value: float | None = None
-    finish_cond = str(getattr(listing, "finish_condition", "") or "").lower()
-    road_type = str(getattr(listing, "access_road_type", "") or "").lower()
-    sewer_type = str(getattr(listing, "sewerage", "") or "").lower()
-    flood_zone = str(getattr(listing, "flood_risk_zone", "") or "").upper()
-    subtype = str(getattr(listing, "segment_subtype", "") or "").lower()
+    finish_cond = str(_prop(listing, "finish_condition", "") or "").lower()
+    road_type = str(_prop(listing, "access_road_type", "") or "").lower()
+    sewer_type = str(_prop(listing, "sewerage", "") or "").lower()
+    flood_zone = str(_prop(listing, "flood_risk_zone", "") or "").upper()
+    subtype = str(_prop(listing, "segment_subtype", "") or "").lower()
+    landslide_risk = str(_prop(listing, "landslide_risk", "") or "").upper()
+    noise_level = _prop(listing, "noise_level_db", None)
+    noise_zone = str(_prop(listing, "noise_zone", "") or "").upper()
+    cemetery_buffer = str(_prop(listing, "cemetery_buffer_zone", "") or "")
+    monument_zone = str(_prop(listing, "monument_zone", "") or "")
+    egib_status = str(_prop(listing, "egib_building_status", "") or "").upper()
+    egib_soil = str(_prop(listing, "egib_soil_class", "") or "").upper()
+
+    # Finish-condition normalization factor (same basis as FMV adjustments):
+    # unfinished listings are comparable to the market median only after adding
+    # the finishing burden, turnkey listings get a premium.
+    finish_adjustment = 1.0
+    if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia")):
+        finish_adjustment -= 0.05
+    elif any(f in finish_cond for f in ("remont", "surowy")):
+        finish_adjustment -= 0.15
+    elif "pod_klucz" in finish_cond or "zamieszkania" in finish_cond:
+        finish_adjustment += 0.05
+
+    price_deviation_adjusted_pct: float | None = None
+    if market_median_m2 and market_median_m2 > 0 and price_per_m2 > 0:
+        comparable_price_per_m2 = price_per_m2 / finish_adjustment
+        price_deviation_adjusted_pct = round(
+            ((comparable_price_per_m2 - market_median_m2) / market_median_m2) * 100.0, 1
+        )
 
     if market_median_m2 and area_home > 0:
         # Base benchmark value
@@ -104,6 +136,18 @@ def analyze_negotiation(
             adjustment_factor -= 0.02
         if "POWODZ" in flood_zone:
             adjustment_factor -= 0.07
+
+        # Tier 1 Spatial & Environmental adjustments
+        if "OSUWISKO" in landslide_risk or "ZAGROŻENIE" in landslide_risk:
+            adjustment_factor -= 0.15
+        if (noise_level and float(noise_level) > 65.0) or "WYSOKI" in noise_zone:
+            adjustment_factor -= 0.05
+        if monument_zone:
+            adjustment_factor -= 0.05
+        if cemetery_buffer == "<50m":
+            adjustment_factor -= 0.07
+        elif cemetery_buffer == "50-150m":
+            adjustment_factor -= 0.03
 
         fair_market_value = round(base_fmv * adjustment_factor / 1000.0) * 1000.0
 
@@ -135,9 +179,9 @@ def analyze_negotiation(
     if price_history_count >= 2 or price_drop_amount > 0:
         leverage_points += 2
 
-    if price_deviation_pct is not None and price_deviation_pct >= 10.0:
+    if price_deviation_adjusted_pct is not None and price_deviation_adjusted_pct >= 10.0:
         leverage_points += 2
-    elif price_deviation_pct is not None and price_deviation_pct >= 4.0:
+    elif price_deviation_adjusted_pct is not None and price_deviation_adjusted_pct >= 4.0:
         leverage_points += 1
 
     if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia", "remont", "surowy")):
@@ -147,6 +191,20 @@ def analyze_negotiation(
     if any(s in sewer_type for s in ("szambo", "brak")):
         leverage_points += 1
     if "POWODZ" in flood_zone:
+        leverage_points += 2
+
+    # Tier 1 Leverage points
+    if "OSUWISKO" in landslide_risk or "ZAGROŻENIE" in landslide_risk:
+        leverage_points += 3
+    if (noise_level and float(noise_level) > 65.0) or "WYSOKI" in noise_zone:
+        leverage_points += 1
+    if monument_zone:
+        leverage_points += 1
+    if cemetery_buffer == "<50m":
+        leverage_points += 2
+    elif cemetery_buffer == "50-150m":
+        leverage_points += 1
+    if egib_status == "BRAK_W_EWIDENCJI":
         leverage_points += 2
 
     if leverage_points >= 4:
@@ -167,9 +225,10 @@ def analyze_negotiation(
             f"Cena została już obniżona o {price_drop_amount:,.0f} zł (-{price_drop_pct:.1f}%), co świadczy o gotowości sprzedającego do ustępstw."
         )
 
-    if price_deviation_pct is not None and price_deviation_pct >= 5.0 and market_median_m2:
+    if price_deviation_adjusted_pct is not None and price_deviation_adjusted_pct >= 5.0 and market_median_m2:
         arguments.append(
-            f"Cena ofertowa ({price_per_m2:,.0f} zł/m²) przewyższa lokalną medianę ({market_median_m2:,.0f} zł/m²) o {price_deviation_pct:+.1f}%."
+            f"Cena ofertowa ({price_per_m2:,.0f} zł/m²) przewyższa lokalną medianę ({market_median_m2:,.0f} zł/m²) "
+            f"o {price_deviation_adjusted_pct:+.1f}% po korekcie o stan wykończenia."
         )
 
     if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia")):
@@ -190,6 +249,34 @@ def analyze_negotiation(
     if "POWODZ" in flood_zone:
         arguments.append("Lokalizacja w strefie zagrożenia powodziowego ISOK (wyższa składka ubezpieczenia i ryzyko).")
 
+    # Tier 1 Spatial arguments
+    if "OSUWISKO" in landslide_risk or "ZAGROŻENIE" in landslide_risk:
+        arguments.append("Zidentyfikowano aktywne osuwisko lub strefę zagrożenia ruchami masowymi (PIG-PIB SOPO).")
+
+    if (noise_level and float(noise_level) > 65.0) or "WYSOKI" in noise_zone:
+        db_txt = f"{float(noise_level):.0f} dB" if noise_level else ">65 dB"
+        arguments.append(f"Podwyższony poziom hałasu komunikacyjnego ({db_txt} Lden, sąsiedztwo trasy tranzytowej).")
+
+    if monument_zone:
+        arguments.append(
+            f"Nieruchomość objęta ochroną konserwatorską ({monument_zone}) — wyższe koszty remontu i rygory prawne."
+        )
+
+    if cemetery_buffer == "<50m":
+        arguments.append("Działka w bezpośredniej strefie sanitarnej cmentarza (<50m, zakaz rozbudowy i ujęć wody).")
+    elif cemetery_buffer == "50-150m":
+        arguments.append("Działka w strefie ochronnej cmentarza (50–150m, ograniczenia sanitarne).")
+
+    if egib_status == "BRAK_W_EWIDENCJI":
+        arguments.append(
+            "Budynek nieujawniony w ewidencji gruntów i budynków EGiB (ryzyko formalnoprawne / brak odbioru)."
+        )
+
+    if any(pc in egib_soil for pc in ("RIIIA", "RIIIB", "ŁIII", "PSIII", "RI", "RII")):
+        arguments.append(
+            f"Grunt chroniony w ewidencji EGiB ({egib_soil}) — ustawowa ochrona rolna klas I-III utrudnia odrolnienie."
+        )
+
     if "srodkowy" in subtype or "środkowy" in subtype:
         arguments.append("Segment środkowy szeregowca (brak bezpośredniego dostępu do ogrodu od frontu).")
 
@@ -203,6 +290,7 @@ def analyze_negotiation(
     return NegotiationAdvice(
         market_median_m2=market_median_m2,
         price_deviation_pct=price_deviation_pct,
+        price_deviation_adjusted_pct=price_deviation_adjusted_pct,
         days_on_market=days_on_market,
         negotiation_leverage=negotiation_leverage,
         fair_market_value=fair_market_value,
@@ -229,12 +317,6 @@ TERYT_VOIVODESHIPS = {
     "30": "wielkopolskie",
     "32": "zachodniopomorskie",
 }
-
-
-def _prop(obj: Any, field: str, default: Any = None) -> Any:
-    if isinstance(obj, dict):
-        return obj.get(field, default)
-    return getattr(obj, field, default)
 
 
 def calculate_notary_and_court_fee(price: float) -> float:
@@ -277,12 +359,13 @@ PKA_STATIONS = [
 ]
 
 EXPRESSWAY_HUBS = [
-    ("Węzeł Rzeszów Północ (A4/S19)", 50.095, 22.005),
-    ("Węzeł Rzeszów Wschód (A4)", 50.065, 22.080),
-    ("Węzeł Rzeszów Zachód (A4/S19)", 50.075, 21.915),
-    ("Węzeł Rzeszów Południe (S19)", 49.998, 21.925),
-    ("Węzeł Świlcza (S19/DK94)", 50.062, 21.910),
-    ("Węzeł Jasionka (S19)", 50.108, 22.055),
+    ("Węzeł Rzeszów Północ (A4 / S19)", 50.1039, 22.0125),
+    ("Węzeł Rzeszów Wschód (A4 / S19)", 50.0886, 22.0839),
+    ("Węzeł Rzeszów Zachód (A4 / S19)", 50.0911, 21.9056),
+    ("Węzeł Rzeszów Południe (S19)", 50.0053, 21.9328),
+    ("Węzeł Świlcza (S19 / DK94)", 50.0631, 21.9167),
+    ("Węzeł Jasionka (S19)", 50.1172, 22.0558),
+    ("Węzeł Łańcut (A4)", 50.0906, 22.2472),
 ]
 
 
@@ -395,6 +478,8 @@ def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> 
         "total_acquisition_cost": total_cost,
         "hidden_costs_total": hidden_costs,
         "hidden_costs_pct": hidden_pct,
+        "finishing_cost": float(finishing_cost),
+        "transaction_costs": float(hidden_costs - finishing_cost),
         "verdict": verdict,
         "severity": severity,
         "breakdown": breakdown,
@@ -628,13 +713,116 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
             }
         )
 
+    # 5. Landslide Risk (SOPO PIG-PIB)
+    landslide_risk = str(_prop(listing, "landslide_risk", "") or "").upper()
+    if "OSUWISKO" in landslide_risk or "ZAGROŻENIE" in landslide_risk:
+        findings.append(
+            {
+                "badge": "🚨 Zagrożenie Osuwiskowe (PIG-PIB SOPO)",
+                "title": "Aktywne osuwisko lub strefa ruchów masowych",
+                "desc": "Działka w strefie osuwiskowej zarejestrowanej w SOPO PIG-PIB. Ryzyko uszkodzenia fundamentów, odmowy ubezpieczenia oraz braku możliwości odsprzedaży.",
+                "severity": "danger",
+            }
+        )
+
+    # 6. EGiB Building Status & Protected Soil
+    egib_status = str(_prop(listing, "egib_building_status", "") or "").upper()
+    egib_soil = str(_prop(listing, "egib_soil_class", "") or "")
+    if egib_status == "BRAK_W_EWIDENCJI":
+        findings.append(
+            {
+                "badge": "⚠️ Dom Nieujawniony w EGiB",
+                "title": "Brak obrysu budynku w ewidencji gruntów i budynków",
+                "desc": "Budynek nie figuruje w państwowej kartotece budynków (brak użytku B). Ryzyko samowoli budowlanej, braku formalnego odbioru lub odmowy kredytu hipotecznego.",
+                "severity": "danger",
+            }
+        )
+    elif egib_status == "UJAWNIONY":
+        findings.append(
+            {
+                "badge": "🏛️ Budynek Ujawniony w EGiB",
+                "title": "Budynek formalnie zaewidencjonowany w katastrze",
+                "desc": "Działka posiada ujawnioną zabudowę mieszkaniową (użytek B/Br) w rejestrze EGiB.",
+                "severity": "success",
+            }
+        )
+
+    if egib_soil and any(pc in egib_soil.upper() for pc in ("RIIIA", "RIIIB", "ŁIII", "PSIII", "RI", "RII")):
+        findings.append(
+            {
+                "badge": f"🌾 Grunt Chroniony w EGiB ({egib_soil})",
+                "title": "Ustawowa ochrona gruntów rolnych (klasy I-III)",
+                "desc": f"Działka oznaczona klasą bonitacyjną {egib_soil}. Zmiana przeznaczenia lub rozbudowa wymaga kosztownej i sformalizowanej procedury wyłączenia z produkcji rolniczej.",
+                "severity": "warning",
+            }
+        )
+
+    # 7. Acoustic Noise (EHAŁAS / GIOŚ)
+    noise_level = _prop(listing, "noise_level_db", None)
+    noise_zone = str(_prop(listing, "noise_zone", "") or "").upper()
+    if (noise_level and float(noise_level) > 65.0) or "WYSOKI" in noise_zone:
+        db_disp = f"{float(noise_level):.0f} dB" if noise_level else ">65 dB"
+        findings.append(
+            {
+                "badge": f"🔊 Podwyższony Hałas ({db_disp} Lden)",
+                "title": "Przekroczenie norm uciążliwości akustycznej (EHAŁAS / GIOŚ)",
+                "desc": f"Nieruchomość w strefie podwyższonego hałasu komunikacyjnego ({db_disp} Lden). Obniżony komfort życia i konieczność inwestycji w okna dźwiękoszczelne.",
+                "severity": "danger",
+            }
+        )
+
+    # 8. GDOŚ Nature Protection
+    nature_zone = _prop(listing, "nature_protected_zone", None)
+    if nature_zone:
+        findings.append(
+            {
+                "badge": f"🌿 Obszar Chroniony GDOŚ ({nature_zone})",
+                "title": "Lokalizacja w strefie ochrony przyrody (Natura 2000 / Park Krajobrazowy)",
+                "desc": f"Działka objęta reżimem ochrony środowiskowej ({nature_zone}). Możliwe obostrzenia dotyczące wycinki drzew, instalacji i uciążliwości inwestycji.",
+                "severity": "warning",
+            }
+        )
+
+    # 9. NID Monuments & Conservator
+    monument_zone = _prop(listing, "monument_zone", None)
+    if monument_zone:
+        findings.append(
+            {
+                "badge": f"🏛️ Zabytek / Strefa Konserwatorska ({monument_zone})",
+                "title": "Wpis do rejestru zabytków lub strefa ochrony WKZ (NID)",
+                "desc": f"Obiekt lub działka podlegają nadzorowi Wojewódzkiego Konserwatora Zabytków ({monument_zone}). Każdy remont, wymiana stolarki czy termomodernizacja wymaga zgody WKZ.",
+                "severity": "danger",
+            }
+        )
+
+    # 10. Cemetery Buffer Zone
+    cemetery_zone = str(_prop(listing, "cemetery_buffer_zone", "") or "")
+    if cemetery_zone == "<50m":
+        findings.append(
+            {
+                "badge": "🚨 Strefa Sanitarna Cmentarza (<50m)",
+                "title": "Bezpośrednie sąsiedztwo cmentarza (Rozp. Ministra Zdrowia)",
+                "desc": "W odległości poniżej 50m od granic cmentarza obowiązuje ustawowy zakaz wznoszenia budynków mieszkalnych oraz ograniczenia lokalizacji okien.",
+                "severity": "danger",
+            }
+        )
+    elif cemetery_zone == "50-150m":
+        findings.append(
+            {
+                "badge": "⚠️ Strefa Ochronna Cmentarza (50-150m)",
+                "title": "Odległość 50–150m od terenu cmentarza",
+                "desc": "Nieruchomość w strefie ograniczeń ujęć wody i rygorów sanitarnych. Wymagane obowiązkowe podłączenie do sieci wodociągowej (zakaz studni pitnych).",
+                "severity": "warning",
+            }
+        )
+
     has_danger = any(f["severity"] == "danger" for f in findings)
     has_warn = any(f["severity"] == "warning" for f in findings)
     if has_danger:
         risk_verdict = "WYKRYTO POWAŻNE RYZYKO ŚRODOWISKOWE LUB PRAWNE"
         risk_sev = "danger"
     elif has_warn:
-        risk_verdict = "WYMAGA UWAGI (BRAK MPZP LUB ROZBIEŻNOŚĆ KATASTRALNA)"
+        risk_verdict = "WYMAGA UWAGI (OGRANICZENIA PLANISTYCZNE LUB ŚRODOWISKOWE)"
         risk_sev = "warning"
     else:
         risk_verdict = "TEREN BEZPIECZNY PLANISTYCZNIE I ŚRODOWISKOWO"
@@ -647,7 +835,118 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
     }
 
 
-def calculate_gesut_audit(listing: Any) -> dict[str, Any]:
+GESUT_NETWORK_LABELS = {
+    "woda": "Sieć wodociągowa",
+    "kanalizacja": "Sieć kanalizacyjna",
+    "gaz": "Sieć gazowa",
+    "prad": "Sieć elektroenergetyczna",
+    "cieplo": "Sieć ciepłownicza",
+    "telekomunikacja": "Sieć telekomunikacyjna",
+}
+
+GESUT_ABSENT_GUIDANCE = {
+    "woda": "Brak wodociągu w pobliżu — konieczna studnia wiercona (koszt ~15–25 tys. zł) lub dalsze przyłącze.",
+    "kanalizacja": "Brak sieci kanalizacyjnej w zasięgu — wymagana przydomowa oczyszczalnia (~18 tys. zł) lub szambo.",
+    "gaz": "Brak gazu sieciowego w zasięgu — ogrzewanie gazowe wymaga zbiornika LPG (dzierżawa lub zakup ~6–12 tys. zł).",
+    "prad": "Brak sieci energetycznej wykrytej w promieniu — konieczny przyłącz (opłaty zależne od dystrybutora, często 3–15 tys. zł).",
+    "cieplo": "Brak sieci ciepłowniczej w zasięgu (typowe poza centrum — ogrzewanie własne).",
+    "telekomunikacja": "Brak sieci telekomunikacyjnej w zasięgu — sprawdź dostępność światłowodu u operatorów.",
+}
+
+GESUT_PRESENT_DESC = {
+    "woda": "Wodociąg biegnie w bezpośrednim sąsiedztwie działki — przyłącze ~150–300 zł/mb.",
+    "kanalizacja": "Kolektor kanalizacyjny w zasięgu działki — możliwe przyłącze do sieci miejskiej.",
+    "gaz": "Gazociąg w zasięgu działki — możliwe podłączenie i ogrzewanie gazem ziemnym.",
+    "prad": "Linia elektroenergetyczna w sąsiedztwie — niski koszt przyłącza.",
+    "cieplo": "Sieć ciepłownicza w zasięgu (rzadkość poza centrum).",
+    "telekomunikacja": "Kabel telekomunikacyjny w sąsiedztwie — dobre perspektywy na światłowód.",
+}
+
+
+def calculate_gesut_audit(listing: Any, gesut_networks: dict | None = None) -> dict[str, Any]:
+    if gesut_networks is None:
+        gesut_networks = _prop(listing, "gesut_networks_data", None) or _prop(listing, "gesut_networks", None)
+
+    if isinstance(gesut_networks, dict) and gesut_networks.get("coverage"):
+        return _calculate_gesut_from_real_data(listing, gesut_networks)
+    return _calculate_gesut_descriptive(listing)
+
+
+def _calculate_gesut_from_real_data(listing: Any, gesut_networks: dict) -> dict[str, Any]:
+    networks: dict[str, bool] = gesut_networks.get("networks") or {}
+    radius = float(gesut_networks.get("checked_radius_m") or 20.0)
+    sources = gesut_networks.get("sources") or []
+
+    sewerage = str(_prop(listing, "sewerage", "") or "").lower().replace("_", " ")
+    heating = str(_prop(listing, "heating", "") or "").lower().replace("_", " ")
+    has_fiber = bool(_prop(listing, "has_fiber", False))
+
+    findings: list[dict[str, str]] = []
+    for key, label in GESUT_NETWORK_LABELS.items():
+        present = bool(networks.get(key))
+        if present:
+            findings.append(
+                {
+                    "badge": f"✅ {label} w zasięgu",
+                    "title": f"{label} wykryta w promieniu {radius:.0f} m od działki",
+                    "desc": GESUT_PRESENT_DESC[key],
+                    "severity": "success",
+                }
+            )
+            continue
+
+        severity = "info"
+        if key == "woda" and sewerage and "brak" not in sewerage:
+            severity = "warning"
+        if key == "kanalizacja" and any(s in sewerage for s in ("szambo", "brak")):
+            severity = "warning"
+        if key == "gaz" and "gazowe" in heating:
+            severity = "warning"
+        if key == "telekomunikacja" and has_fiber:
+            severity = "warning"
+        if key == "prad":
+            severity = "warning"
+        findings.append(
+            {
+                "badge": f"⚠️ Brak w zasięgu: {label}",
+                "title": f"{label} niewykryta w promieniu {radius:.0f} m",
+                "desc": GESUT_ABSENT_GUIDANCE[key],
+                "severity": severity,
+            }
+        )
+
+    source_txt = (
+        f"Dane GESUT (powiatowe ewidencje WMS: {', '.join(sources)}) — pomiar w promieniu {radius:.0f} m. "
+        "Detekcja na podstawie rysunku sieci na mapie ewidencyjnej; przyłącza wymagają potwierdzenia w starostwie."
+    )
+    findings.append(
+        {
+            "badge": "🗂️ Źródło danych",
+            "title": "Rzeczywiste dane ewidencyjne GESUT",
+            "desc": source_txt,
+            "severity": "info",
+        }
+    )
+
+    has_warn = any(f["severity"] == "warning" for f in findings)
+    present_count = sum(1 for v in networks.values() if v)
+    if has_warn:
+        verdict = f"CZĘŚCIOWE UZBROJENIE ({present_count}/6 sieci w zasięgu)"
+        severity = "warning"
+    else:
+        verdict = "KOMPLETNE UZBROJENIE TERENU (GESUT)"
+        severity = "success"
+
+    return {
+        "verdict": verdict,
+        "severity": severity,
+        "findings": findings,
+        "source": f"GESUT WMS ({', '.join(sources)}) — promień {radius:.0f} m",
+        "data_driven": True,
+    }
+
+
+def _calculate_gesut_descriptive(listing: Any) -> dict[str, Any]:
     gesut_findings: list[dict[str, str]] = []
     sewerage = str(_prop(listing, "sewerage", "") or "").lower()
     road = str(_prop(listing, "access_road_type", "") or "").lower()
@@ -778,6 +1077,8 @@ def calculate_gesut_audit(listing: Any) -> dict[str, Any]:
         "verdict": gesut_verdict,
         "severity": gesut_severity,
         "findings": gesut_findings,
+        "source": "Brak danych GESUT — analiza na podstawie deklaracji z ogłoszenia",
+        "data_driven": False,
     }
 
 

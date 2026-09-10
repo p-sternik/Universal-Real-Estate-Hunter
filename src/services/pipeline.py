@@ -1,11 +1,12 @@
 import asyncio
+import time
 from typing import Any
 
 from loguru import logger
 
 from config import settings
 from src.filters import QualificationEngine
-from src.models.enums import FinishCondition, HeatingType, SewerageType
+from src.models.enums import BuildingType, FinishCondition, HeatingType, SewerageType
 from src.models.listing import ListingSchema
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.config_manager import SearchProfile
@@ -128,6 +129,7 @@ class ScraperPipeline:
                 listing.mpzp_zone = getattr(existing_model, "mpzp_zone", None)
                 listing.mpzp_status = getattr(existing_model, "mpzp_status", None)
                 listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
+                listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
 
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
         is_exact_coords = True
@@ -178,6 +180,18 @@ class ScraperPipeline:
                         listing.mpzp_zone = geo_audit.get("mpzp_zone")
                         listing.mpzp_status = geo_audit.get("mpzp_status")
                         listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
+                    for k in (
+                        "landslide_risk",
+                        "egib_building_status",
+                        "egib_soil_class",
+                        "noise_level_db",
+                        "noise_zone",
+                        "nature_protected_zone",
+                        "monument_zone",
+                        "cemetery_buffer_zone",
+                    ):
+                        if (v := geo_audit.get(k)) is not None:
+                            setattr(listing, k, v)
                 except Exception as e:
                     logger.debug(f"[Pipeline] Geoportal audit skipped: {e}")
 
@@ -220,8 +234,22 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # 3. Enrich filter_result with spatial audit findings (MPZP, flood risk, cadastral parcel)
-        if listing.parcel_id and filter_result.is_qualified:
+        # Propagate spatial fields to filter_result
+        for f in (
+            "landslide_risk",
+            "egib_building_status",
+            "egib_soil_class",
+            "noise_level_db",
+            "noise_zone",
+            "nature_protected_zone",
+            "monument_zone",
+            "cemetery_buffer_zone",
+        ):
+            if (val := getattr(listing, f, None)) is not None:
+                setattr(filter_result, f, val)
+
+        # 3. Enrich filter_result with spatial audit findings (MPZP, flood risk, cadastral parcel, Tier 1 checks)
+        if filter_result.is_qualified:
             if listing.mpzp_zone:
                 filter_result.mpzp_zone = listing.mpzp_zone
                 if listing.mpzp_status == "OBOWIĄZUJĄCY":
@@ -235,11 +263,115 @@ class ScraperPipeline:
                     filter_result.cons.append("⚠️ Zagrożenie powodziowe (ISOK): Działka w strefie ryzyka powodziowego")
                     filter_result.score = max(0.0, filter_result.score - 20.0)
 
+            # SOPO Landslide
+            if listing.landslide_risk in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
+                filter_result.cons.append(
+                    "🚨 Aktywne osuwisko / Zagrożenie ruchami masowymi (PIG-PIB SOPO): "
+                    "Ryzyko naruszenia konstrukcji, odmowy ubezpieczenia lub kredytu"
+                )
+                filter_result.score = max(0.0, filter_result.score - 50.0)
+
+            # EGiB Building disclosure & Soil class
+            if listing.egib_building_status:
+                cat = (
+                    listing.category.value
+                    if hasattr(listing.category, "value")
+                    else str(getattr(listing, "category", "dom"))
+                ).lower()
+                is_house = cat in ("dom", "segment", "blizniak", "szeregowiec") or listing.building_type in (
+                    BuildingType.WOLNOSTOJACY,
+                    BuildingType.BLIZNIAK,
+                    BuildingType.SZEREGOWIEC,
+                )
+                finish = (
+                    listing.finish_condition.value
+                    if hasattr(listing.finish_condition, "value")
+                    else str(listing.finish_condition or "")
+                ).lower()
+                is_developer = "deweloperski" in finish or (
+                    hasattr(listing, "market") and str(listing.market).lower() == "pierwotny"
+                )
+
+                if is_house and not is_developer:
+                    if listing.egib_building_status == "BRAK_W_EWIDENCJI":
+                        filter_result.cons.append(
+                            "⚠️ Dom nieujawniony w ewidencji budynków EGiB: Ryzyko samowoli budowlanej, "
+                            "braku odbioru końcowego lub problemu z kredytem hipotecznym"
+                        )
+                        filter_result.score = max(0.0, filter_result.score - 15.0)
+                    elif listing.egib_building_status == "UJAWNIONY":
+                        filter_result.pros.append(
+                            "Budynek formalnie ujawniony w państwowej ewidencji budynków (EGiB użytek B/Br)"
+                        )
+
+            if listing.egib_soil_class:
+                soil_upper = listing.egib_soil_class.upper()
+                if any(pc in soil_upper for pc in ("RIIIA", "RIIIB", "ŁIII", "PSIII", "RI", "RII")):
+                    filter_result.cons.append(
+                        f"⚠️ Grunt chroniony w EGiB ({listing.egib_soil_class}): Klasa bonitacyjna podlega "
+                        "ustawowej ochronie rolnej (trudności z odrolnieniem i rozbudową)"
+                    )
+                    filter_result.score = max(0.0, filter_result.score - 10.0)
+
+            # Acoustic Noise (>65 dB)
+            if (listing.noise_level_db is not None and listing.noise_level_db > 65.0) or (
+                listing.noise_zone and "WYSOKI" in listing.noise_zone
+            ):
+                db_str = f"{listing.noise_level_db:.0f}" if listing.noise_level_db is not None else ">65"
+                filter_result.cons.append(
+                    f"⚠️ Podwyższony poziom hałasu ({db_str} dB Lden): "
+                    "Przekroczenie progu uciążliwości akustycznej w sąsiedztwie korytarza tranzytowego"
+                )
+                filter_result.score = max(0.0, filter_result.score - 15.0)
+
+            # GDOŚ Nature protection
+            if listing.nature_protected_zone:
+                filter_result.cons.append(
+                    f"⚠️ Obszar chroniony przyrodniczo (GDOŚ: {listing.nature_protected_zone}): "
+                    "Rygory środowiskowe i ograniczenia inwestycyjne"
+                )
+                filter_result.score = max(0.0, filter_result.score - 10.0)
+
+            # NID Monuments
+            if listing.monument_zone:
+                filter_result.cons.append(
+                    f"🏛️ Obiekt w rejestrze zabytków / strefa konserwatorska (NID: {listing.monument_zone}): "
+                    "Wszelkie prace budowlane wymagają uzgodnień z Wojewódzkim Konserwatorem Zabytków (WKZ)"
+                )
+                filter_result.score = max(0.0, filter_result.score - 15.0)
+
+            # Cemetery Buffer
+            if listing.cemetery_buffer_zone:
+                if listing.cemetery_buffer_zone == "<50m":
+                    filter_result.cons.append(
+                        "🚨 Bezpośrednia strefa sanitarna cmentarza (<50m): Ustawowy zakaz rozbudowy "
+                        "i lokalizacji okien mieszkalnych (Rozporządzenie MZ)"
+                    )
+                    filter_result.score = max(0.0, filter_result.score - 25.0)
+                elif listing.cemetery_buffer_zone == "50-150m":
+                    filter_result.cons.append(
+                        "⚠️ Strefa ochronna cmentarza (50–150m): Ograniczenia sanitarne i warunki ujęć wody"
+                    )
+                    filter_result.score = max(0.0, filter_result.score - 10.0)
+
             if geo_audit:
                 risks = geo_audit.get("surrounding_risks", [])
                 if risks:
                     for r in risks:
-                        if "zagrożenia powodziowego" not in r:
+                        if not any(
+                            m in r
+                            for m in (
+                                "zagrożenia powodziowego",
+                                "SOPO",
+                                "osuwisk",
+                                "hałas",
+                                "GDOŚ",
+                                "NID",
+                                "cmentar",
+                                "Gleba",
+                                "EGiB",
+                            )
+                        ):
                             filter_result.cons.append(f"⚠️ Geoportal: {r}")
                     if any("Ba" in r or "Bi" in r or "Tk" in r for r in risks):
                         filter_result.score = max(0.0, filter_result.score - 25.0)
@@ -297,6 +429,7 @@ class ScraperPipeline:
 
     async def run_cycle(self, target_profile: str | None = None) -> dict:
         """Run a complete scraping and processing cycle across active profiles."""
+        cycle_started = time.perf_counter()
         logger.info("=== Starting Scraper Pipeline Cycle ===")
         from src.services.config_manager import config_manager
 
@@ -372,8 +505,19 @@ class ScraperPipeline:
         total_steps = len(flat_scrapers) or 1
         global_tracker.start_session(total_portals=total_steps)
 
+        # Market medians are computed once per cycle (single full-table pass) and
+        # shared across all portal batches.
+        async with get_session() as session:
+            medians_repo = ListingRepository(session)
+            cycle_medians = await medians_repo.get_market_medians()
+        t_medians = time.perf_counter() - cycle_started
+        logger.debug(f"[Pipeline] Market medians computed in {t_medians:.2f}s.")
+
         # 1. Scrape all portals in parallel
+        scrape_portal_times: list[tuple[str, float]] = []
+
         async def scrape_portal(prof, prof_name, scraper):
+            t_start = time.perf_counter()
             if global_tracker.is_cancelled():
                 return prof, prof_name, scraper.name, [], None
             global_tracker.update_portal(f"{scraper.name} ({prof_name})", 1, getattr(scraper, "max_pages", 1), 10)
@@ -391,17 +535,23 @@ class ScraperPipeline:
                 global_tracker.add_log(f"[{scraper.name} - {prof_name}] Błąd: {e}", level="error")
                 return prof, prof_name, scraper.name, [], e
             finally:
+                elapsed = time.perf_counter() - t_start
+                scrape_portal_times.append((scraper.name, elapsed))
+                logger.info(f"[Pipeline] [{scraper.name} - {prof_name}] scrape took {elapsed:.1f}s.")
                 try:
                     await scraper.close()
                 except Exception:
                     pass
 
         scrape_results = await asyncio.gather(*[scrape_portal(p, pn, sc) for p, pn, sc in flat_scrapers])
+        t_scrape = time.perf_counter() - cycle_started - t_medians
+        logger.info(f"[Pipeline] Scraping stage took {t_scrape:.1f}s total.")
 
         # 2. Concurrently process listings with Semaphore
         concurrency = getattr(settings, "CONCURRENT_REQUESTS", 3) or 3
         sem = asyncio.Semaphore(concurrency)
 
+        t_process_start = time.perf_counter()
         step_idx = 0
         for prof, prof_name, _sc_name, listings, _err in scrape_results:
             if global_tracker.is_cancelled():
@@ -416,9 +566,6 @@ class ScraperPipeline:
                 continue
 
             processed = 0
-            async with get_session() as session:
-                repo = ListingRepository(session)
-                batch_medians = await repo.get_market_medians()
 
             empty_cancel_res = {
                 "is_new": False,
@@ -432,7 +579,7 @@ class ScraperPipeline:
                 item,
                 prof=prof,
                 total_listings=len(listings),
-                medians=batch_medians,
+                medians=cycle_medians,
                 cancel_res=empty_cancel_res,
             ):
                 nonlocal processed
@@ -476,6 +623,14 @@ class ScraperPipeline:
 
             step_pct = base_pct + int((step_idx / total_steps) * 85)
             global_tracker.percentage = step_pct
+
+        t_process = time.perf_counter() - t_process_start
+        portal_timings = ", ".join(f"{name}={elapsed:.1f}s" for name, elapsed in scrape_portal_times)
+        logger.info(
+            f"[Pipeline] Cycle timing: medians={t_medians:.1f}s, scrape={t_scrape:.1f}s "
+            f"({portal_timings}), processing={t_process:.1f}s, "
+            f"total={time.perf_counter() - cycle_started:.1f}s"
+        )
 
         summary = {
             "total_scraped": total_scraped,

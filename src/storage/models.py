@@ -71,6 +71,15 @@ class ListingModel(Base):
     mpzp_zone: Mapped[str | None] = mapped_column(String(250), nullable=True)
     mpzp_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
     flood_risk_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    gesut_networks: Mapped[str | None] = mapped_column(Text, nullable=True)
+    landslide_risk: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    egib_building_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    egib_soil_class: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    noise_level_db: Mapped[float | None] = mapped_column(Float, nullable=True)
+    noise_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    nature_protected_zone: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    monument_zone: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    cemetery_buffer_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
@@ -170,6 +179,17 @@ class ListingModel(Base):
     @ai_questions.setter
     def ai_questions(self, value: list[str]):
         self._ai_questions = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def gesut_networks_data(self) -> dict | None:
+        try:
+            return json.loads(self.gesut_networks) if self.gesut_networks else None
+        except Exception:
+            return None
+
+    @gesut_networks_data.setter
+    def gesut_networks_data(self, value: dict | None):
+        self.gesut_networks = json.dumps(value, ensure_ascii=False) if value else None
 
 
 class PriceHistoryModel(Base):

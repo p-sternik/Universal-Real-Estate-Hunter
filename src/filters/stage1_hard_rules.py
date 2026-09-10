@@ -300,3 +300,144 @@ class Stage1Filter:
         # Check whitelist match
         matched_wl = self.check_whitelist(listing, wl_areas)
         return True, [], matched_wl
+
+    def borderline_margins(self, listing: ListingSchema, profile: Any | None = None) -> list[str]:
+        """
+        Detect Stage I "borderline" failures: rules violated only by small margins.
+        Returns human-readable borderline reasons, or an empty list when any hard
+        rule fails (blacklist, budget floor, owner/market type, building type, or
+        margins exceeded). Called only when evaluate() has already rejected the listing.
+        """
+        p = profile or self.profile
+        if not p and listing.profile_name:
+            from src.services.config_manager import config_manager
+
+            p = config_manager.get_profile(listing.profile_name)
+
+        min_p = getattr(p, "min_price", self.min_price) if p else self.min_price
+        max_p = getattr(p, "max_price", self.max_price) if p else self.max_price
+        min_p_m2 = getattr(p, "min_price_per_m2", self.min_price_per_m2) if p else self.min_price_per_m2
+        max_p_m2 = getattr(p, "max_price_per_m2", self.max_price_per_m2) if p else self.max_price_per_m2
+        min_area: float | None = getattr(p, "min_area_home", self.min_area_home) if p else self.min_area_home
+        max_area: float | None = getattr(p, "max_area_home", self.max_area_home) if p else self.max_area_home
+        min_plot = getattr(p, "min_area_plot", self.min_area_plot) if p else self.min_area_plot
+        max_plot = getattr(p, "max_area_plot", self.max_area_plot) if p else self.max_area_plot
+        min_rooms = getattr(p, "min_rooms", self.min_rooms) if p else self.min_rooms
+        max_rooms = getattr(p, "max_rooms", self.max_rooms) if p else self.max_rooms
+        min_floor = getattr(p, "min_floor", self.min_floor) if p else self.min_floor
+        max_floor = getattr(p, "max_floor", self.max_floor) if p else self.max_floor
+        owner_type = getattr(p, "owner_type", self.owner_type) if p else self.owner_type
+        market_type = getattr(p, "market_type", self.market_type) if p else self.market_type
+        category = getattr(p, "category", self.category) if p else self.category
+        if hasattr(listing, "category") and listing.category:
+            cat_val = listing.category.value if hasattr(listing.category, "value") else str(listing.category)
+            if cat_val in ("dom", "mieszkanie", "dzialka"):
+                category = cat_val
+
+        bl_words = getattr(p, "blacklist_keywords", self.blacklist) if p else self.blacklist
+        min_year = getattr(p, "min_year_built", self.min_year_built) if p else self.min_year_built
+        max_year = getattr(p, "max_year_built", self.max_year_built) if p else self.max_year_built
+        bt_allowed = getattr(p, "building_types", self.building_types) if p else self.building_types
+
+        borderline: list[str] = []
+
+        if self.check_blacklist(listing, bl_words):
+            return []
+
+        if (min_p or 0) > 0 and listing.price < min_p:
+            return []
+        if (max_p or 0) > 0 and listing.price > max_p:
+            if listing.price <= 1.1 * max_p:
+                borderline.append(f"Cena {listing.price:,.0f} zł do 10% powyżej budżetu {max_p:,.0f} zł")
+            else:
+                return []
+
+        if listing.price_per_m2 and listing.price_per_m2 > 0:
+            if min_p_m2 and listing.price_per_m2 < min_p_m2:
+                return []
+            if max_p_m2 and listing.price_per_m2 > max_p_m2:
+                return []
+
+        if (
+            owner_type == "private"
+            and listing.is_private_owner is False
+            or owner_type == "developer"
+            and listing.is_private_owner is True
+        ):
+            return []
+
+        if market_type in ("pierwotny", "wtórny"):
+            l_market = listing.market.value if hasattr(listing.market, "value") else str(listing.market)
+            if l_market not in ("nieokreślony", market_type):
+                return []
+
+        if category == "dom" and listing.year_built:
+            if min_year and listing.year_built < min_year:
+                year_floor = min_year - 5
+                if listing.year_built >= year_floor:
+                    borderline.append(f"Rok budowy {listing.year_built} do 5 lat poniżej minimum {min_year}")
+                else:
+                    return []
+            if max_year and listing.year_built > max_year:
+                return []
+
+        if category in ("dom", "mieszkanie") and bt_allowed:
+            b_val = (
+                listing.building_type.value if hasattr(listing.building_type, "value") else str(listing.building_type)
+            )
+            if b_val not in bt_allowed:
+                return []
+
+        if category == "mieszkanie":
+            if min_area is not None and min_area > 0 and listing.area_home < min_area:
+                if listing.area_home >= 0.9 * min_area:
+                    borderline.append(
+                        f"Metraż mieszkania {listing.area_home:.1f} m² do 10% poniżej minimum {min_area} m²"
+                    )
+                else:
+                    return []
+            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
+                if listing.area_home <= 1.1 * max_area:
+                    borderline.append(
+                        f"Metraż mieszkania {listing.area_home:.1f} m² do 10% powyżej maksimum {max_area} m²"
+                    )
+                else:
+                    return []
+
+            if listing.rooms is not None:
+                if min_rooms and listing.rooms < min_rooms:
+                    return []
+                if max_rooms and listing.rooms > max_rooms:
+                    return []
+            if listing.floor is not None:
+                if min_floor is not None and listing.floor < min_floor:
+                    return []
+                if max_floor is not None and listing.floor > max_floor:
+                    return []
+
+        elif category == "dom":
+            if min_area is not None and min_area > 0 and listing.area_home < min_area:
+                if listing.area_home >= 0.9 * min_area:
+                    borderline.append(f"Metraż domu {listing.area_home:.1f} m² do 10% poniżej minimum {min_area} m²")
+                else:
+                    return []
+            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
+                if listing.area_home <= 1.1 * max_area:
+                    borderline.append(f"Metraż domu {listing.area_home:.1f} m² do 10% powyżej maksimum {max_area} m²")
+                else:
+                    return []
+
+            if listing.area_plot is not None and listing.area_plot > 0:
+                if listing.area_plot < 200.0:
+                    return []
+                if max_plot and listing.area_plot > max_plot:
+                    return []
+
+        elif category == "dzialka":
+            effective_plot = listing.area_plot or listing.area_home
+            if min_plot and effective_plot < min_plot:
+                return []
+            if max_plot and effective_plot > max_plot:
+                return []
+
+        return borderline

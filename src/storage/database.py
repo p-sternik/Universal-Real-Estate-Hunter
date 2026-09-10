@@ -182,6 +182,23 @@ async def _migrate_sqlite_columns(conn) -> None:
                 if "flood_risk_zone" not in existing_cols:
                     logger.info("Migrating schema: adding 'flood_risk_zone' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN flood_risk_zone VARCHAR(100)"))
+                if "gesut_networks" not in existing_cols:
+                    logger.info("Migrating schema: adding 'gesut_networks' to listings table")
+                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN gesut_networks TEXT"))
+                tier1_cols = [
+                    ("landslide_risk", "VARCHAR(100)"),
+                    ("egib_building_status", "VARCHAR(100)"),
+                    ("egib_soil_class", "VARCHAR(100)"),
+                    ("noise_level_db", "FLOAT"),
+                    ("noise_zone", "VARCHAR(100)"),
+                    ("nature_protected_zone", "VARCHAR(250)"),
+                    ("monument_zone", "VARCHAR(250)"),
+                    ("cemetery_buffer_zone", "VARCHAR(100)"),
+                ]
+                for col_name, col_type in tier1_cols:
+                    if col_name not in existing_cols:
+                        logger.info(f"Migrating schema: adding '{col_name}' to listings table")
+                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}"))
         except Exception as e:
             logger.warning(f"Schema migration note: {e}")
 

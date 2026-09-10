@@ -84,7 +84,12 @@ class TelegramNotifier:
             )
             if negotiation_advice.market_median_m2 and negotiation_advice.price_deviation_pct is not None:
                 med_fmt = f"{negotiation_advice.market_median_m2:,.0f} zł/m²".replace(",", " ")
-                lines.append(f"  • Rynek: <b>{med_fmt}</b> ({negotiation_advice.price_deviation_pct:+.1f}%)")
+                dev = (
+                    negotiation_advice.price_deviation_adjusted_pct
+                    if negotiation_advice.price_deviation_adjusted_pct is not None
+                    else negotiation_advice.price_deviation_pct
+                )
+                lines.append(f"  • Rynek: <b>{med_fmt}</b> ({dev:+.1f}% po korekcie o stan)")
             if negotiation_advice.suggested_opening_offer:
                 offer_fmt = f"{negotiation_advice.suggested_opening_offer:,.0f} zł".replace(",", " ")
                 lines.append(f"  • Sugerowane otwarcie: <b>{offer_fmt}</b>")
@@ -100,6 +105,16 @@ class TelegramNotifier:
         if getattr(listing, "flood_risk_zone", None):
             f_icon = "🌊" if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE" else "🛡️"
             lines.append(f"{f_icon} Powódź: <b>{listing.flood_risk_zone}</b>")
+        if getattr(listing, "landslide_risk", None) and listing.landslide_risk in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
+            lines.append(f"🚨 Osuwisko (SOPO): <b>{listing.landslide_risk}</b>")
+        nz = getattr(listing, "noise_zone", None)
+        if nz and "WYSOKI" in nz:
+            db_val = f"{listing.noise_level_db:.0f}" if getattr(listing, "noise_level_db", None) is not None else ">65"
+            lines.append(f"🔊 Hałas: <b>{db_val} dB Lden ({nz})</b>")
+        if getattr(listing, "cemetery_buffer_zone", None) and listing.cemetery_buffer_zone in ("<50m", "50-150m"):
+            lines.append(f"⚰️ Cmentarz: <b>{listing.cemetery_buffer_zone}</b>")
+        if getattr(listing, "monument_zone", None):
+            lines.append(f"🏛️ Zabytek (NID): <b>{listing.monument_zone}</b>")
         lines.append(f"\n🔗 <a href='{listing.url}'>Zobacz ogłoszenie na {listing.portal}</a>")
         return "\n".join(lines)
 

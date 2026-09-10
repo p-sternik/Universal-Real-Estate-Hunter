@@ -10,6 +10,7 @@ from src.services.market_analyzer import (
     analyze_land_and_utilities,
     analyze_negotiation,
     calculate_commute_audit,
+    calculate_gesut_audit,
     calculate_notary_and_court_fee,
     calculate_risk_shield,
     calculate_tco_audit,
@@ -82,6 +83,8 @@ def test_analyze_negotiation_high_leverage():
 
     assert advice.days_on_market >= 74
     assert advice.price_deviation_pct == 25.0
+    # Deweloperski: comparable price = 10,000 / 0.95 = 10,526 -> +31.6% vs median
+    assert advice.price_deviation_adjusted_pct == 31.6
     assert advice.negotiation_leverage == "WYSOKA"
     assert advice.fair_market_value is not None
     assert advice.suggested_opening_offer is not None
@@ -93,6 +96,7 @@ def test_analyze_negotiation_high_leverage():
     assert "dni bez sprzedaży" in args_joined
     assert "obniżona" in args_joined
     assert "przewyższa lokalną medianę" in args_joined
+    assert "po korekcie o stan wykończenia" in args_joined
     assert "wykończenie" in args_joined
     assert "nieutwardzoną" in args_joined
 
@@ -128,6 +132,8 @@ def test_analyze_negotiation_fair_price_low_leverage():
 
     assert advice.days_on_market <= 6
     assert advice.price_deviation_pct == 0.0
+    # Pod klucz gets +5% premium: comparable = 8000 / 1.05 = 7619 -> -4.8%
+    assert advice.price_deviation_adjusted_pct == -4.8
     assert advice.negotiation_leverage in ("NISKA", "ŚREDNIA")
     assert advice.fair_market_value is not None
     assert advice.suggested_opening_offer is not None
@@ -360,6 +366,8 @@ def test_calculate_tco_audit_developer_state():
     # 5. Hidden costs total > 200,000 zł
     assert tco["hidden_costs_total"] >= 210_000.0
     assert tco["total_acquisition_cost"] == tco["purchase_price"] + tco["hidden_costs_total"]
+    assert tco["finishing_cost"] == 180_000.0
+    assert tco["transaction_costs"] == round(tco["hidden_costs_total"] - 180_000.0, 0)
     assert tco["severity"] in ("danger", "warning")
     items = [b["item"] for b in tco["breakdown"]]
     assert any("Wykończenie" in i for i in items)
@@ -387,6 +395,10 @@ def test_calculate_tco_audit_secondary_market():
     assert fin_entry is not None
     assert fin_entry["amount"] == 0.0
     assert "brak nakładów" in fin_entry["desc"]
+    assert tco["finishing_cost"] == 0.0
+    # No finishing -> all hidden costs are transaction costs (PCC + notary + agency)
+    assert tco["transaction_costs"] == tco["hidden_costs_total"]
+    assert tco["transaction_costs"] >= 10_000.0
 
 
 def test_calculate_commute_audit_with_coords():
@@ -502,3 +514,109 @@ def test_analyze_land_and_utilities_safe_listing():
     assert any("Pełen komfort sanitarny" in t for t in gesut_titles)
     assert any("Dostęp do infrastruktury drogowej" in t for t in gesut_titles)
     assert any("Szybki internet na działce" in t for t in gesut_titles)
+
+
+def test_calculate_gesut_audit_with_real_gesut_data():
+    listing = {
+        "sewerage": "miejska",
+        "heating": "gazowe",
+        "has_fiber": True,
+        "gesut_networks": {
+            "coverage": True,
+            "checked_radius_m": 20.0,
+            "sources": ["Miasto Rzeszów"],
+            "networks": {
+                "woda": True,
+                "kanalizacja": True,
+                "gaz": False,
+                "prad": True,
+                "cieplo": False,
+                "telekomunikacja": False,
+            },
+        },
+    }
+    gesut = calculate_gesut_audit(listing)
+
+    assert gesut["data_driven"] is True
+    assert gesut["severity"] == "warning"
+    assert "Miasto Rzeszów" in gesut["source"]
+    titles = [f["title"] for f in gesut["findings"]]
+    assert any("Sieć wodociągowa wykryta" in t for t in titles)
+    assert any("Sieć elektroenergetyczna wykryta" in t for t in titles)
+    assert any("Sieć gazowa niewykryta" in t for t in titles)
+    assert any("Sieć telekomunikacyjna niewykryta" in t for t in titles)
+    # Gaz absent + gazowe heating -> warning, telecom absent + fiber claim -> warning
+    warn = [f for f in gesut["findings"] if f["severity"] == "warning"]
+    assert any("Sieć gazowa niewykryta" in f["title"] for f in warn)
+    assert any("Sieć telekomunikacyjna niewykryta" in f["title"] for f in warn)
+    # Source of data is present
+    assert any("Źródło danych" in f["badge"] for f in gesut["findings"])
+
+
+def test_calculate_gesut_audit_fallback_without_gesut_data():
+    listing = {
+        "sewerage": "miejska",
+        "access_road_type": "asfaltowa",
+        "heating": "gazowe",
+        "has_fiber": True,
+    }
+    gesut = calculate_gesut_audit(listing)
+    assert gesut["data_driven"] is False
+    titles = [f["title"] for f in gesut["findings"]]
+    assert any("Pełen komfort sanitarny" in t for t in titles)
+
+
+def test_analyze_negotiation_with_tier1_factors():
+    listing = {
+        "price": 1_000_000,
+        "price_per_m2": 10_000,
+        "area_home": 100.0,
+        "finish_condition": "pod_klucz",
+        "landslide_risk": "OSUWISKO",
+        "noise_level_db": 70.0,
+        "noise_zone": "WYSOKI_HAŁAS (>65 dB)",
+        "monument_zone": "Pałacyk",
+        "cemetery_buffer_zone": "<50m",
+        "egib_building_status": "BRAK_W_EWIDENCJI",
+        "egib_soil_class": "RIIIa",
+    }
+
+    advice = analyze_negotiation(listing, market_median_m2=10_000.0)
+    assert advice.negotiation_leverage == "WYSOKA"
+    assert advice.fair_market_value is not None
+    # Base FMV was 100 * 10,000 = 1,000,000.
+    # Adjustments: pod_klucz (+0.05), landslide (-0.15), noise (-0.05), monument (-0.05), cemetery (-0.07) -> factor 0.73
+    # 1,000,000 * 0.73 = 730,000
+    assert advice.fair_market_value <= 750_000
+
+    args_joined = " ".join(advice.arguments)
+    assert "osuwisko" in args_joined.lower()
+    assert "hałasu" in args_joined.lower()
+    assert "cmentarza" in args_joined.lower()
+
+
+def test_calculate_risk_shield_with_tier1_factors():
+    listing = {
+        "mpzp_status": "OBOWIĄZUJĄCY",
+        "mpzp_zone": "MN",
+        "flood_risk_zone": "BRAK",
+        "landslide_risk": "OSUWISKO",
+        "egib_building_status": "BRAK_W_EWIDENCJI",
+        "egib_soil_class": "RIIIa",
+        "noise_level_db": 69.0,
+        "noise_zone": "WYSOKI_HAŁAS (>65 dB)",
+        "nature_protected_zone": "Natura 2000",
+        "monument_zone": "Kościółek",
+        "cemetery_buffer_zone": "<50m",
+    }
+
+    shield = calculate_risk_shield(listing)
+    assert shield["severity"] == "danger"
+    badges = [f["badge"] for f in shield["findings"]]
+    assert any("Zagrożenie Osuwiskowe" in b for b in badges)
+    assert any("Dom Nieujawniony w EGiB" in b for b in badges)
+    assert any("Grunt Chroniony w EGiB" in b for b in badges)
+    assert any("Podwyższony Hałas" in b for b in badges)
+    assert any("Obszar Chroniony GDOŚ" in b for b in badges)
+    assert any("Zabytek" in b for b in badges)
+    assert any("Strefa Sanitarna Cmentarza" in b for b in badges)

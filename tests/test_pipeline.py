@@ -196,3 +196,63 @@ async def test_pipeline_integrates_geoportal_spatial_findings(async_session, mon
     assert any("Miejscowy Plan" in p for p in model.pros)
     # Score penalty -20 applied for flood risk
     assert model.qualification_score == 40.0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_integrates_tier1_spatial_penalties(async_session, monkeypatch):
+    """Pipeline applies penalties for SOPO (-50), missing EGiB building (-15), protected soil (-10), and noise >65 dB (-15)."""
+    from src.services.geoportal import geoportal_service
+
+    mock_audit = AsyncMock(
+        return_value={
+            "main_parcel_id": "186301_1.0221.2296/2",
+            "main_parcel_number": "2296/2",
+            "cadastral_area": 600.0,
+            "geoportal_url": "https://mapy.geoportal.gov.pl/?identifyParcel=186301_1.0221.2296/2",
+            "mpzp_zone": "MN",
+            "mpzp_status": "OBOWIĄZUJĄCY",
+            "flood_risk_zone": "BRAK",
+            "landslide_risk": "OSUWISKO",
+            "egib_building_status": "BRAK_W_EWIDENCJI",
+            "egib_soil_class": "RIIIa",
+            "noise_level_db": 68.0,
+            "noise_zone": "WYSOKI_HAŁAS (>65 dB)",
+            "nature_protected_zone": "Natura 2000",
+            "monument_zone": "Dworek",
+            "cemetery_buffer_zone": "<50m",
+            "surrounding_risks": [],
+            "surrounding_parcels_count": 2,
+        }
+    )
+    monkeypatch.setattr(geoportal_service, "audit_location", mock_audit)
+
+    repo = ListingRepository(async_session)
+    listing = make_listing()
+    listing.coordinates = (50.04, 22.0)
+    listing.finish_condition = "pod_klucz"
+
+    engine_mock = AsyncMock()
+    # Starting score 100.0
+    engine_mock.evaluate_listing.return_value = make_qualified_result(score=100.0)
+    pipeline = make_pipeline(llm_enabled=False, engine_mock=engine_mock)
+
+    await pipeline.process_listing(listing, repo)
+
+    model = await repo.get_by_url(listing.url)
+    assert model is not None
+    assert model.landslide_risk == "OSUWISKO"
+    assert model.egib_building_status == "BRAK_W_EWIDENCJI"
+    assert model.egib_soil_class == "RIIIa"
+    assert model.noise_level_db == 68.0
+    assert model.cemetery_buffer_zone == "<50m"
+
+    # Cons check
+    assert any("Aktywne osuwisko" in c for c in model.cons)
+    assert any("Dom nieujawniony w ewidencji" in c for c in model.cons)
+    assert any("Grunt chroniony w EGiB" in c for c in model.cons)
+    assert any("Podwyższony poziom hałasu" in c for c in model.cons)
+    assert any("strefa sanitarna cmentarza" in c.lower() for c in model.cons)
+
+    # Score penalty calculation:
+    # 100 - 50 (SOPO) - 15 (EGiB building) - 10 (soil) - 15 (noise) - 10 (GDOŚ) - 15 (NID) - 25 (cemetery <50m) = 0.0 (clamped to 0.0)
+    assert model.qualification_score == 0.0

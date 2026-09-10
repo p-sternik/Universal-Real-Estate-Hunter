@@ -158,6 +158,20 @@ class ListingRepository:
                 existing.mpzp_status = listing.mpzp_status
             if listing.flood_risk_zone:
                 existing.flood_risk_zone = listing.flood_risk_zone
+            if listing.gesut_networks:
+                existing.gesut_networks_data = listing.gesut_networks
+            for f in (
+                "landslide_risk",
+                "egib_building_status",
+                "egib_soil_class",
+                "noise_level_db",
+                "noise_zone",
+                "nature_protected_zone",
+                "monument_zone",
+                "cemetery_buffer_zone",
+            ):
+                if (val := getattr(listing, f, None)) is not None:
+                    setattr(existing, f, val)
 
             # Update qualification
             existing.is_qualified = filter_result.is_qualified
@@ -218,6 +232,14 @@ class ListingRepository:
             mpzp_zone=listing.mpzp_zone,
             mpzp_status=listing.mpzp_status,
             flood_risk_zone=listing.flood_risk_zone,
+            landslide_risk=listing.landslide_risk,
+            egib_building_status=listing.egib_building_status,
+            egib_soil_class=listing.egib_soil_class,
+            noise_level_db=listing.noise_level_db,
+            noise_zone=listing.noise_zone,
+            nature_protected_zone=listing.nature_protected_zone,
+            monument_zone=listing.monument_zone,
+            cemetery_buffer_zone=listing.cemetery_buffer_zone,
             access_road_type=listing.access_road_type.value,
             market=listing.market.value,
             finish_condition=(
@@ -245,6 +267,8 @@ class ListingRepository:
         _apply_ai_fields(new_model, filter_result)
         if listing.gallery_images:
             new_model.gallery_images = listing.gallery_images
+        if listing.gesut_networks:
+            new_model.gesut_networks_data = listing.gesut_networks
 
         self.session.add(new_model)
         try:

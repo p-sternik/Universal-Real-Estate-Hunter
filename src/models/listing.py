@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -48,6 +49,14 @@ class FilterResult(BaseModel):
     # Spatial due diligence
     mpzp_zone: str | None = None
     flood_risk_zone: str | None = None
+    landslide_risk: str | None = None
+    egib_building_status: str | None = None
+    egib_soil_class: str | None = None
+    noise_level_db: float | None = None
+    noise_zone: str | None = None
+    nature_protected_zone: str | None = None
+    monument_zone: str | None = None
+    cemetery_buffer_zone: str | None = None
 
     @property
     def verdict_icon(self) -> str:
@@ -101,6 +110,15 @@ class ListingSchema(BaseModel):
     mpzp_zone: str | None = None
     mpzp_status: str | None = None
     flood_risk_zone: str | None = None
+    gesut_networks: dict[str, Any] | None = None
+    landslide_risk: str | None = None
+    egib_building_status: str | None = None
+    egib_soil_class: str | None = None
+    noise_level_db: float | None = None
+    noise_zone: str | None = None
+    nature_protected_zone: str | None = None
+    monument_zone: str | None = None
+    cemetery_buffer_zone: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     skip_detail: bool = False

@@ -333,6 +333,8 @@ async def audit_geoportal_all(limit: int = 50, only_qualified: bool = True):
             if item.latitude is None or item.longitude is None:
                 continue
             geo_res = await geoportal_service.audit_location(item.latitude, item.longitude, radius_meters=120)
+            if geo_res.get("gesut_networks"):
+                item.gesut_networks_data = geo_res["gesut_networks"]
             if geo_res.get("main_parcel_id"):
                 item.parcel_id = geo_res["main_parcel_id"]
                 item.geoportal_url = geo_res["geoportal_url"]
@@ -397,11 +399,6 @@ def main():
     view_parser.add_argument("--status", default="QUALIFIED", help="Filter: QUALIFIED, QUALIFIED_WHITELIST, ALL")
     view_parser.add_argument("--limit", type=int, default=15, help="Number of records to show")
 
-    # Generate interactive HTML report
-    report_parser = subparsers.add_parser("report", help="Generate and open static HTML visual dashboard")
-    report_parser.add_argument("--output", default="listings_report.html", help="Path to output HTML file")
-    report_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
-
     # Live Preview Web Server (dynamic, direct DB connection)
     dash_parser = subparsers.add_parser("dashboard", help="Start real-time Live Preview Web Server")
     dash_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
@@ -460,13 +457,9 @@ def main():
         except (KeyboardInterrupt, SystemExit):
             pass
     elif cmd == "view":
-        from src.services.report_generator import print_terminal_view
+        from src.services.terminal_view import print_terminal_view
 
         asyncio.run(print_terminal_view(status_filter=args.status, limit=args.limit))
-    elif cmd == "report":
-        from src.services.report_generator import generate_html_dashboard
-
-        asyncio.run(generate_html_dashboard(output_path=args.output, auto_open=not args.no_open))
     elif cmd == "test-webhook":
         asyncio.run(test_webhook())
     elif cmd == "test-filter":
