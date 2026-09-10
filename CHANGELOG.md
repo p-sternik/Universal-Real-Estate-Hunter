@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.6.2 (2026-09-10)
+
+### Bug Fixes
+
+- Build and push multi-arch docker images for amd64 and arm64
+  ([`8902d60`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/8902d60b7317a3320bcb0e34ec46ea4a707784a3))
+
+
 ## v1.6.1 (2026-09-10)
 
 ### Bug Fixes
