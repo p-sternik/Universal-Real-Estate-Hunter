@@ -1,8 +1,66 @@
-# 🏡 Rzeszów Real Estate Hunter & Scraper Pipeline
+# 🏡 Universal Real Estate Hunter & Intelligence Platform
 
-Zaawansowany, asynchroniczny system monitorowania, analityki oraz inteligentnego filtrowania ofert sprzedaży domów i szeregówek w Rzeszowie i okolicach (+15 km).
+[![Python Version](https://img.shields.io/badge/python-3.11%20%7C%203.12%20%7C%203.13-blue.svg)](https://www.python.org/)
+[![Docker Ready](https://img.shields.io/badge/docker-ready-2496ED.svg?logo=docker&logoColor=white)](https://www.docker.com/)
+[![License: PolyForm Noncommercial](https://img.shields.io/badge/License-PolyForm_Noncommercial_1.0.0-blue.svg)](https://polyformproject.org/licenses/noncommercial/1.0.0)
 
-System wykorzystuje bezpośrednią ekstrakcję stanu hydracji JSON (`__NEXT_DATA__` w Next.js), wieloetapowy silnik kwalifikacji (twarde reguły + analiza semantyczna NLP/LLM), deduplikację ofert między agencjami (`property_fingerprint`), historię zmian cen w bazie danych oraz powiadomienia w formie bogatych Discord Embed / bota Telegram.
+Zaawansowana, asynchroniczna platforma monitorowania, analityki i wywiadu rynkowego dla nieruchomości. Ciągle śledzi, kwalifikuje, deduplikuje i analizuje oferty z głównych portali (**Otodom**, **OLX**, **Nieruchomości-online**, **Morizon**), integruje oficjalne dane ewidencyjne (**Geoportal Krajowy / GUGiK**), analizę due diligence opartą na LLM, interaktywny CRM z mapą oraz powiadomienia Discord/Telegram w czasie rzeczywistym.
+
+> 🇬🇧 *English documentation is available in [README.md](README.md).*
+
+---
+
+## ✨ Kluczowe funkcje
+
+### 🌐 1. Wydajny scraping wielu portali
+- **Omijanie anty-botów:** `curl_cffi` z impersonacją odcisku TLS przeglądarki Chrome (`impersonate="chrome120"`) przechodzi przez zabezpieczenia Cloudflare i DataDome bez płatnych proxy.
+- **Bezpośrednia ekstrakcja hydracji Next.js:** strukturalny JSON z tagów `__NEXT_DATA__` i `__PRERENDERED_STATE__` zamiast kruchych selektorów DOM.
+- **Inteligentny odświeżanie szczegółów:** warstwa cache pomija niedawno pobrane oferty, śledząc jednocześnie spadki cen i zmiany ogłoszeń.
+- **Niezależne limity per portal:** osobne limity stron i opóźnienia dla Otodom, OLX, Nieruchomości-online i Morizon.
+
+### 🗺️ 2. Oficjalne dane katastralne i geoprzestrzenne (Geoportal GUGiK)
+- **Automatyczna identyfikacja działki:** zapytania do krajowego API ULDK (`GetParcelByXY`) ustalają numer działki ewidencyjnej (`TERYT`), gminę, obręb i numer z współrzędnych GPS.
+- **Dokładna powierzchnia:** pobieranie granic działki w `EPSG:2180` i obliczanie rzeczywistej powierzchni prawnej w m² (z obsługą enklaw i multipoligonów).
+- **Audyt ryzyka przemysłowego/handlowego:** skan otoczenia w promieniu 120 metrów w 8 kierunkach przez KIEG WMS (`GetFeatureInfo`):
+  - `Ba` – tereny produkcyjne / przemysłowe
+  - `Bi` – kompleksy handlowe / magazynowe
+  - `Tk` – tereny kolejowe
+- **Automatyczna kara punktowa i alerty:** −25 punktów za sąsiedztwo ryzyk przemysłowych, wpis w „minusach" i linki 1-klik do Geoportalu Krajowego.
+
+### 🧠 3. Dwuetapowy silnik kwalifikacji i analizy semantycznej
+- **Etap I (twarde reguły):** ścisłe progi numeryczne (cena, cena/m², metraż domu, działka, liczba pokoi, piętro, rok budowy, typ właściciela/rynku) oraz whitelist/blacklist lokalizacji.
+- **Etap II (NLP semantyczne i heurystyki):** analiza tytułów i pełnych opisów:
+  - Wykrywanie **stanu wykończenia**: *do zamieszkania / pod klucz*, *do wykończenia*, *deweloperski*, *surowy zamknięty*, *surowy otwarty*, *do remontu*.
+  - Oznaczanie **wizualizacji 3D i zdjęć poglądowych** (ostrzeżenie przy braku realnych zdjęć).
+  - Wykrywanie **mediów**: kanalizacja miejska vs. szambo vs. przydomowa oczyszczalnia, typ ogrzewania (pompa ciepła, gaz, miejskie, paliwo stałe, elektryczne) i światłowód.
+  - Weryfikacja dojazdu (asfalt vs. polna), parkingu, typu segmentu i ryzyk terenowych.
+- **Deduplikacja między agencjami (`property_fingerprint`):** dopasowywanie tej samej nieruchomości wystawionej przez kilka agencji na podstawie rozmytych sygnatur przestrzennych, cenowych i wymiarowych.
+- **Historia cen:** śledzenie spadków cen z procentami i znacznikami czasu.
+
+### 🤖 4. AI Due Diligence (opcjonalna analiza LLM)
+Wspierane backendy: **OpenRouter**, **OpenAI** lub lokalny **Ollama**. Dla każdej oferty LLM zwraca strukturalny JSON:
+- **Podsumowanie TL;DR** — maks. 2 konkretne zdania: lokalizacja, metraż, cena (i zł/m²), faktyczny stan wykończenia oraz główne ryzyko/atut. Bez marketingowej wody.
+- **Werdykt** (`worth_interest` + `verdict`) — ✅ warto się zainteresować / ❌ pominąć, uzasadniony konkretnymi liczbami z ogłoszenia.
+- **Stan wykończenia + notatka** — precyzyjna klasyfikacja plus jedno zdanie, co jest zrobione, a czego brakuje (np. *„Wykonane instalacje i okna; do zrobienia: wylewki, tynki, wykończenie."*).
+- **Wykrywanie wizualizacji** — oznaczanie ofert opartych na renderach / zdjęciach przykładowej aranżacji zamiast realnych zdjęć.
+- **Pytania do agenta** — 3–5 konkretnych pytań o luki informacyjne w danym ogłoszeniu.
+- **Ekstrakcja kontaktu** — numer telefonu i osoba kontaktowa.
+- **Ukryte koszty, ryzyka prawne, rozbieżności portal vs. opis, zalety i wady.**
+
+### 📊 5. Interaktywny Live Dashboard i CRM
+- **Nowoczesny ciemny UI:** profesjonalny design na neutralnej palecie kolorów i cyfrach tabelarycznych.
+- **Interaktywna mapa Leaflet:** kolorowe pinezki, klasteryzacja i synchronizacja widoku.
+- **Osobisty CRM:** oznaczanie ofert jako ⭐ Ulubione, 📅 Do obejrzenia, ✕ Odrzucone oraz prywatne notatki z oględzin.
+- **Zarządzanie wieloma profilami:** przełączanie profili (np. *Domy Rzeszów*, *Mieszkania Kraków*, *Działki Warszawa*) prosto z przeglądarki.
+- **Modal AI Due Diligence:** TL;DR, badge werdyktu, pytania do agenta, karta kontaktu z gotowym SMS-em do skopiowania, kalkulator kosztów zakupu all-in i historia spadków cen.
+- **Konfiguracja na żywo:** edycja profili, progów, whitelist/blacklist i harmonogramu bez restartu — z jednoklikowym startem scrapingu.
+- **Reset bazy danych:** bezpieczne czyszczenie ofert (per profil lub całej bazy) z potwierdzeniem.
+- **Galerie zdjęć i Lightbox:** karuzele miniatur i pełnoekranowy podgląd.
+
+### ⏱️ 6. Inteligentny harmonogram i godziny nocne
+- Konfigurowalne ciągłe monitorowanie w tle (np. co 15–20 minut w ciągu dnia).
+- Automatyczny **tryb nocny** (np. co 60 minut między 22:00 a 07:00).
+- Dynamiczna zmiana interwałów z poziomu panelu web bez restartu kontenera.
 
 ---
 
@@ -10,231 +68,273 @@ System wykorzystuje bezpośrednią ekstrakcję stanu hydracji JSON (`__NEXT_DATA
 
 ```text
 Universal-Real-Estate-Hunter/
-├── config/
-│   ├── __init__.py
-│   └── settings.py          # Konfiguracja Pydantic Settings (.env, progi, whitelist, blacklist)
+├── config/                    # Pydantic BaseSettings i ładowanie zmiennych środowiskowych
+│   └── settings.py            # Progi, domyślna whitelist, adresy baz danych, ustawienia LLM
 ├── src/
-│   ├── __init__.py
-│   ├── models/              # Schematy Pydantic v2 i typy wyliczeniowe (Enums)
-│   │   ├── __init__.py
-│   │   ├── enums.py         # BuildingType, SegmentSubtype, RoadType, MarketType, QualificationStatus
-│   │   └── listing.py       # ListingSchema, FilterResult, RawListing, Coordinates
-│   ├── scrapers/            # Asynchroniczne moduły ekstrakcji danych
-│   │   ├── __init__.py
-│   │   ├── base.py          # Klasa bazowa BaseScraper (curl_cffi, httpx, rotacja nagłówków, retry)
-│   │   ├── otodom.py        # Scraper Otodom.pl (__NEXT_DATA__ JSON + detail page hydration)
-│   │   └── olx.py           # Scraper OLX.pl (__PRERENDERED_STATE__ / selektory DOM)
-│   ├── filters/             # Dwuetapowy silnik kwalifikacji i deduplikacji
-│   │   ├── __init__.py      # QualificationEngine (koordynator etapów I i II + scoring)
-│   │   ├── stage1_hard_rules.py  # Etap I: Budżet, metraż, działka, Whitelist / Blacklist
-│   │   ├── stage2_semantic.py    # Etap II: Analiza opisu (segment skrajny, droga, garaż, skarpa)
-│   │   ├── fingerprint.py        # Algorytm deduplikacji agencyjnej (property_fingerprint)
-│   │   └── llm_analyzer.py       # Opcjonalny moduł LLM (OpenAI API / Ollama)
-│   ├── storage/             # Warstwa bazy danych i ORM (SQLAlchemy 2.0 async)
-│   │   ├── __init__.py
-│   │   ├── database.py      # Silnik async (SQLite / PostgreSQL), sesje, init_db
-│   │   ├── models.py        # Modele Declarative (ListingModel, PriceHistoryModel)
-│   │   └── repository.py    # Wzorzec repozytorium (upsert, historia cen, deduplikacja)
-│   ├── services/            # Serwisy aplikacyjne i powiadomienia
-│   │   ├── __init__.py
-│   │   ├── discord_notifier.py   # Formatowanie i wysyłka bogatych Embedów na Discord Webhook
-│   │   ├── telegram_notifier.py  # Obsługa bota Telegram (wiadomości HTML)
-│   │   └── pipeline.py           # Orkiestrator całego cyklu przetwarzania ofert
-│   └── scheduler/           # Harmonogram zadań
-│       ├── __init__.py
-│       └── runner.py        # APScheduler (AsyncIOScheduler) / asyncio graceful runner
-├── tests/                   # Kompletny zestaw testów automatycznych (pytest)
-│   ├── test_filters.py      # Testy reguł Etapu I i Etapu II
-│   ├── test_fingerprint.py  # Testy tolerancji deduplikacji (ceny, metraże, ulice)
-│   ├── test_otodom_parser.py# Testy parsowania payloadów Otodom i czyszczenia tekstu
-│   ├── test_storage.py      # Testy bazy danych, relacji i historii cen
-│   └── test_discord.py      # Testy formatowania Discord Embed
-├── .env.example             # Szablon zmiennych środowiskowych
-├── pyproject.toml           # Metadane projektu i konfiguracja narzędzi
-├── requirements.txt         # Zależności pip
-├── main.py                  # Główny punkt wejściowy CLI
-└── README.md                # Dokumentacja techniczna
+│   ├── models/                # Schematy Pydantic v2 i enums
+│   ├── scrapers/              # Scrapery portali (Otodom, OLX, Nieruchomości-online, Morizon)
+│   ├── filters/               # Silnik kwalifikacji (Etap I + Etap II + LLM + fingerprint)
+│   ├── storage/               # Modele SQLAlchemy 2.0 async, repozytorium, automatyczne migracje SQLite
+│   ├── services/
+│   │   ├── geoportal.py       # Audyt przestrzenny GUGiK ULDK & KIEG WMS
+│   │   ├── geocoder.py        # Geokoder Nominatim z cache
+│   │   ├── pipeline.py        # Orkiestrator cyklu (scraping → audyt → zapis → powiadomienia)
+│   │   ├── config_manager.py  # Konfiguracja profili i harmonogramu (search_config.json)
+│   │   ├── live_dashboard.py  # Asynchroniczny serwer aiohttp i REST API
+│   │   ├── discord_notifier.py# Powiadomienia Discord Embed
+│   │   ├── telegram_notifier.py # Powiadomienia bota Telegram (HTML)
+│   │   ├── progress.py        # Śledzenie postępu scrapingu na żywo
+│   │   └── report_generator.py# Generator statycznego raportu HTML
+│   ├── scheduler/             # Cykliczny runner z trybem dzień/noc
+│   └── version.py             # Wersja (zarządzana przez semantic-release)
+├── tests/                     # Zestaw testów pytest
+├── Dockerfile                 # Obraz produkcyjny
+├── docker-compose.yml         # Zestaw usług (Dashboard + Daemon Scrapera)
+├── search_config.json         # Profile wyszukiwania, limity portali i harmonogram
+├── main.py                    # Główny punkt wejściowy CLI
+├── pyproject.toml             # Metadane projektu, ruff, pytest, bandit, semantic-release
+├── requirements.txt           # Zależności pip
+├── .pre-commit-config.yaml    # Hooki pre-commit (ruff, bezpieczeństwo, higiena plików)
+└── listings.db                # Baza SQLite (lokalnie lub w wolumenie Dockera)
 ```
 
 ---
 
-## ⚡ Stack Technologiczny
+## 🚀 Szybki start z Dockerem (zalecany)
 
-* **Język:** Python 3.11+ / 3.12 / 3.13
-* **Pobieranie danych:**
-  * `curl_cffi` – automatyczne omijanie zabezpieczeń antybotowych Cloudflare / DataDome dzięki impersonacji stosu TLS i nagłówków przeglądarki Chrome (`impersonate="chrome120"`).
-  * `httpx` – asynchroniczny klient HTTP z obsługą HTTP/2 jako fallback.
-* **Parsowanie danych:**
-  * `BeautifulSoup4` / `selectolax` – ekstrakcja skryptów JSON (`<script id="__NEXT_DATA__">`) i czyszczenie HTML.
-  * `pydantic` v2 – ścisła walidacja i normalizacja typów danych wejściowych.
-* **Baza Danych & ORM:**
-  * `SQLAlchemy 2.0` (asynchroniczny) z pełnym wsparciem SQLite (`aiosqlite`) oraz PostgreSQL (`asyncpg`).
-  * Automatyczna deduplikacja ofert, relacja jeden-do-wielu dla historii zmian cen (`PriceHistoryModel`).
-* **Analiza NLP / LLM:**
-  * Dedykowany silnik heurystyczno-wyrażeniowy (RegEx) zoptymalizowany pod specyfikę polskiego rynku nieruchomości.
-  * Opcjonalna integracja z `OpenAI API` (`gpt-4o-mini`) lub lokalnym modelem `Ollama` (`llama3.1`).
-* **Harmonogram:**
-  * `APScheduler 3.x` (`AsyncIOScheduler`) z konfigurowalnym interwałem (domyślnie co 20 minut) i obsługą sygnałów wyłączenia (`SIGINT`, `SIGTERM`).
-* **Powiadomienia:**
-  * Discord Webhook z kolorami statusu (zielony, niebieski, pomarańczowy), podziałem na sekcje zalet i wad oraz zdjęciem nieruchomości.
-  * Telegram Bot API z formatowaniem HTML.
-
----
-
-## 🎯 Model Kwalifikacji i Filtrowania
-
-### Etap I: Twarde reguły numeryczne i geograficzne
-1. **Budżet:** `price <= 1 300 000 zł`
-2. **Metraż domu:** `90 m² <= area_home <= 145 m²`
-3. **Działka:**
-   * `area_plot >= 250 m²`
-   * Jeśli w ogłoszeniu brak metrażu działki w nagłówku, oferta **nie jest odrzucana**, lecz kierowana do analizy treści opisu.
-4. **Lokalizacja – Blacklist (odrzucenie bezwzględne):**
-   * Wykrycie w tytule, lokalizacji lub treści opisu którejkolwiek z fraz: `Matysówka`, `Matysowska`, `Tyczyn`, `Chmielnik`, `Biała`, `Zwięczyca`, `Kielanówka`, `Górna Słocina`, `św. Rocha`, `skarpie`, `teren osuwiskowy` -> **natychmiastowe odrzucenie**.
-5. **Lokalizacja – Whitelist (priorytetowe dopuszczenie i status `QUALIFIED_WHITELIST`):**
-   * **Słocina:** wyłącznie dolna (rejon Paderewskiego, Witolda, Powstańców Wielkopolskich).
-   * **Zalesie:** wyłącznie dolne/centralne (Łukasiewicza, Dunikowskiego, Spacerowa).
-   * **Staromieście:** rejon Staromieście Ogrody, Borowa, Lubelska i okolice.
-   * **Północ/Wschód:** Trzebownisko, Nowa Wieś, Terliczka, Krasne (wzdłuż DK94), Głogów Małopolski (Niwa, Rogoźnica, rejon stacji PKA).
-
-### Etap II: Analiza semantyczna opisu (RegEx / LLM)
-1. **Typ segmentu (`IS_CORNER`):**
-   * Wykrywanie cech segmentu skrajnego/narożnego: `skrajny`, `narożny`, `ostatni w rzędzie`.
-   * **Reguła segmentu środkowego:** Jeśli nieruchomość jest segmentem środkowym, a działka wynosi `< 200 m²` -> **odrzucenie**.
-2. **Standard dojazdu:**
-   * Odrzucenie ofert ze stwierdzeniami: `dojazd drogą polną`, `droga nieutwardzona`, `brak bezpośredniego zjazdu`, `droga gruntowa`.
-   * Promowanie dojazdu asfaltem lub kostką brukową.
-3. **Miejsca postojowe:**
-   * Sprawdzanie obecności garażu w bryle budynku lub min. 2 miejsc na podjeździe (wyróżniane w zaletach powiadomienia).
-4. **Weryfikacja ukształtowania terenu:**
-   * Wykrywanie wzmianek o spadkach terenu, gliniastym podłożu, skarpach i terenach podmokłych.
-
-### Deduplikacja Agencyjna (`property_fingerprint`)
-W celu uniknięcia wysyłania 5 powiadomień o tej samej nieruchomości wystawionej przez różne agencje, system generuje unikalny hash bazujący na:
-* Znormalizowanej cenie (przedziały co 10 000 zł)
-* Metrażu domu z tolerancją +/- 2 m² (przedziały o szerokości 4 m²)
-* Metrażu działki z tolerancją +/- 10 m² (przedziały o szerokości 10 m²)
-* Ekstrahowanym tokenie ulicy (z ignorowaniem prefiksów, patronów i imion, np. "Paderewskiego" zamiast "Ignacego")
-
----
-
-## 🚀 Szybki Start
-
-### 1. Instalacja zależności
-
+### 1. Sklonuj repozytorium
 ```bash
-# Sklonuj repozytorium lub wejdź do katalogu
+git clone https://github.com/p-sternik/Universal-Real-Estate-Hunter.git
 cd Universal-Real-Estate-Hunter
-
-# Zainstaluj zależności produkcyjne i testowe
-pip install -r requirements.txt
 ```
 
-### 2. Konfiguracja (.env)
-
-Skopiuj plik `.env.example` do `.env` i uzupełnij Webhook Discorda:
-
+### 2. Skonfiguruj zmienne środowiskowe
+Skopiuj plik przykładowy i uzupełnij dane Discorda/Telegrama oraz (opcjonalnie) klucz LLM:
 ```bash
 cp .env.example .env
 ```
 
-Przykładowy `.env`:
-```env
+### 3. Uruchom przez Docker Compose
+```bash
+docker compose up -d
+```
+
+System uruchomi dwa kontenery:
+1. **`estate_hunter_dashboard`**: Live Web Dashboard pod adresem **`http://localhost:8080`**.
+2. **`estate_hunter_scraper`**: ciągły monitoring aktywnych profili wyszukiwania.
+
+### 4. Sprawdź logi
+```bash
+docker compose logs -f scraper
+```
+
+---
+
+## 💻 Instalacja lokalna (bez Dockera)
+
+### Wymagania
+- Python 3.11, 3.12 lub 3.13
+
+### Wariant A: pip
+```bash
+git clone https://github.com/p-sternik/Universal-Real-Estate-Hunter.git
+cd Universal-Real-Estate-Hunter
+
+# Utwórz i aktywuj środowisko wirtualne
+python -m venv venv
+# Linux / macOS:
+source venv/bin/activate
+# Windows PowerShell:
+.\venv\Scripts\Activate.ps1
+
+pip install --upgrade pip
+pip install -r requirements.txt
+```
+
+### Wariant B: uv (zalecany do developmentu)
+```bash
+uv sync
+uv run pre-commit install
+```
+
+### Inicjalizacja bazy danych
+```bash
+python main.py init-db
+```
+
+---
+
+## 🛠️ Komendy CLI
+
+Aplikacja udostępnia ujednolicone CLI w [`main.py`](main.py):
+
+| Komenda | Opis | Przykład |
+| :--- | :--- | :--- |
+| `run` | Start ciągłego demona monitorującego | `python main.py run` lub `python main.py run --profile "Domy Rzeszów" --interval 15` |
+| `once` | Pojedynczy przebieg scrapingu i kwalifikacji | `python main.py once` lub `python main.py once --profile "Domy Rzeszów"` |
+| `dashboard` | Uruchomienie Live Dashboard z CRM i mapą Leaflet | `python main.py dashboard --port 8080` (alias: `server`) |
+| `geoportal` | Audyt zapisanych ofert w Geoportalu GUGiK | `python main.py geoportal --limit 50` (`--all` — z niezakwalifikowanymi) |
+| `report` | Generowanie statycznego raportu HTML | `python main.py report` (otwiera w przeglądarce) |
+| `view` | Podgląd zakwalifikowanych ofert w terminalu | `python main.py view --status QUALIFIED --limit 15` |
+| `reindex` | Ponowna ocena wszystkich ofert w bazie najnowszymi filtrami | `python main.py reindex` |
+| `geocode` | Uzupełnienie brakujących współrzędnych GPS przez Nominatim | `python main.py geocode` |
+| `test-webhook` | Testowe powiadomienie na Discord | `python main.py test-webhook` |
+| `test-filter` | Demonstracja silnika filtrów na syntetycznych scenariuszach | `python main.py test-filter` |
+| `init-db` | Inicjalizacja tabel bazy danych | `python main.py init-db` |
+
+Nadpisanie miasta i promienia działa dla `run` i `once`:
+```bash
+python main.py once --city Kraków --radius 20
+```
+
+---
+
+## ⚙️ Konfiguracja
+
+### 1. Zmienne środowiskowe (`.env`)
+```ini
+# Baza danych (domyślnie SQLite, wspierany PostgreSQL)
 DATABASE_URL=sqlite+aiosqlite:///listings.db
-DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/TWOJ_WEBHOOK_ID/TWOJ_TOKEN
+
+# Powiadomienia
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
+TELEGRAM_CHAT_ID=-100123456789
+
+# Fallback harmonogramu (gdy nie ustawione w search_config.json)
 CHECK_INTERVAL_MINUTES=20
 
+# Fallback progów Etapu I
 MAX_PRICE=1300000.0
 MIN_AREA_HOME=90.0
 MAX_AREA_HOME=145.0
 MIN_AREA_PLOT=250.0
 
+# Analiza LLM (opcjonalna — patrz sekcja „AI Due Diligence")
+USE_LLM_ANALYSIS=false
+OPENROUTER_API_KEY=
+OPENROUTER_MODEL=nex-agi/nex-n2.5-mini:free
+LLM_MAX_CALLS_PER_MINUTE=15
+# Alternatywy:
+OPENAI_API_KEY=
+OPENAI_MODEL=gpt-4o-mini
+OPENAI_BASE_URL=
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.1:8b
+
+# Sieć i scraping
+PROXY_URL=
+REQUEST_TIMEOUT_SECONDS=20
+MAX_RETRIES=3
 FETCH_DETAILS=true
 ```
 
-### 3. Komendy CLI (`main.py`)
+### 2. Profile wyszukiwania i harmonogram (`search_config.json`)
+Wiele niezależnych profili (Domy, Mieszkania, Działki) w dowolnym polskim mieście konfiguruje się z poziomu Web Dashboardu lub edytując `search_config.json`:
 
-* **Uniwersalny cykl scrapingu (dowolne miasto i promień):**
-  ```bash
-  # Domyślna lokalizacja (z search_config.json / Rzeszów):
-  python main.py once
-
-  # Dowolne inne miasto i promień (+km):
-  python main.py once --city Kraków --radius 20
-  python main.py once --city Warszawa --radius 15
-  python main.py once --city Wrocław --radius 25
-  ```
-
-* **Uruchomienie ciągłego demona monitorującego (co 20 minut z harmonogramem):**
-  ```bash
-  python main.py run
-  # lub z wybranym miastem:
-  python main.py run --city Lublin --radius 15
-  ```
-
-* **Uruchomienie serwera Live Universal Dashboard (Mapa Leaflet + CRM + Split View):**
-  ```bash
-  python main.py dashboard
-  # lub
-  python main.py server --port 8080
-  ```
-  Otwiera w przeglądarce interaktywny pulpit nawigacyjny pod adresem `http://127.0.0.1:8080`:
-  * **⚙️ Konfiguracja wyszukiwania w locie:** zmiana miasta docelowego, promienia (+km), progów cenowych, metrażu, whitelist i blacklist bezpośrednio w panelu UI z opcją natychmiastowego startu scrapingu!
-  * **Filtry w czasie rzeczywistym:** suwak maksymalnej ceny, metraż od/do, minimalna działka, selektor rynku (pierwotny/wtórny) i typu budynku (szeregowiec, bliźniak, wolnostojący).
-  * **Ulepszone wyświetlanie ofert:** powiększanie zdjęć w modalnym Lightboxie, bogate tagi cech (`🌱 Działka`, `🏠 Dom`, `🏗️ Pierwotny`, `🛣️ Droga`, `📅 Rok`), boks z dokładnymi powodami odrzucenia dla ofert niespełniających kryteriów.
-  * **Interaktywna mapa OpenStreetMap / Leaflet:** kolorowe pinezki ze spiderfyingiem / eliminacją nakładania się ofert w tych samych inwestycjach.
-  * **Widok Split (50/50) z dwukierunkową synchronizacją:** kliknięcie w pinezkę przewija listę i podświetla ofertę; kliknięcie *"📍 Pokaż na mapie"* wycentrowuje widok.
-  * **Wbudowany CRM & Notatki:** oznaczanie ofert jako ⭐ Ulubione, 📅 Do obejrzenia, 🗑️ Odrzucone oraz prywatne notatki zapisywane w SQLite.
-  * **Live Progress Bar:** podgląd paska postępu scrapingu na żywo i dziennik operacji.
-
-* **Geokodowanie brakujących współrzędnych (Nominatim + Cache SQLite):**
-  ```bash
-  python main.py geocode
-  ```
-
-* **Podgląd ofert bezpośrednio w terminalu:**
-  ```bash
-  python main.py view --status QUALIFIED_WHITELIST --limit 10
-  ```
-
-* **Generowanie statycznego pliku raportu HTML:**
-  ```bash
-  python main.py report
-  ```
-
-* **Test powiadomienia Discord Webhook:**
-  ```bash
-  python main.py test-webhook
-  ```
-
-* **Test silnika filtrów na syntetycznych scenariuszach:**
-  ```bash
-  python main.py test-filter
-  ```
-
-* **Inicjalizacja tabel bazy danych:**
-  ```bash
-  python main.py init-db
-  ```
-
-* **Uruchomienie testów jednostkowych:**
-  ```bash
-  pytest -v
-  ```
+```json
+{
+  "profiles": [
+    {
+      "id": "rzeszow_domy",
+      "name": "Domy Rzeszów",
+      "enabled": true,
+      "category": "dom",
+      "city": "Rzeszów",
+      "distance_radius": 15,
+      "min_price": 400000,
+      "max_price": 1300000,
+      "min_area_home": 100,
+      "max_area_home": 150,
+      "min_area_plot": 250,
+      "min_year_built": 2015,
+      "allowed_finish_conditions": ["do zamieszkania"],
+      "allow_visualisations": false,
+      "building_types": ["wolnostojący", "bliźniak", "szeregowiec", "inny"],
+      "whitelist_areas": [],
+      "blacklist_keywords": [],
+      "enabled_portals": null
+    }
+  ],
+  "scrapers": {
+    "otodom": {"enabled": true, "max_pages": 5, "delay_seconds": 1.0},
+    "olx": {"enabled": true, "max_pages": 2, "delay_seconds": 1.0},
+    "nieruchomosci_online": {"enabled": true, "max_pages": 3, "delay_seconds": 1.0},
+    "morizon": {"enabled": true, "max_pages": 2, "delay_seconds": 1.0}
+  },
+  "scheduler": {
+    "interval_minutes": 20,
+    "night_mode": true,
+    "night_interval_minutes": 60,
+    "quiet_hours_start": "22:00",
+    "quiet_hours_end": "07:00"
+  },
+  "llm_analysis_enabled": true
+}
+```
 
 ---
 
-## 📊 Format Powiadomień Discord Embed
+## 🤖 AI Due Diligence
 
-Gdy system wykryje nową ofertę lub zmianę ceny zakwalifikowanej nieruchomości, wysyła czytelną kartę:
+Włącz analizę LLM ustawiając `USE_LLM_ANALYSIS=true` (lub `llm_analysis_enabled` w `search_config.json`) i konfigurując jeden z backendów:
 
-* **Kolor zielony (`#2ECC71`):** Oferty z Whitelist (np. Słocina Dolna, Zalesie Dolne, Staromieście Ogrody, Trzebownisko, Krasne DK94).
-* **Kolor niebieski (`#3498DB`):** Oferty spełniające kryteria ogólne.
-* **Kolor pomarańczowy (`#F39C12`):** Oferty zakwalifikowane wymagające weryfikacji ręcznej (np. brak podanego metrażu działki).
-* **Pola karty:**
-  * **Cena & Metraż:** np. `1 150 000 zł (8 846 zł/m²) | Dom: 130.0 m² | Działka: 380 m²`
-  * **Typ & Lokalizacja:** np. `Szeregowiec (skrajny/narożny) | ul. Witolda, Słocina, Rzeszów`
-  * **Dojazd & Infrastruktura:** np. `Droga: asfalt | 🚗 Parking/Garaż: TAK`
-  * **Kluczowe zalety:** lista wypunktowana (np. Pompa ciepła, Rekuperacja, Garaż w bryle)
-  * **Wykryte minusy / uwagi:** np. Wzmianka o nachyleniu działki
-  * **Zdjęcie główne:** podgląd miniatury z ogłoszenia
+| Backend | Konfiguracja | Uwagi |
+| :--- | :--- | :--- |
+| **OpenRouter** (domyślny) | `OPENROUTER_API_KEY`, `OPENROUTER_MODEL` | Wspiera darmowe modele (np. `nex-agi/nex-n2.5-mini:free`); modele płatne pozwalają na wyższy limit zapytań |
+| **API zgodne z OpenAI** | `OPENAI_API_KEY`, `OPENAI_MODEL`, `OPENAI_BASE_URL` | Dowolny endpoint zgodny z OpenAI |
+| **Ollama** (lokalnie) | `OLLAMA_BASE_URL`, `OLLAMA_MODEL` | W pełni lokalnie, bez kluczy API |
+
+**Optymalizacja kosztów:**
+- Oferty z niezmienionym opisem nie są ponownie wysyłane do LLM (wyniki są zachowane w bazie).
+- `LLM_MAX_CALLS_PER_MINUTE` ogranicza liczbę zapytań do limitów dostawcy (darmowy OpenRouter = 20 zapytań/min, ustaw 15).
+- Automatyczne retry z wykładniczym backoff przy limitach (429) oraz łańcuch awaryjny OpenRouter → OpenAI → Ollama.
+
+**Co dostajesz dla każdej oferty:** konkretne TL;DR, werdykt ✅/❌ z uzasadnieniem liczbowym, precyzyjny stan wykończenia z notatką, wykrycie wizualizacji, 3–5 konkretnych pytań do agenta, dane kontaktowe, ukryte koszty, ryzyka prawne i rozbieżności portal vs. opis.
+
+---
+
+## 🗺️ Jak działa audyt przestrzenny Geoportalu
+
+Gdy oferta przejdzie kwalifikację, system wykonuje bezpłatny audyt przestrzenny w oparciu o oficjalną Krajową Infrastrukturę Informacji Przestrzennej (GUGiK):
+
+1. **Identyfikacja działki:** API ULDK ustala numer działki ewidencyjnej (np. `181609_2.0001.2643/7`).
+2. **Rzeczywista powierzchnia prawna:** obliczenia geometryczne na oficjalnych granicach działki w m².
+3. **Skan zagrożeń strefowych:** KIEG WMS sprawdza użytkowanie terenu w promieniu 120 m. Wykrycie strefy przemysłowej (`Ba`), magazynowej/handlowej (`Bi`) lub kolejowej (`Tk`) oznacza ofertę ostrzeżeniem i karą −25 punktów w score.
+
+---
+
+## 🧪 Rozwój i testy automatyczne
+
+Uruchomienie testów:
+```bash
+uv run pytest          # lub: pytest
+uv run pytest -m "not integration"   # tylko testy jednostkowe (uruchamiane też pre-push)
+```
+
+**Narzędzia jakości** (egzekwowane hookami pre-commit):
+- `ruff` — lint i formatowanie
+- `bandit` — lint bezpieczeństwa
+- `gitleaks` — skanowanie sekretów
+- higiena plików: końcowe spacje, nowa linia na końcu pliku, zakończenia linii LF, walidacja JSON/YAML/TOML
+
+```bash
+uv run pre-commit install
+uv run pre-commit run --all-files
+```
+
+Wersje są zarządzane automatycznie przez `python-semantic-release` (conventional commits); zobacz [`CHANGELOG.md`](CHANGELOG.md).
+
+---
+
+## 🔒 Bezpieczeństwo i dobre praktyki
+
+- **Nigdy nie commituj `.env` ani `listings.db`**: oba pliki są wykluczone w `.gitignore` i `.dockerignore`.
+- **Kontenery bezstanowe:** w Dockerze dane są montowane w `/app/data/listings.db`, co zapewnia trwałość między restartami i aktualizacjami.
+- **Skanowanie sekretów:** `gitleaks` działa przy każdym commicie, zapobiegając wyciekowi kluczy.
+
+---
+
+## 📄 Licencja
+
+Projekt jest licencjonowany na warunkach [PolyForm Noncommercial License 1.0.0](LICENSE) — bezpłatny do użytku osobistego, edukacyjnego i niekomercyjnego. Wykorzystanie komercyjne bez uprzedniej pisemnej zgody autora jest zabronione.
