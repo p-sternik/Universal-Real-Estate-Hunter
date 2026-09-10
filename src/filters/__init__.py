@@ -97,11 +97,20 @@ class QualificationEngine:
             if llm_insights.get("is_corner"):
                 is_corner = True
                 listing.segment_subtype = SegmentSubtype.SKRAJNY
+            elif llm_insights.get("is_middle"):
+                listing.segment_subtype = SegmentSubtype.SRODKOWY
             if llm_insights.get("road_is_bad") and passed_stage2:
                 passed_stage2 = False
                 stage2_reasons.append("LLM: Wykryto nieutwardzoną / polną drogę dojazdową")
             if llm_insights.get("has_parking_or_garage"):
                 has_parking = True
+            if llm_insights.get("extracted_plot_m2") and not listing.area_plot:
+                try:
+                    listing.area_plot = float(llm_insights["extracted_plot_m2"])
+                except (ValueError, TypeError):
+                    pass
+            for hc in llm_insights.get("hidden_costs", []):
+                cons.append(f"⚠️ [Ukryty koszt] {hc}")
             for p in llm_insights.get("pros", []):
                 if p not in pros:
                     pros.append(f"[LLM] {p}")

@@ -264,35 +264,36 @@ class ScraperPipeline:
                     global_tracker.add_log(f"[{scraper.name} - {prof_name}] Pobrano {len(listings)} ogłoszeń.")
                     logger.info(f"[{scraper.name} - {prof_name}] Scraped {len(listings)} listings. Processing...")
 
-                    async with get_session() as session:
-                        repo = ListingRepository(session)
-                        processed = 0
-                        for item in listings:
+                    processed = 0
+                    for item in listings:
+                        async with get_session() as session:
+                            repo = ListingRepository(session)
                             res = await self.process_listing(item, repo, profile=profile)
-                            processed += 1
-                            if res["is_new"]:
-                                total_new += 1
-                            if res["is_duplicate_fingerprint"]:
-                                total_duplicates += 1
-                            if res["price_changed"]:
-                                total_price_changes += 1
-                            if res["qualified"]:
-                                total_qualified += 1
-                                if res["is_new"]:
-                                    global_tracker.add_log(
-                                        f"⭐ Nowa oferta [{prof_name}]: {item.title[:45]} ({item.price:,.0f} zł)",
-                                        level="success",
-                                    )
-                            if res["notified"]:
-                                total_notified += 1
 
-                            global_tracker.record_items(
-                                count=1,
-                                qualified=1 if res["qualified"] and res["is_new"] else 0,
-                                duplicates=1 if res["is_duplicate_fingerprint"] else 0,
-                            )
-                            if processed % 5 == 0 or processed == len(listings):
-                                global_tracker.update_processing(processed, len(listings))
+                        processed += 1
+                        if res["is_new"]:
+                            total_new += 1
+                        if res["is_duplicate_fingerprint"]:
+                            total_duplicates += 1
+                        if res["price_changed"]:
+                            total_price_changes += 1
+                        if res["qualified"]:
+                            total_qualified += 1
+                            if res["is_new"]:
+                                global_tracker.add_log(
+                                    f"⭐ Nowa oferta [{prof_name}]: {item.title[:45]} ({item.price:,.0f} zł)",
+                                    level="success",
+                                )
+                        if res["notified"]:
+                            total_notified += 1
+
+                        global_tracker.record_items(
+                            count=1,
+                            qualified=1 if res["qualified"] and res["is_new"] else 0,
+                            duplicates=1 if res["is_duplicate_fingerprint"] else 0,
+                        )
+                        if processed % 5 == 0 or processed == len(listings):
+                            global_tracker.update_processing(processed, len(listings))
 
                     step_pct = base_pct + int((step_idx / total_steps) * 85)
                     global_tracker.percentage = step_pct

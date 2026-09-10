@@ -16,22 +16,40 @@ _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
 
+from sqlalchemy import event, text
+
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         db_url = settings.DATABASE_URL
+        connect_args = {}
         # For sqlite ensure directory exists if path is provided
-        if db_url.startswith("sqlite+aiosqlite:///"):
-            path = db_url.replace("sqlite+aiosqlite:///", "")
-            dirname = os.path.dirname(path)
-            if dirname:
-                os.makedirs(dirname, exist_ok=True)
+        if "sqlite" in db_url:
+            if db_url.startswith("sqlite+aiosqlite:///"):
+                path = db_url.replace("sqlite+aiosqlite:///", "")
+                dirname = os.path.dirname(path)
+                if dirname:
+                    os.makedirs(dirname, exist_ok=True)
+            connect_args = {
+                "timeout": 60.0,
+            }
 
         _engine = create_async_engine(
             db_url,
             echo=False,
             future=True,
+            connect_args=connect_args,
         )
+
+        if "sqlite" in db_url:
+            @event.listens_for(_engine.sync_engine, "connect")
+            def set_sqlite_pragma(dbapi_connection, connection_record):
+                cursor = dbapi_connection.cursor()
+                cursor.execute("PRAGMA journal_mode=WAL")
+                cursor.execute("PRAGMA busy_timeout=60000")
+                cursor.execute("PRAGMA synchronous=NORMAL")
+                cursor.close()
+
     return _engine
 
 
@@ -144,6 +162,10 @@ async def init_db() -> None:
     engine = get_engine()
     logger.info("Initializing database tables...")
     async with engine.begin() as conn:
+        if "sqlite" in settings.DATABASE_URL:
+            await conn.execute(text("PRAGMA journal_mode=WAL;"))
+            await conn.execute(text("PRAGMA busy_timeout=60000;"))
+            await conn.execute(text("PRAGMA synchronous=NORMAL;"))
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_sqlite_columns(conn)
     logger.info("Database tables initialized and up-to-date.")
