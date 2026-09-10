@@ -394,9 +394,13 @@ class Stage2SemanticFilter:
         is_primary = getattr(listing, "market", None) == MarketType.PIERWOTNY
         is_future_or_current = getattr(listing, "year_built", None) is not None and listing.year_built >= 2025
         has_construction_marker = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(desc))
-        if is_primary and (is_future_or_current or has_construction_marker) and not has_visualisations:
-            if self.RE_FINISH_DO_ZAMIESZKANIA.search(desc) or existing_finish == FinishCondition.DO_ZAMIESZKANIA:
-                has_visualisations = True
+        if (
+            is_primary
+            and (is_future_or_current or has_construction_marker)
+            and not has_visualisations
+            and (self.RE_FINISH_DO_ZAMIESZKANIA.search(desc) or existing_finish == FinishCondition.DO_ZAMIESZKANIA)
+        ):
+            has_visualisations = True
 
         if (
             existing_finish
@@ -487,19 +491,13 @@ class Stage2SemanticFilter:
             if not getattr(cfg, "allow_visualisations", True) and has_visualisations:
                 rejection_reasons.append("Oferta oparta na wizualizacjach (wyłączone w konfiguracji)")
             allowed_fin = getattr(cfg, "allowed_finish_conditions", ["all"])
-            if allowed_fin and "all" not in allowed_fin:
-                if detected_finish.value not in allowed_fin:
-                    rejection_reasons.append(
-                        f"Stan wykończenia '{detected_finish.value}' poza dozwolonymi w konfiguracji"
-                    )
+            if allowed_fin and "all" not in allowed_fin and detected_finish.value not in allowed_fin:
+                rejection_reasons.append(f"Stan wykończenia '{detected_finish.value}' poza dozwolonymi w konfiguracji")
             if getattr(cfg, "reject_septic_tank", False) and detected_sewerage == SewerageType.SZAMBO:
                 rejection_reasons.append("Oferta posiada szambo (wyłączone w konfiguracji)")
             allowed_heat = getattr(cfg, "allowed_heating_types", ["all"])
-            if allowed_heat and "all" not in allowed_heat:
-                if detected_heating.value not in allowed_heat:
-                    rejection_reasons.append(
-                        f"Typ ogrzewania '{detected_heating.value}' poza dozwolonymi w konfiguracji"
-                    )
+            if allowed_heat and "all" not in allowed_heat and detected_heating.value not in allowed_heat:
+                rejection_reasons.append(f"Typ ogrzewania '{detected_heating.value}' poza dozwolonymi w konfiguracji")
         except Exception:
             pass
 

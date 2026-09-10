@@ -94,9 +94,7 @@ class Stage1Filter:
         prefix = full_text[prefix_start:match_start]
         if self.RE_NEGATION_PREFIX.search(prefix):
             return True
-        if self.RE_TRANSIT_PREFIX.search(prefix):
-            return True
-        return False
+        return bool(self.RE_TRANSIT_PREFIX.search(prefix))
 
     def check_blacklist(self, listing: ListingSchema, blacklist_words: list[str] | None = None) -> str | None:
         """Check if any blacklisted term is present in title, location, or description with negation awareness."""
@@ -119,9 +117,8 @@ class Stage1Filter:
 
             # 2. Title: check match with negation/transit check
             m_title = pattern.search(title_text)
-            if m_title:
-                if not self._is_negated_or_transit(title_text, m_title.start(), m_title.end()):
-                    return term
+            if m_title and not self._is_negated_or_transit(title_text, m_title.start(), m_title.end()):
+                return term
 
             # 3. Description: check all matches and ensure they are not negated or transit references
             spans: list[tuple[int, int]] = []

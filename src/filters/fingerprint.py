@@ -15,8 +15,7 @@ def normalize_text(text: str | None) -> str:
     # Remove non-alphanumeric chars except space
     text = re.sub(r"[^\w\s]", " ", text)
     # Collapse multiple spaces
-    text = re.sub(r"\s+", " ", text).strip()
-    return text
+    return re.sub(r"\s+", " ", text).strip()
 
 
 HONORIFIC_PREFIXES = {

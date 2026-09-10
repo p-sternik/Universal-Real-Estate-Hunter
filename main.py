@@ -295,7 +295,7 @@ async def reindex_all_listings():
         pct = (count / total * 100) if total > 0 else 0
         print(f"  • {status.capitalize():<24}: {count:>3} ({pct:>5.1f}%)")
     print("\nRozkład systemów ogrzewania:")
-    for status, count in heating_counter.most_common():
+    for _status, count in heating_counter.most_common():
         pct = (count / total * 100) if total > 0 else 0
         print("=" * 55 + "\n")
 
@@ -319,7 +319,7 @@ async def audit_geoportal_all(limit: int = 50, only_qualified: bool = True):
             ListingModel.longitude.isnot(None),
         )
         if only_qualified:
-            stmt = stmt.where(ListingModel.is_qualified == True)
+            stmt = stmt.where(ListingModel.is_qualified.is_(True))
         stmt = stmt.order_by(ListingModel.is_qualified.desc(), ListingModel.id.desc()).limit(limit)
 
         res = await session.execute(stmt)

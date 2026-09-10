@@ -212,8 +212,7 @@ class OtodomScraper(BaseScraper):
         if not next_data:
             return {}
 
-        ad_data = next_data.get("props", {}).get("pageProps", {}).get("ad", {})
-        return ad_data
+        return next_data.get("props", {}).get("pageProps", {}).get("ad", {})
 
     async def parse_search_item(
         self,

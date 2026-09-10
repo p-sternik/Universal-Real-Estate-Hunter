@@ -1,6 +1,7 @@
 import html
 import os
 import webbrowser
+from pathlib import Path
 
 from loguru import logger
 from rich.console import Console
@@ -21,7 +22,7 @@ async def get_listings_from_db(status_filter: str | None = None, limit: int | No
         if status_filter and status_filter.upper() != "ALL":
             sf = status_filter.upper()
             if sf == "QUALIFIED":
-                stmt = stmt.where(ListingModel.is_qualified == True)
+                stmt = stmt.where(ListingModel.is_qualified.is_(True))
             elif sf in ("FAVORITE", "TO_VISIT", "REJECTED", "NEW"):
                 stmt = stmt.where(ListingModel.user_status == sf)
             else:
@@ -590,14 +591,13 @@ async def generate_html_dashboard(
 </html>
 """
 
-    abs_path = os.path.abspath(output_path)
-    with open(abs_path, "w", encoding="utf-8") as f:
-        f.write(html_content)
+    abs_path = Path(output_path).resolve()
+    abs_path.write_text(html_content, encoding="utf-8")
 
     logger.info(f"HTML Dashboard generated successfully at: {abs_path}")
     if auto_open:
         try:
-            webbrowser.open(f"file:///{abs_path.replace(os.sep, '/')}")
+            webbrowser.open(f"file:///{str(abs_path).replace(os.sep, '/')}")
         except Exception as e:
             logger.debug(f"Could not automatically open browser: {e}")
 

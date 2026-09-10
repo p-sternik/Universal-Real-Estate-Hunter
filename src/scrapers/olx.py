@@ -7,6 +7,7 @@ from typing import Any
 from bs4 import BeautifulSoup
 from loguru import logger
 
+from config import settings
 from src.filters.fingerprint import generate_property_fingerprint
 from src.models.enums import (
     BuildingType,

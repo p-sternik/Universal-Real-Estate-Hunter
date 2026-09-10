@@ -295,7 +295,7 @@ class LiveDashboardServer:
                 )
 
             body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
-            etag = f'"{hashlib.md5(body).hexdigest()}"'
+            etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304)
             return web.json_response(body=body, headers={"ETag": etag})

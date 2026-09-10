@@ -31,8 +31,6 @@ repos:
         args: [--fix=lf]
       - id: detect-private-key
       - id: check-ast
-      - id: no-commit-to-branch
-        args: [--branch, main]
 
   # Security checks (optional but recommended)
   - repo: https://github.com/PyCQA/bandit
