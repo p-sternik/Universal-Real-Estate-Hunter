@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Web Dashboard Service (Interactive CRM, Map, Configuration UI)
   dashboard:
@@ -9,10 +7,11 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///app/data/listings.db
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/listings.db
       - TZ=Europe/Warsaw
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/data
       - ./search_config.json:/app/search_config.json
@@ -26,10 +25,11 @@ services:
     depends_on:
       - dashboard
     environment:
-      - DATABASE_URL=sqlite+aiosqlite:///app/data/listings.db
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/listings.db
       - TZ=Europe/Warsaw
     env_file:
-      - .env
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/data
       - ./search_config.json:/app/search_config.json
