@@ -392,7 +392,8 @@ class Stage2SemanticFilter:
 
         # Correlation check: Primary market + under construction / future delivery -> visualisations
         is_primary = getattr(listing, "market", None) == MarketType.PIERWOTNY
-        is_future_or_current = getattr(listing, "year_built", None) is not None and listing.year_built >= 2025
+        year_built = getattr(listing, "year_built", None)
+        is_future_or_current = year_built is not None and year_built >= 2025
         has_construction_marker = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(desc))
         if (
             is_primary
@@ -408,6 +409,7 @@ class Stage2SemanticFilter:
             and desc_finish != FinishCondition.NIEOKRESLONY
             and desc_finish != existing_finish
         ):
+            detected_finish: FinishCondition
             if existing_finish == FinishCondition.DO_ZAMIESZKANIA and desc_finish in (
                 FinishCondition.DEWELOPERSKI,
                 FinishCondition.DO_WYKONCZENIA,

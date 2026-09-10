@@ -285,25 +285,25 @@ class SearchProfile(BaseModel):
 
         radius = self.distance_radius or 15
         params = [f"distanceRadius={radius}", "limit=36"]
-        if (self.min_price or 0) > 0:
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"priceMin={int(self.min_price)}")
-        if (self.max_price or 0) > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"priceMax={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if (self.min_area_plot or 0) > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"areaMin={int(self.min_area_plot)}")
-            if (self.max_area_plot or 0) > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"areaMax={int(self.max_area_plot)}")
         else:
-            if (self.min_area_home or 0) > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"areaMin={int(self.min_area_home)}")
-            if (self.max_area_home or 0) > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"areaMax={int(self.max_area_home)}")
             if self.category == "dom":
-                if (self.min_area_plot or 0) > 0:
+                if self.min_area_plot is not None and self.min_area_plot > 0:
                     params.append(f"terrainAreaMin={int(self.min_area_plot)}")
-                if (self.max_area_plot or 0) > 0:
+                if self.max_area_plot is not None and self.max_area_plot > 0:
                     params.append(f"terrainAreaMax={int(self.max_area_plot)}")
 
         if self.market_type == "pierwotny":
@@ -332,20 +332,20 @@ class SearchProfile(BaseModel):
 
         radius = self.distance_radius or 15
         params = [f"search%5Bdist%5D={radius}"]
-        if (self.min_price or 0) > 0:
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"search%5Bfilter_float_price%3Afrom%5D={int(self.min_price)}")
-        if (self.max_price or 0) > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"search%5Bfilter_float_price%3Ato%5D={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if (self.min_area_plot or 0) > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"search%5Bfilter_float_m%3Afrom%5D={int(self.min_area_plot)}")
-            if (self.max_area_plot or 0) > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"search%5Bfilter_float_m%3Ato%5D={int(self.max_area_plot)}")
         else:
-            if (self.min_area_home or 0) > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"search%5Bfilter_float_m%3Afrom%5D={int(self.min_area_home)}")
-            if (self.max_area_home or 0) > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"search%5Bfilter_float_m%3Ato%5D={int(self.max_area_home)}")
 
         if self.market_type == "pierwotny":
@@ -375,25 +375,25 @@ class SearchProfile(BaseModel):
         base = f"https://{slug}.nieruchomosci-online.pl/{cat},sprzedaz/"
 
         params = []
-        if (self.min_price or 0) > 0:
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"cena_od={int(self.min_price)}")
-        if (self.max_price or 0) > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"cena_do={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if (self.min_area_plot or 0) > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"powierzchnia_od={int(self.min_area_plot)}")
-            if (self.max_area_plot or 0) > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"powierzchnia_do={int(self.max_area_plot)}")
         else:
-            if (self.min_area_home or 0) > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"powierzchnia_od={int(self.min_area_home)}")
-            if (self.max_area_home or 0) > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"powierzchnia_do={int(self.max_area_home)}")
 
-        if (self.min_rooms or 0) > 0:
+        if self.min_rooms is not None and self.min_rooms > 0:
             params.append(f"liczba-pokoi_od={int(self.min_rooms)}")
-        if (self.max_rooms or 0) > 0:
+        if self.max_rooms is not None and self.max_rooms > 0:
             params.append(f"liczba-pokoi_do={int(self.max_rooms)}")
 
         if params:
@@ -406,20 +406,20 @@ class SearchProfile(BaseModel):
         base = f"https://www.morizon.pl/{cat}/{slug}/"
 
         params = []
-        if (self.min_price or 0) > 0:
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"ps%5Bprice_from%5D={int(self.min_price)}")
-        if (self.max_price or 0) > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"ps%5Bprice_to%5D={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if (self.min_area_plot or 0) > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"ps%5Bliving_area_from%5D={int(self.min_area_plot)}")
-            if (self.max_area_plot or 0) > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"ps%5Bliving_area_to%5D={int(self.max_area_plot)}")
         else:
-            if (self.min_area_home or 0) > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"ps%5Bliving_area_from%5D={int(self.min_area_home)}")
-            if (self.max_area_home or 0) > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"ps%5Bliving_area_to%5D={int(self.max_area_home)}")
 
         if params:
@@ -547,9 +547,11 @@ class ConfigManager:
             except Exception as e:
                 logger.warning(f"[ConfigManager] Błąd odczytu {self.config_path}, przywracam domyślne: {e}")
 
-        # Check fallback root config (e.g. inside Docker image when volume config_path doesn't exist yet)
-        fallback = Path("search_config.json")
-        if fallback.exists() and fallback.resolve() != self.config_path.resolve():
+        # Check fallback root configs (e.g. inside Docker image when volume config_path doesn't exist yet)
+        for fallback_name in ("search_config.json", "search_config.example.json"):
+            fallback = Path(fallback_name)
+            if not fallback.exists() or fallback.resolve() == self.config_path.resolve():
+                continue
             try:
                 with fallback.open(encoding="utf-8") as f:
                     data = json.load(f)
@@ -571,7 +573,7 @@ class ConfigManager:
             self._config = self._get_default_config()
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.config_path.open("w", encoding="utf-8") as f:
+            with self.config_path.open("w", encoding="utf-8", newline="\n") as f:
                 json.dump(self._config.model_dump(), f, ensure_ascii=False, indent=2)
             logger.info(f"[ConfigManager] Zapisano konfigurację do {self.config_path}")
         except Exception as e:
@@ -580,6 +582,7 @@ class ConfigManager:
     def get_config(self) -> SearchConfig:
         if self._config is None:
             self.load_config()
+        assert self._config is not None
         return self._config
 
     def update_config(self, updates: dict[str, Any]) -> SearchConfig:

@@ -102,9 +102,11 @@ class OLXScraper(BaseScraper):
 
     def _parse_params_dict(self, params: list[dict[str, Any]]) -> dict[str, Any]:
         """Convert OLX parameter list into key-value map, preferring normalizedValue (EN keys)."""
-        res = {}
+        res: dict[str, Any] = {}
         for p in params:
             key = p.get("key")
+            if not isinstance(key, str):
+                continue
             val = p.get("value")
             if isinstance(val, dict):
                 val = val.get("key") or val.get("label") or val.get("value")
@@ -445,7 +447,7 @@ class OLXScraper(BaseScraper):
                         if not link_tag or not title_tag:
                             continue
 
-                        rel_url = link_tag.get("href", "")
+                        rel_url = str(link_tag.get("href") or "")
                         abs_url = f"https://www.olx.pl{rel_url}" if rel_url.startswith("/") else rel_url
                         title_txt = title_tag.get_text(strip=True)
                         price_txt = price_tag.get_text(strip=True) if price_tag else "0"
@@ -457,7 +459,7 @@ class OLXScraper(BaseScraper):
                             price_val = float(clean_p)
 
                         ad_id_match = re.search(r"-ID([a-zA-Z0-9]+)\.html", abs_url) or re.search(r"(\d+)", abs_url)
-                        ad_id = ad_id_match.group(1) if ad_id_match else abs_url
+                        ad_id = str(ad_id_match.group(1)) if ad_id_match else abs_url
 
                         # Extract area from title or subtitle
                         desc_p = card.select_one('span[data-testid="location-date"]')
@@ -516,7 +518,7 @@ class OLXScraper(BaseScraper):
                                     )
                                 if det_ad.get("photos"):
                                     det_gallery = [
-                                        p.get("link") or p.get("url")
+                                        str(p.get("link") or p.get("url"))
                                         for p in det_ad["photos"]
                                         if isinstance(p, dict) and (p.get("link") or p.get("url"))
                                     ]

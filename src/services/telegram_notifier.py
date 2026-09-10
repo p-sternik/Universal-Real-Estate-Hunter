@@ -62,9 +62,18 @@ class TelegramNotifier:
             for c in filter_result.cons[:3]:
                 lines.append(f"  • {c}")
 
+        if filter_result.ai_verdict:
+            lines.append(f"\n⚖️ <b>Werdykt AI {filter_result.verdict_icon}:</b> {filter_result.ai_verdict}")
+
+        parcel_id = getattr(listing, "parcel_id", None)
         if getattr(listing, "geoportal_url", None):
-            p_nr = listing.parcel_id.split(".")[-1] if getattr(listing, "parcel_id", None) else "mapa"
+            p_nr = parcel_id.split(".")[-1] if parcel_id else "mapa"
             lines.append(f"🗺️ <a href='{listing.geoportal_url}'>Działka w Geoportalu (nr {p_nr})</a>")
+        if getattr(listing, "mpzp_zone", None):
+            lines.append(f"🏛️ MPZP: <b>{listing.mpzp_zone}</b>")
+        if getattr(listing, "flood_risk_zone", None):
+            f_icon = "🌊" if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE" else "🛡️"
+            lines.append(f"{f_icon} Powódź: <b>{listing.flood_risk_zone}</b>")
         lines.append(f"\n🔗 <a href='{listing.url}'>Zobacz ogłoszenie na {listing.portal}</a>")
         return "\n".join(lines)
 

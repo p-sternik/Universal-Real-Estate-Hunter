@@ -27,18 +27,22 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate (Lint, Security, Tests)
+    name: Validate (Lint, Types, Security, Tests) — py${{ matrix.python-version }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Set up uv & Python 3.12
+      - name: Set up uv & Python ${{ matrix.python-version }}
         uses: astral-sh/setup-uv@v9.0.0
         with:
           enable-cache: true
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache-dependency-glob: |
             pyproject.toml
             uv.lock
@@ -51,11 +55,31 @@ jobs:
           uv run ruff check src/ tests/ main.py
           uv run ruff format --check src/ tests/ main.py
 
+      - name: Run mypy
+        run: uv run mypy
+
       - name: Run Bandit
         run: uv run bandit -c pyproject.toml -r src/ main.py -lll -iii
 
-      - name: Run unit tests
-        run: uv run pytest tests/ -q -x --tb=short -m "not integration"
+      - name: Run unit tests with coverage
+        run: uv run pytest tests/ -q -x --tb=short -m "not integration" --cov=src --cov-report=term-missing --cov-fail-under=55
+
+  docker:
+    name: Docker image smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: [validate]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build image
+        run: docker build -t estate-hunter:ci .
+
+      - name: Smoke test image
+        run: |
+          docker run --rm estate-hunter:ci python main.py --help
+          docker run --rm estate-hunter:ci python main.py init-db
 
   release:
     name: Semantic Release

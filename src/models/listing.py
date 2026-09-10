@@ -40,9 +40,22 @@ class FilterResult(BaseModel):
     has_fiber: bool = False
     # AI Due Diligence
     ai_summary: str | None = None
+    ai_verdict: str | None = None
+    worth_interest: bool | None = None
     ai_questions: list[str] = Field(default_factory=list)
     contact_phone: str | None = None
     contact_person: str | None = None
+    # Spatial due diligence
+    mpzp_zone: str | None = None
+    flood_risk_zone: str | None = None
+
+    @property
+    def verdict_icon(self) -> str:
+        if self.worth_interest is True:
+            return "✅"
+        if self.worth_interest is False:
+            return "❌"
+        return "❓"
 
 
 class ListingSchema(BaseModel):
@@ -85,6 +98,9 @@ class ListingSchema(BaseModel):
     parcel_id: str | None = None
     cadastral_area: float | None = None
     geoportal_url: str | None = None
+    mpzp_zone: str | None = None
+    mpzp_status: str | None = None
+    flood_risk_zone: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     skip_detail: bool = False

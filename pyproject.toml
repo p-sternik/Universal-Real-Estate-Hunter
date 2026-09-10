@@ -31,6 +31,8 @@ dev = [
     "pre-commit>=4.5.0",
     "bandit[toml]>=1.9.0",
     "python-semantic-release>=10.2.0",
+    "pytest-cov>=7.1.0",
+    "mypy>=2.3.1",
 ]
 
 [build-system]
@@ -109,6 +111,27 @@ filterwarnings = [
 markers = [
     "integration: marks tests as integration tests (excluded from pre-push)",
 ]
+
+# Coverage configuration
+[tool.coverage.run]
+source = ["src"]
+
+[tool.coverage.report]
+fail_under = 55
+show_missing = true
+skip_covered = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "raise NotImplementedError",
+]
+
+# Mypy configuration
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true
+files = ["src", "main.py"]
 
 # Bandit security linter configuration
 [tool.bandit]

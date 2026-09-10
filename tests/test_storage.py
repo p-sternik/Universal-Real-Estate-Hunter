@@ -308,6 +308,8 @@ async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
         passed_stage1=True,
         passed_stage2=True,
         ai_summary="TL;DR oferty.",
+        ai_verdict="Tak — 8 260 zł/m² to poniżej rynku w tej lokalizacji.",
+        worth_interest=True,
         ai_questions=["Pytanie 1?", "Pytanie 2?"],
         contact_phone="+48600123456",
         contact_person="Anna Nowak",
@@ -316,6 +318,8 @@ async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
     model, is_new, _ = await repo.save_or_update(listing, filt_res)
     assert is_new is True
     assert model.ai_summary == "TL;DR oferty."
+    assert model.ai_verdict == "Tak — 8 260 zł/m² to poniżej rynku w tej lokalizacji."
+    assert model.worth_interest is True
     assert model.ai_questions == ["Pytanie 1?", "Pytanie 2?"]
     assert model.contact_phone == "+48600123456"
     assert model.contact_person == "Anna Nowak"
@@ -324,6 +328,8 @@ async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
     loaded = await repo.get_by_url(listing.url)
     assert loaded is not None
     assert loaded.ai_summary == "TL;DR oferty."
+    assert loaded.ai_verdict == "Tak — 8 260 zł/m² to poniżej rynku w tej lokalizacji."
+    assert loaded.worth_interest is True
     assert loaded.ai_questions == ["Pytanie 1?", "Pytanie 2?"]
     assert loaded.contact_phone == "+48600123456"
     assert loaded.contact_person == "Anna Nowak"
@@ -339,6 +345,55 @@ async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
     model_up, is_new_up, _ = await repo.save_or_update(listing, filt_res_empty)
     assert is_new_up is False
     assert model_up.ai_summary == "TL;DR oferty."
+    assert model_up.ai_verdict == "Tak — 8 260 zł/m² to poniżej rynku w tej lokalizacji."
+    assert model_up.worth_interest is True
     assert model_up.ai_questions == ["Pytanie 1?", "Pytanie 2?"]
     assert model_up.contact_phone == "+48600123456"
     assert model_up.contact_person == "Anna Nowak"
+
+
+@pytest.mark.asyncio
+async def test_repository_spatial_fields(async_session):
+    repo = ListingRepository(async_session)
+    listing = ListingSchema(
+        id="spatial-1",
+        portal="Otodom",
+        title="Działka budowlana",
+        url="https://otodom.pl/oferta/spatial-1",
+        price=300_000,
+        price_per_m2=300,
+        area_home=0.0,
+        area_plot=1000.0,
+        location_raw="Rzeszów",
+        property_fingerprint="fp-spatial-1",
+    )
+    listing.parcel_id = "186301_1.0221.2296/2"
+    listing.cadastral_area = 550.0
+    listing.geoportal_url = "https://mapy.geoportal.gov.pl/imap/Imgp_2.html?identifyParcel=186301_1.0221.2296/2"
+    listing.mpzp_zone = "4.MN: tereny zabudowy mieszkaniowej"
+    listing.mpzp_status = "OBOWIĄZUJĄCY"
+    listing.flood_risk_zone = "BRAK"
+
+    filt_res = FilterResult(
+        is_qualified=True,
+        status=QualificationStatus.QUALIFIED,
+        score=75.0,
+        passed_stage1=True,
+        passed_stage2=True,
+        mpzp_zone=listing.mpzp_zone,
+        flood_risk_zone=listing.flood_risk_zone,
+    )
+
+    model, is_new, _ = await repo.save_or_update(listing, filt_res)
+    assert is_new is True
+    assert model.parcel_id == "186301_1.0221.2296/2"
+    assert model.cadastral_area == 550.0
+    assert model.mpzp_zone == "4.MN: tereny zabudowy mieszkaniowej"
+    assert model.mpzp_status == "OBOWIĄZUJĄCY"
+    assert model.flood_risk_zone == "BRAK"
+
+    loaded = await repo.get_by_url(listing.url)
+    assert loaded is not None
+    assert loaded.mpzp_zone == "4.MN: tereny zabudowy mieszkaniowej"
+    assert loaded.mpzp_status == "OBOWIĄZUJĄCY"
+    assert loaded.flood_risk_zone == "BRAK"

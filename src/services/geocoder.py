@@ -1,6 +1,7 @@
 import asyncio
 import time
 from datetime import UTC, datetime
+from typing import Any
 
 import httpx
 from loguru import logger
@@ -76,7 +77,7 @@ class NominatimGeocoder:
             if elapsed < 1.1:
                 await asyncio.sleep(1.1 - elapsed)
 
-            params = {
+            params: dict[str, Any] = {
                 "q": query,
                 "format": "json",
                 "limit": 1,

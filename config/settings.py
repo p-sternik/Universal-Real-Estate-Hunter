@@ -1,5 +1,52 @@
+from typing import Any
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _default_whitelist_areas() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "Słocina Dolna",
+            "keywords": ["paderewskiego", "witolda", "powstańców wielkopolskich", "powstancow wielkopolskich"],
+            "required_parent": "słocina",
+        },
+        {
+            "name": "Zalesie Dolne/Centralne",
+            "keywords": ["łukasiewicza", "lukasiewicza", "dunikowskiego", "spacerowa"],
+            "required_parent": "zalesie",
+        },
+        {
+            "name": "Staromieście",
+            "keywords": ["staromieście ogrody", "staromiescie ogrody", "borowa", "lubelska", "lubelskiej"],
+            "required_parent": "staromieście",
+        },
+        {
+            "name": "Północ/Wschód (Trzebownisko)",
+            "keywords": ["trzebownisko"],
+            "required_parent": None,
+        },
+        {
+            "name": "Północ/Wschód (Nowa Wieś)",
+            "keywords": ["nowa wieś", "nowa wies"],
+            "required_parent": None,
+        },
+        {
+            "name": "Północ/Wschód (Terliczka)",
+            "keywords": ["terliczka"],
+            "required_parent": None,
+        },
+        {
+            "name": "Północ/Wschód (Krasne wzdłuż DK94)",
+            "keywords": ["krasne", "dk94", "krasnego"],
+            "required_parent": None,
+        },
+        {
+            "name": "Północ/Wschód (Głogów Młp. Niwa / Rogoźnica / PKA)",
+            "keywords": ["niwa", "rogoźnica", "rogoznica", "stacji pka", "pka", "głogów", "glogow"],
+            "required_parent": None,
+        },
+    ]
 
 
 class Settings(BaseSettings):
@@ -28,50 +75,7 @@ class Settings(BaseSettings):
 
     # Stage I: Whitelist configurations
     # Whitelist is prioritized. Offers matching whitelist receive high priority / bonus tag.
-    WHITELIST_AREAS: list[dict] = Field(
-        default_factory=lambda: [
-            {
-                "name": "Słocina Dolna",
-                "keywords": ["paderewskiego", "witolda", "powstańców wielkopolskich", "powstancow wielkopolskich"],
-                "required_parent": "słocina",
-            },
-            {
-                "name": "Zalesie Dolne/Centralne",
-                "keywords": ["łukasiewicza", "lukasiewicza", "dunikowskiego", "spacerowa"],
-                "required_parent": "zalesie",
-            },
-            {
-                "name": "Staromieście",
-                "keywords": ["staromieście ogrody", "staromiescie ogrody", "borowa", "lubelska", "lubelskiej"],
-                "required_parent": "staromieście",
-            },
-            {
-                "name": "Północ/Wschód (Trzebownisko)",
-                "keywords": ["trzebownisko"],
-                "required_parent": None,
-            },
-            {
-                "name": "Północ/Wschód (Nowa Wieś)",
-                "keywords": ["nowa wieś", "nowa wies"],
-                "required_parent": None,
-            },
-            {
-                "name": "Północ/Wschód (Terliczka)",
-                "keywords": ["terliczka"],
-                "required_parent": None,
-            },
-            {
-                "name": "Północ/Wschód (Krasne wzdłuż DK94)",
-                "keywords": ["krasne", "dk94", "krasnego"],
-                "required_parent": None,
-            },
-            {
-                "name": "Północ/Wschód (Głogów Młp. Niwa / Rogoźnica / PKA)",
-                "keywords": ["niwa", "rogoźnica", "rogoznica", "stacji pka", "pka", "głogów", "glogow"],
-                "required_parent": None,
-            },
-        ]
-    )
+    WHITELIST_AREAS: list[dict[str, Any]] = Field(default_factory=_default_whitelist_areas)
 
     # Scraping Configuration
     REQUEST_TIMEOUT_SECONDS: int = 25

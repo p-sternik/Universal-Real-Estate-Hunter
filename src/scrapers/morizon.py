@@ -164,7 +164,8 @@ class MorizonScraper(BaseScraper):
         # Photos
         imgs: list[str] = []
         for img in soup.select("img"):
-            src = img.get("src") or img.get("data-src")
+            src_attr = img.get("src") or img.get("data-src")
+            src = str(src_attr) if src_attr else ""
             if src and any(domain in src for domain in ["morizon", "gratka"]) and src not in imgs:
                 if src.startswith("//"):
                     src = f"https:{src}"

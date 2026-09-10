@@ -8,6 +8,7 @@ from src.filters import QualificationEngine
 from src.models.enums import FinishCondition, HeatingType, SewerageType
 from src.models.listing import ListingSchema
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
+from src.services.config_manager import SearchProfile
 from src.services.discord_notifier import DiscordNotifier
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
@@ -122,6 +123,61 @@ class ScraperPipeline:
                 listing.parcel_id = existing_model.parcel_id
                 listing.cadastral_area = existing_model.cadastral_area
                 listing.geoportal_url = existing_model.geoportal_url
+                listing.mpzp_zone = getattr(existing_model, "mpzp_zone", None)
+                listing.mpzp_status = getattr(existing_model, "mpzp_status", None)
+                listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
+
+        # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
+        is_exact_coords = True
+        stage1_passed = True
+        if hasattr(self.engine, "stage1"):
+            stage1_attr = getattr(self.engine, "stage1", None)
+            from unittest.mock import AsyncMock, MagicMock
+
+            if stage1_attr is not None and not isinstance(stage1_attr, (AsyncMock, MagicMock)):
+                try:
+                    s1_res = stage1_attr.evaluate(listing, profile=profile)
+                    if isinstance(s1_res, tuple) and len(s1_res) >= 1:
+                        stage1_passed = bool(s1_res[0])
+                except Exception as e:
+                    logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
+
+        geo_audit = None
+        if stage1_passed:
+            # Resolve coordinates if missing (skip if already resolved in existing_model)
+            if not listing.coordinates:
+                from src.services.geocoder import geocoder
+
+                lat, lon, is_exact = await geocoder.geocode(
+                    session=repo.session,
+                    street=listing.street,
+                    district=listing.district,
+                    city=listing.city,
+                    location_raw=listing.location_raw,
+                )
+                if lat and lon:
+                    listing.coordinates = (lat, lon)
+                    is_exact_coords = is_exact
+            elif existing_model and existing_model.is_exact_coords is not None:
+                is_exact_coords = bool(existing_model.is_exact_coords)
+
+            # Audit location in Geoportal if coords are exact, and not already audited
+            if listing.coordinates and is_exact_coords and not listing.parcel_id:
+                try:
+                    from src.services.geoportal import geoportal_service
+
+                    geo_audit = await geoportal_service.audit_location(
+                        listing.coordinates[0], listing.coordinates[1], radius_meters=120
+                    )
+                    if geo_audit.get("main_parcel_id"):
+                        listing.parcel_id = geo_audit["main_parcel_id"]
+                        listing.cadastral_area = geo_audit.get("cadastral_area")
+                        listing.geoportal_url = geo_audit.get("geoportal_url")
+                        listing.mpzp_zone = geo_audit.get("mpzp_zone")
+                        listing.mpzp_status = geo_audit.get("mpzp_status")
+                        listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
+                except Exception as e:
+                    logger.debug(f"[Pipeline] Geoportal audit skipped: {e}")
 
         # Check if LLM can be skipped because this listing was already analyzed.
         # If LLM analysis is enabled and the listing has no AI summary yet (e.g. rows
@@ -135,7 +191,7 @@ class ScraperPipeline:
             if desc_unchanged and (existing_model.ai_summary or existing_model.ai_questions):
                 skip_llm = True
 
-        # 2. Run two-stage qualification engine
+        # 2. Run two-stage qualification engine (LLM now receives spatial context in listing!)
         filter_result = await self.engine.evaluate_listing(listing, profile=profile, skip_llm=skip_llm)
 
         # If LLM was skipped, preserve previously saved LLM pros/cons and AI fields
@@ -147,64 +203,51 @@ class ScraperPipeline:
             if existing_model.cons:
                 for c in existing_model.cons:
                     if (
-                        c.startswith("[LLM]") or c.startswith("⚠️ [Ukryty koszt]") or c.startswith("⚖️ [Ryzyko prawne]")
+                        c.startswith("[LLM]")
+                        or c.startswith("🔧 [LLM]")
+                        or c.startswith("🖼️ [LLM]")
+                        or c.startswith("🔍 [LLM]")
+                        or c.startswith("⚠️ [Ukryty koszt]")
+                        or c.startswith("⚖️ [Ryzyko prawne]")
                     ) and c not in filter_result.cons:
                         filter_result.cons.append(c)
-            # Preserve AI Due Diligence fields
-            if not filter_result.ai_summary and getattr(existing_model, "ai_summary", None):
-                filter_result.ai_summary = existing_model.ai_summary
-            if not filter_result.ai_questions and getattr(existing_model, "ai_questions", None):
-                filter_result.ai_questions = existing_model.ai_questions
-            if not filter_result.contact_phone and getattr(existing_model, "contact_phone", None):
-                filter_result.contact_phone = existing_model.contact_phone
-            if not filter_result.contact_person and getattr(existing_model, "contact_person", None):
-                filter_result.contact_person = existing_model.contact_person
+            # Preserve AI Due Diligence fields for the in-memory result used by notifiers
+            for field in ("ai_summary", "ai_verdict", "ai_questions", "contact_phone", "contact_person"):
+                if not getattr(filter_result, field) and getattr(existing_model, field, None):
+                    setattr(filter_result, field, getattr(existing_model, field))
+            if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
+                filter_result.worth_interest = existing_model.worth_interest
 
-        result["qualified"] = filter_result.is_qualified
+        # 3. Enrich filter_result with spatial audit findings (MPZP, flood risk, cadastral parcel)
+        if listing.parcel_id and filter_result.is_qualified:
+            if listing.mpzp_zone:
+                filter_result.mpzp_zone = listing.mpzp_zone
+                if listing.mpzp_status == "OBOWIĄZUJĄCY":
+                    filter_result.pros.append(f"Miejscowy Plan (MPZP): {listing.mpzp_zone}")
+                elif listing.mpzp_status == "BRAK_PLANU_LUB_CYFRYZACJI":
+                    filter_result.cons.append("⚠️ Brak cyfrowego MPZP w Geoportalu (wymaga weryfikacji WZ)")
 
-        # 3. Resolve coordinates if missing (skip if already resolved in existing_model)
-        is_exact_coords = True
-        if not listing.coordinates:
-            from src.services.geocoder import geocoder
+            if listing.flood_risk_zone:
+                filter_result.flood_risk_zone = listing.flood_risk_zone
+                if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE":
+                    filter_result.cons.append("⚠️ Zagrożenie powodziowe (ISOK): Działka w strefie ryzyka powodziowego")
+                    filter_result.score = max(0.0, filter_result.score - 20.0)
 
-            lat, lon, is_exact = await geocoder.geocode(
-                session=repo.session,
-                street=listing.street,
-                district=listing.district,
-                city=listing.city,
-                location_raw=listing.location_raw,
-            )
-            if lat and lon:
-                listing.coordinates = (lat, lon)
-                is_exact_coords = is_exact
-        elif existing_model and existing_model.is_exact_coords is not None:
-            is_exact_coords = bool(existing_model.is_exact_coords)
-
-        # 3.5. Audit location in Geoportal if qualified, coords are exact, and not already audited
-        if listing.coordinates and is_exact_coords and filter_result.is_qualified and not listing.parcel_id:
-            try:
-                from src.services.geoportal import geoportal_service
-
-                geo_audit = await geoportal_service.audit_location(
-                    listing.coordinates[0], listing.coordinates[1], radius_meters=120
-                )
-                if geo_audit.get("main_parcel_id"):
-                    listing.parcel_id = geo_audit["main_parcel_id"]
-                    listing.cadastral_area = geo_audit.get("cadastral_area")
-                    listing.geoportal_url = geo_audit["geoportal_url"]
-
-                    risks = geo_audit.get("surrounding_risks", [])
-                    if risks:
-                        for r in risks:
+            if geo_audit:
+                risks = geo_audit.get("surrounding_risks", [])
+                if risks:
+                    for r in risks:
+                        if "zagrożenia powodziowego" not in r:
                             filter_result.cons.append(f"⚠️ Geoportal: {r}")
+                    if any("Ba" in r or "Bi" in r or "Tk" in r for r in risks):
                         filter_result.score = max(0.0, filter_result.score - 25.0)
 
-                    p_num = geo_audit.get("main_parcel_number")
-                    p_area = geo_audit.get("cadastral_area")
-                    if p_num and p_area:
-                        filter_result.pros.append(f"Zidentyfikowano działkę w Geoportalu: nr {p_num} ({p_area} m²)")
-            except Exception as e:
-                logger.debug(f"[Pipeline] Geoportal audit skipped: {e}")
+                p_num = geo_audit.get("main_parcel_number")
+                p_area = geo_audit.get("cadastral_area")
+                if p_num and p_area:
+                    filter_result.pros.append(f"Zidentyfikowano działkę w Geoportalu: nr {p_num} ({p_area} m²)")
+
+        result["qualified"] = filter_result.is_qualified
 
         # 4. Save or update in database
         db_model, is_new, price_changed = await repo.save_or_update(
@@ -253,7 +296,7 @@ class ScraperPipeline:
         total_notified = 0
 
         if self._custom_scrapers:
-            execution_plan = [(None, self.scrapers)]
+            execution_plan: list[tuple[SearchProfile | None, list[BaseScraper]]] = [(None, self.scrapers)]
             fresh_urls: set = set()
         else:
             profiles = cfg.get_active_profiles(target_profile)
@@ -279,7 +322,7 @@ class ScraperPipeline:
 
             execution_plan = []
             for prof in profiles:
-                scs = []
+                scs: list[BaseScraper] = []
                 p_portals = prof.enabled_portals
                 if cfg.scrapers.otodom.enabled and (not p_portals or "otodom" in p_portals):
                     scs.append(

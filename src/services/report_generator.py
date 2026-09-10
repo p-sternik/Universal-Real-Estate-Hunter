@@ -90,7 +90,7 @@ async def print_terminal_view(status_filter: str | None = "QUALIFIED", limit: in
 async def generate_html_dashboard(
     output_path: str = "listings_report.html",
     auto_open: bool = True,
-) -> str:
+) -> Path:
     """Generate a modern HTML dashboard showcasing all listings with photos and direct links."""
     listings = await get_listings_from_db(status_filter="ALL")
 

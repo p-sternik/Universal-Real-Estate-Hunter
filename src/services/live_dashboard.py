@@ -286,6 +286,9 @@ class LiveDashboardServer:
                         "parcel_id": getattr(item, "parcel_id", None),
                         "cadastral_area": getattr(item, "cadastral_area", None),
                         "geoportal_url": getattr(item, "geoportal_url", None),
+                        "mpzp_zone": getattr(item, "mpzp_zone", None),
+                        "mpzp_status": getattr(item, "mpzp_status", None),
+                        "flood_risk_zone": getattr(item, "flood_risk_zone", None),
                         "user_status": getattr(item, "user_status", "NEW") or "NEW",
                         "user_notes": getattr(item, "user_notes", "") or "",
                         "access_road_type": item.access_road_type,
@@ -314,6 +317,8 @@ class LiveDashboardServer:
                         "created_at": item.created_at.isoformat() if item.created_at else None,
                         # AI Due Diligence
                         "ai_summary": getattr(item, "ai_summary", None),
+                        "ai_verdict": getattr(item, "ai_verdict", None),
+                        "worth_interest": getattr(item, "worth_interest", None),
                         "ai_questions": getattr(item, "ai_questions", []) or [],
                         "contact_phone": getattr(item, "contact_phone", None),
                         "contact_person": getattr(item, "contact_person", None),

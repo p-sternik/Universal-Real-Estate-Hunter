@@ -57,8 +57,8 @@ class PermissiveProfile:
     max_year_built = None
     owner_type = "all"
     market_type = "all"
-    blacklist_keywords = []
-    whitelist_areas = []
+    blacklist_keywords: list[str] = []
+    whitelist_areas: list[dict] = []
     building_types = ["szeregowiec", "bliźniak", "wolnostojący", "inny"]
     allowed_finish_conditions = ["all"]
     allow_visualisations = True
@@ -684,6 +684,51 @@ async def test_qualification_engine_llm_discrepancies_and_sewerage_brak():
 
     assert any("Brak przyłącza kanalizacyjnego" in c for c in res.cons)
     assert any("Rozbieżność portal vs opis" in c for c in res.cons)
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_llm_verdict_and_finish_note():
+    engine = QualificationEngine(llm_enabled=False)
+    engine.llm = AsyncMock()
+    engine.llm.analyze_description.return_value = {
+        "summary": "Dom 120 m² w Rzeszowie za 820 000 zł (6 833 zł/m²), stan deweloperski.",
+        "worth_interest": True,
+        "verdict": "Tak — 6 833 zł/m² jest poniżej średniej rynkowej, ale dolicz ok. 200 tys. zł na wykończenie.",
+        "finish_condition": "do_wykonczenia",
+        "finish_note": "Wykonane: instalacje, okna, elewacja. Do zrobienia: wylewki, tynki, całe wykończenie.",
+    }
+
+    listing = create_sample_listing(
+        raw_description="Dom w stanie deweloperskim do własnego wykończenia. Wykonane instalacje i okna.",
+    )
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+
+    assert (
+        res.ai_verdict == "Tak — 6 833 zł/m² jest poniżej średniej rynkowej, ale dolicz ok. 200 tys. zł na wykończenie."
+    )
+    assert res.worth_interest is True
+    assert listing.finish_condition == FinishCondition.DO_WYKONCZENIA
+    assert any("Wykonane: instalacje, okna, elewacja" in c for c in res.cons)
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_llm_visualisations_detection():
+    engine = QualificationEngine(llm_enabled=False)
+    engine.llm = AsyncMock()
+    engine.llm.analyze_description.return_value = {
+        "has_visualisations": True,
+        "visualisation_note": "Zdjęcia przedstawiają wizualizacje przykładowej aranżacji.",
+    }
+
+    listing = create_sample_listing(
+        raw_description="Nowa inwestycja. Dojazd asfaltowy.",
+    )
+    assert listing.has_visualisations is False
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+
+    assert listing.has_visualisations is True
+    assert res.has_visualisations is True
+    assert any("Wizualizacje" in c for c in res.cons)
 
 
 def test_llm_slice_description_head_and_tail():

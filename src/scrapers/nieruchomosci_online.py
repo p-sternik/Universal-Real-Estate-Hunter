@@ -198,12 +198,13 @@ class NieruchomosciOnlineScraper(BaseScraper):
                     continue
                 geo = obj.get("geo") or {}
                 lat, lon = geo.get("latitude"), geo.get("longitude")
-                try:
-                    lat_f, lon_f = float(lat), float(lon)
-                    if lat_f or lon_f:
-                        result["coordinates"] = (lat_f, lon_f)
-                except (TypeError, ValueError):
-                    pass
+                if lat is not None and lon is not None:
+                    try:
+                        lat_f, lon_f = float(lat), float(lon)
+                        if lat_f or lon_f:
+                            result["coordinates"] = (lat_f, lon_f)
+                    except (TypeError, ValueError):
+                        pass
                 if obj.get("yearBuilt"):
                     try:
                         result["year_built"] = int(obj["yearBuilt"])
@@ -238,12 +239,13 @@ class NieruchomosciOnlineScraper(BaseScraper):
         has_render = False
 
         for img in soup.select("div.gallery img, #gallery img, a.photo img, img.main-photo, div.slider img"):
-            src = img.get("src") or img.get("data-src") or img.get("data-lazy")
+            src_attr = img.get("src") or img.get("data-src") or img.get("data-lazy")
+            src = str(src_attr) if src_attr else ""
             if src and src not in gallery:
                 if src.startswith("//"):
                     src = f"https:{src}"
                 gallery.append(src)
-            meta_str = f"{src or ''} {img.get('alt', '')} {img.get('title', '')}".lower()
+            meta_str = f"{src} {img.get('alt', '') or ''} {img.get('title', '') or ''}".lower()
             if any(ind in meta_str for ind in render_indicators):
                 has_render = True
 
@@ -491,8 +493,8 @@ class NieruchomosciOnlineScraper(BaseScraper):
                 break
 
             logger.info(f"[{self.name}] Found {len(tiles)} tiles on page {page}.")
-            items = [self._parse_tile(tile) for tile in tiles]
-            items = [i for i in items if i]
+            parsed_items = [self._parse_tile(tile) for tile in tiles]
+            items = [i for i in parsed_items if i is not None]
 
             await self._emit_progress(
                 page=page,

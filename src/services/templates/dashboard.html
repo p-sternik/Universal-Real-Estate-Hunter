@@ -2461,10 +2461,23 @@
                 <button class="btn btn-ghost btn-sm" onclick="closeAiModal(null)">✕</button>
             </div>
 
+            <!-- AI Verdict -->
+            <div class="ai-section" id="aiVerdictSection" style="display:none;">
+                <div class="ai-section-title">⚖️ Werdykt AI</div>
+                <div id="aiVerdictBadge" style="font-weight:600;padding:8px 12px;border-radius:var(--radius-md);margin-bottom:6px;display:inline-block;"></div>
+                <div id="aiVerdictContent" class="ai-summary-text"></div>
+            </div>
+
             <!-- TL;DR Summary -->
             <div class="ai-section">
                 <div class="ai-section-title">📋 Podsumowanie (TL;DR)</div>
                 <div id="aiSummaryContent" class="ai-summary-text"></div>
+            </div>
+
+            <!-- Spatial & Geoportal Audit -->
+            <div class="ai-section" id="aiSpatialSection" style="display:none;">
+                <div class="ai-section-title">🗺️ Audyt Geodezyjny (MPZP, Powódź, EGiB)</div>
+                <div id="aiSpatialContent" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:6px;align-items:center;"></div>
             </div>
 
             <!-- Contact Card -->
@@ -3767,6 +3780,8 @@
                         <span class="spec-item">${escapeHtml(item.building_type || 'Grunt')}</span>
                         ${roadText ? `<span class="spec-sep">·</span><span class="spec-item">Droga: ${roadText}</span>` : ''}
                         ${sewText ? `<span class="spec-sep">·</span><span class="spec-item">Media: ${sewText}</span>` : ''}
+                        ${item.mpzp_zone ? `<span class="spec-sep">·</span><span class="spec-item" title="MPZP: ${escapeHtml(item.mpzp_zone)}">🏛️ ${escapeHtml(item.mpzp_zone.length > 25 ? item.mpzp_zone.slice(0, 25) + '...' : item.mpzp_zone)}</span>` : ''}
+                        ${item.flood_risk_zone === 'ZAGROŻENIE_POWODZIOWE' ? `<span class="spec-sep">·</span><span class="spec-item" style="color:var(--danger, #ef4444);font-weight:600;">🌊 Teren zalewowy</span>` : ''}
                     `;
                 } else {
                     specsHtml = `
@@ -3782,6 +3797,8 @@
                         ${fiberBadge}
                         ${roadText ? `<span class="spec-sep">·</span><span class="spec-item">Droga: ${roadText}</span>` : ''}
                         ${yearText ? `<span class="spec-sep">·</span><span class="spec-item">${yearText}</span>` : ''}
+                        ${item.mpzp_zone ? `<span class="spec-sep">·</span><span class="spec-item" title="MPZP: ${escapeHtml(item.mpzp_zone)}">🏛️ ${escapeHtml(item.mpzp_zone.length > 25 ? item.mpzp_zone.slice(0, 25) + '...' : item.mpzp_zone)}</span>` : ''}
+                        ${item.flood_risk_zone === 'ZAGROŻENIE_POWODZIOWE' ? `<span class="spec-sep">·</span><span class="spec-item" style="color:var(--danger, #ef4444);font-weight:600;">🌊 Teren zalewowy</span>` : ''}
                     `;
                 }
 
@@ -4033,9 +4050,64 @@
 
             document.getElementById('aiModalTitle').innerText = item.title || '';
 
+            // Verdict
+            const verdictSection = document.getElementById('aiVerdictSection');
+            const verdictBadge = document.getElementById('aiVerdictBadge');
+            const verdictContent = document.getElementById('aiVerdictContent');
+            if (item.ai_verdict || item.worth_interest !== null && item.worth_interest !== undefined) {
+                verdictSection.style.display = 'block';
+                if (item.worth_interest === true) {
+                    verdictBadge.innerText = '✅ WARTO SIĘ ZAINTERESOWAĆ';
+                    verdictBadge.style.background = '#e8f8ec';
+                    verdictBadge.style.color = '#1d7a34';
+                } else if (item.worth_interest === false) {
+                    verdictBadge.innerText = '❌ NIE WARTO / OMINĄĆ';
+                    verdictBadge.style.background = '#fdeceb';
+                    verdictBadge.style.color = '#b3362c';
+                } else {
+                    verdictBadge.innerText = '❓ ZA MAŁO DANYCH — WYMAGA WERYFIKACJI';
+                    verdictBadge.style.background = '#fff6e5';
+                    verdictBadge.style.color = '#9a6a00';
+                }
+                verdictContent.innerText = item.ai_verdict || 'Brak uzasadnienia werdyktu.';
+            } else {
+                verdictSection.style.display = 'none';
+            }
+
             // Summary
             const summaryEl = document.getElementById('aiSummaryContent');
             summaryEl.innerText = item.ai_summary || 'Brak analizy AI — uruchom scraping z włączonym LLM, aby wygenerować podsumowanie.';
+
+            // Spatial & Geoportal
+            const spatialSection = document.getElementById('aiSpatialSection');
+            const spatialContent = document.getElementById('aiSpatialContent');
+            if (item.parcel_id || item.mpzp_zone || item.flood_risk_zone || item.geoportal_url) {
+                spatialSection.style.display = 'block';
+                let chips = [];
+                if (item.parcel_id) {
+                    const areaTxt = item.cadastral_area ? ` (${item.cadastral_area} m²)` : '';
+                    chips.push(`<span class="card-spec-item" style="background:var(--bg-card);border:1px solid var(--border);padding:4px 8px;border-radius:4px;">📍 Działka: <strong>${escapeHtml(item.parcel_id)}</strong>${areaTxt}</span>`);
+                }
+                if (item.mpzp_zone) {
+                    const isMnp = item.mpzp_status === 'OBOWIĄZUJĄCY';
+                    const bg = isMnp ? 'rgba(34, 197, 94, 0.15)' : 'rgba(234, 179, 8, 0.15)';
+                    const col = isMnp ? '#16a34a' : '#ca8a04';
+                    chips.push(`<span class="card-spec-item" style="background:${bg};color:${col};font-weight:600;padding:4px 8px;border-radius:4px;">🏛️ MPZP: ${escapeHtml(item.mpzp_zone)}</span>`);
+                }
+                if (item.flood_risk_zone) {
+                    const isFlood = item.flood_risk_zone === 'ZAGROŻENIE_POWODZIOWE';
+                    const bg = isFlood ? 'rgba(239, 68, 68, 0.15)' : 'rgba(59, 130, 246, 0.15)';
+                    const col = isFlood ? '#dc2626' : '#2563eb';
+                    const icon = isFlood ? '🌊' : '🛡️';
+                    chips.push(`<span class="card-spec-item" style="background:${bg};color:${col};font-weight:600;padding:4px 8px;border-radius:4px;">${icon} Powódź: ${escapeHtml(item.flood_risk_zone)}</span>`);
+                }
+                if (item.geoportal_url) {
+                    chips.push(`<a href="${escapeHtml(item.geoportal_url)}" target="_blank" rel="noopener noreferrer" class="btn-link btn-geoportal-live" style="margin-left:auto;text-decoration:none;padding:4px 10px;border-radius:4px;background:var(--primary);color:#fff;font-size:12px;">Otwórz w Geoportalu ↗</a>`);
+                }
+                spatialContent.innerHTML = chips.join('');
+            } else {
+                spatialSection.style.display = 'none';
+            }
 
             // Contact
             const contactSection = document.getElementById('aiContactSection');

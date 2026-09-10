@@ -1,4 +1,4 @@
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 import pytest_asyncio
@@ -43,10 +43,11 @@ def make_listing() -> ListingSchema:
 
 
 def make_qualified_result(**ai_fields) -> FilterResult:
+    score = ai_fields.pop("score", 60.0)
     return FilterResult(
         is_qualified=True,
         status=QualificationStatus.QUALIFIED,
-        score=60.0,
+        score=score,
         passed_stage1=True,
         passed_stage2=True,
         **ai_fields,
@@ -54,10 +55,11 @@ def make_qualified_result(**ai_fields) -> FilterResult:
 
 
 def make_unqualified_result(**ai_fields) -> FilterResult:
+    score = ai_fields.pop("score", 10.0)
     return FilterResult(
         is_qualified=False,
         status=QualificationStatus.REJECTED_STAGE2,
-        score=10.0,
+        score=score,
         passed_stage1=True,
         passed_stage2=False,
         **ai_fields,
@@ -66,7 +68,7 @@ def make_unqualified_result(**ai_fields) -> FilterResult:
 
 def make_pipeline(llm_enabled: bool, engine_mock) -> ScraperPipeline:
     pipeline = ScraperPipeline(
-        scrapers=[object()],
+        scrapers=[MagicMock()],
         discord_notifier=AsyncMock(),
         telegram_notifier=AsyncMock(),
     )
@@ -153,3 +155,44 @@ async def test_pipeline_skips_llm_when_analysis_disabled(async_session):
 
     engine_mock.evaluate_listing.assert_awaited_once()
     assert engine_mock.evaluate_listing.call_args.kwargs["skip_llm"] is True
+
+
+@pytest.mark.asyncio
+async def test_pipeline_integrates_geoportal_spatial_findings(async_session, monkeypatch):
+    """Pipeline audits Geoportal for exact coords and applies MPZP and flood risk."""
+    from src.services.geoportal import geoportal_service
+
+    mock_audit = AsyncMock(
+        return_value={
+            "main_parcel_id": "186301_1.0221.2296/2",
+            "main_parcel_number": "2296/2",
+            "cadastral_area": 500.0,
+            "geoportal_url": "https://mapy.geoportal.gov.pl/?identifyParcel=186301_1.0221.2296/2",
+            "mpzp_zone": "MN: tereny mieszkaniowe",
+            "mpzp_status": "OBOWIĄZUJĄCY",
+            "flood_risk_zone": "ZAGROŻENIE_POWODZIOWE",
+            "surrounding_risks": ["Działka w strefie zagrożenia powodziowego"],
+            "surrounding_parcels_count": 4,
+        }
+    )
+    monkeypatch.setattr(geoportal_service, "audit_location", mock_audit)
+
+    repo = ListingRepository(async_session)
+    listing = make_listing()
+    listing.coordinates = (50.04, 22.0)
+
+    engine_mock = AsyncMock()
+    engine_mock.evaluate_listing.return_value = make_qualified_result(score=60.0)
+    pipeline = make_pipeline(llm_enabled=False, engine_mock=engine_mock)
+
+    await pipeline.process_listing(listing, repo)
+
+    model = await repo.get_by_url(listing.url)
+    assert model is not None
+    assert model.parcel_id == "186301_1.0221.2296/2"
+    assert model.mpzp_zone == "MN: tereny mieszkaniowe"
+    assert model.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE"
+    assert any("Zagrożenie powodziowe" in c for c in model.cons)
+    assert any("Miejscowy Plan" in p for p in model.pros)
+    # Score penalty -20 applied for flood risk
+    assert model.qualification_score == 40.0

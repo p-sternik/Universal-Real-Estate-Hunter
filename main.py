@@ -7,8 +7,8 @@ from loguru import logger
 # Ensure UTF-8 output on Windows consoles
 if sys.platform == "win32":
     try:
-        sys.stdout.reconfigure(encoding="utf-8")
-        sys.stderr.reconfigure(encoding="utf-8")
+        sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
+        sys.stderr.reconfigure(encoding="utf-8")  # type: ignore[union-attr]
     except Exception:
         pass
 
@@ -23,9 +23,9 @@ async def run_once(profile: str | None = None):
     logger.info(f"Executing single pipeline pass{f' for profile: {profile}' if profile else ''}...")
     pipeline = ScraperPipeline()
     summary = await pipeline.run_cycle(target_profile=profile)
-    print("\n--- Podsumowanie cyklu ---")
+    logger.info("--- Cycle summary ---")
     for k, v in summary.items():
-        print(f"  {k}: {v}")
+        logger.info(f"  {k}: {v}")
 
 
 async def test_webhook():
@@ -295,9 +295,10 @@ async def reindex_all_listings():
         pct = (count / total * 100) if total > 0 else 0
         print(f"  • {status.capitalize():<24}: {count:>3} ({pct:>5.1f}%)")
     print("\nRozkład systemów ogrzewania:")
-    for _status, count in heating_counter.most_common():
+    for status, count in heating_counter.most_common():
         pct = (count / total * 100) if total > 0 else 0
-        print("=" * 55 + "\n")
+        print(f"  • {status.capitalize():<24}: {count:>3} ({pct:>5.1f}%)")
+    print("=" * 55)
 
 
 async def audit_geoportal_all(limit: int = 50, only_qualified: bool = True):
@@ -329,6 +330,8 @@ async def audit_geoportal_all(limit: int = 50, only_qualified: bool = True):
         audited = 0
         risks_count = 0
         for item in listings:
+            if item.latitude is None or item.longitude is None:
+                continue
             geo_res = await geoportal_service.audit_location(item.latitude, item.longitude, radius_meters=120)
             if geo_res.get("main_parcel_id"):
                 item.parcel_id = geo_res["main_parcel_id"]

@@ -34,6 +34,9 @@ data/
 .env.local
 !.env.example
 
+# Live search configuration (personalized, template stays in image)
+search_config.json
+
 # Logs & Reports
 listings_report.html
 *_report.html

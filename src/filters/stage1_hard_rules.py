@@ -178,8 +178,8 @@ class Stage1Filter:
         max_p = getattr(p, "max_price", self.max_price) if p else self.max_price
         min_p_m2 = getattr(p, "min_price_per_m2", self.min_price_per_m2) if p else self.min_price_per_m2
         max_p_m2 = getattr(p, "max_price_per_m2", self.max_price_per_m2) if p else self.max_price_per_m2
-        min_area = getattr(p, "min_area_home", self.min_area_home) if p else self.min_area_home
-        max_area = getattr(p, "max_area_home", self.max_area_home) if p else self.max_area_home
+        min_area: float | None = getattr(p, "min_area_home", self.min_area_home) if p else self.min_area_home
+        max_area: float | None = getattr(p, "max_area_home", self.max_area_home) if p else self.max_area_home
         min_plot = getattr(p, "min_area_plot", self.min_area_plot) if p else self.min_area_plot
         max_plot = getattr(p, "max_area_plot", self.max_area_plot) if p else self.max_area_plot
         min_rooms = getattr(p, "min_rooms", self.min_rooms) if p else self.min_rooms
@@ -250,9 +250,9 @@ class Stage1Filter:
         # 5. Category-specific criteria
         if category == "mieszkanie":
             # Apartment area check
-            if (min_area or 0) > 0 and listing.area_home < min_area:
+            if min_area is not None and min_area > 0 and listing.area_home < min_area:
                 reasons.append(f"Metraż mieszkania {listing.area_home:.1f} m² mniejszy niż wymagane {min_area} m²")
-            elif (max_area or 0) > 0 and listing.area_home > max_area:
+            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
                 reasons.append(f"Metraż mieszkania {listing.area_home:.1f} m² większy niż dopuszczalne {max_area} m²")
 
             # Rooms check
@@ -271,9 +271,9 @@ class Stage1Filter:
 
         elif category == "dom":
             # House area check
-            if (min_area or 0) > 0 and listing.area_home < min_area:
+            if min_area is not None and min_area > 0 and listing.area_home < min_area:
                 reasons.append(f"Metraż domu {listing.area_home:.1f} m² mniejszy niż wymagane {min_area} m²")
-            elif (max_area or 0) > 0 and listing.area_home > max_area:
+            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
                 reasons.append(f"Metraż domu {listing.area_home:.1f} m² większy niż dopuszczalne {max_area} m²")
 
             # Plot area check

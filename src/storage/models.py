@@ -68,6 +68,9 @@ class ListingModel(Base):
     parcel_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cadastral_area: Mapped[float | None] = mapped_column(Float, nullable=True)
     geoportal_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    mpzp_zone: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    mpzp_status: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    flood_risk_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
 
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)
@@ -86,6 +89,8 @@ class ListingModel(Base):
 
     # AI Due Diligence & Contact Info
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_verdict: Mapped[str | None] = mapped_column(Text, nullable=True)
+    worth_interest: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
     _ai_questions: Mapped[str] = mapped_column("ai_questions", Text, default="[]")
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contact_person: Mapped[str | None] = mapped_column(String(150), nullable=True)

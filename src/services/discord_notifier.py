@@ -139,13 +139,20 @@ class DiscordNotifier:
             },
         ]
 
-        if getattr(listing, "geoportal_url", None) and getattr(listing, "parcel_id", None):
+        parcel_id = getattr(listing, "parcel_id", None)
+        if getattr(listing, "geoportal_url", None) and parcel_id:
             area_str = f" ({listing.cadastral_area:.0f} m²)" if getattr(listing, "cadastral_area", None) else ""
-            p_nr = listing.parcel_id.split(".")[-1]
+            p_nr = parcel_id.split(".")[-1]
+            geo_lines = [f"[Działka nr {p_nr}{area_str}]({listing.geoportal_url})"]
+            if getattr(listing, "mpzp_zone", None):
+                geo_lines.append(f"🏛️ **MPZP:** {listing.mpzp_zone}")
+            if getattr(listing, "flood_risk_zone", None):
+                flood_icon = "🌊" if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE" else "🛡️"
+                geo_lines.append(f"{flood_icon} **Zagrożenie powodziowe:** {listing.flood_risk_zone}")
             fields.append(
                 {
                     "name": "🗺️ Geoportal / Ewidencja Gruntów",
-                    "value": f"[Działka nr {p_nr}{area_str}]({listing.geoportal_url})",
+                    "value": "\n".join(geo_lines),
                     "inline": False,
                 }
             )
@@ -165,6 +172,24 @@ class DiscordNotifier:
                 {
                     "name": "⚠️ Wykryte minusy / do weryfikacji",
                     "value": "\n".join([f"• {con}" for con in filter_result.cons[:5]]),
+                    "inline": False,
+                }
+            )
+
+        if filter_result.ai_verdict:
+            fields.append(
+                {
+                    "name": f"⚖️ Werdykt AI {filter_result.verdict_icon}",
+                    "value": filter_result.ai_verdict[:1024],
+                    "inline": False,
+                }
+            )
+
+        if filter_result.ai_summary:
+            fields.append(
+                {
+                    "name": "📋 TL;DR",
+                    "value": filter_result.ai_summary[:1024],
                     "inline": False,
                 }
             )

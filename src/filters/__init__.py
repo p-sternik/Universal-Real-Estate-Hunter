@@ -100,7 +100,9 @@ class QualificationEngine:
 
         # Step 3: Optional LLM Enrichment
         ai_summary = None
-        ai_questions = []
+        ai_verdict = None
+        worth_interest = None
+        ai_questions: list[str] = []
         contact_phone = None
         contact_person = None
 
@@ -137,6 +139,22 @@ class QualificationEngine:
                 if finish_raw in finish_map:
                     listing.finish_condition = finish_map[finish_raw]
 
+                finish_note = str(llm_insights.get("finish_note") or "").strip()
+                if finish_note and listing.finish_condition not in (
+                    FinishCondition.DO_ZAMIESZKANIA,
+                    FinishCondition.NIEOKRESLONY,
+                ):
+                    cons.append(f"🔧 [LLM] Stan: {finish_note}")
+
+                if llm_insights.get("has_visualisations") and not has_visualisations:
+                    listing.has_visualisations = True
+                    has_visualisations = True
+                    vis_note = str(llm_insights.get("visualisation_note") or "").strip()
+                    cons.append(
+                        "🖼️ [LLM] Wizualizacje / zdjęcia poglądowe"
+                        + (f": {vis_note}" if vis_note else " (brak realnych zdjęć tej nieruchomości)")
+                    )
+
                 sewer_raw = str(llm_insights.get("sewerage") or "").lower()
                 sewer_map = {
                     "miejska": SewerageType.MIEJSKA,
@@ -163,6 +181,10 @@ class QualificationEngine:
 
                 # AI Due Diligence fields
                 ai_summary = llm_insights.get("summary") or None
+                ai_verdict = llm_insights.get("verdict") or None
+                worth_interest = llm_insights.get("worth_interest")
+                if worth_interest is not None:
+                    worth_interest = bool(worth_interest)
                 ai_questions = llm_insights.get("questions_for_agent") or []
                 contact_phone = llm_insights.get("contact_phone") or None
                 contact_person = llm_insights.get("contact_person") or None
@@ -197,6 +219,8 @@ class QualificationEngine:
                 heating=listing.heating,
                 has_fiber=listing.has_fiber,
                 ai_summary=ai_summary,
+                ai_verdict=ai_verdict,
+                worth_interest=worth_interest,
                 ai_questions=ai_questions,
                 contact_phone=contact_phone,
                 contact_person=contact_person,
@@ -317,6 +341,8 @@ class QualificationEngine:
             heating=listing.heating,
             has_fiber=listing.has_fiber,
             ai_summary=ai_summary,
+            ai_verdict=ai_verdict,
+            worth_interest=worth_interest,
             ai_questions=ai_questions,
             contact_phone=contact_phone,
             contact_person=contact_person,

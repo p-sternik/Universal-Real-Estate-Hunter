@@ -68,6 +68,7 @@ async def test_crm_status_and_notes(test_session: AsyncSession):
 
     # Test update status to TO_VISIT
     updated = await repo.update_user_status(model.id, UserCRMStatus.TO_VISIT.value)
+    assert updated is not None
     assert updated.user_status == "TO_VISIT"
 
 

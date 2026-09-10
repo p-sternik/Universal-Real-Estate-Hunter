@@ -9,6 +9,22 @@ from src.models.listing import FilterResult, ListingSchema
 from .models import ListingModel, PriceHistoryModel
 
 
+def _apply_ai_fields(model: ListingModel, result: FilterResult) -> None:
+    """Copy AI Due Diligence fields, keeping saved values when the new result has none."""
+    if result.ai_summary:
+        model.ai_summary = result.ai_summary
+    if result.ai_verdict:
+        model.ai_verdict = result.ai_verdict
+    if result.worth_interest is not None:
+        model.worth_interest = result.worth_interest
+    if result.ai_questions:
+        model.ai_questions = result.ai_questions
+    if result.contact_phone:
+        model.contact_phone = result.contact_phone
+    if result.contact_person:
+        model.contact_person = result.contact_person
+
+
 class ListingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -133,6 +149,12 @@ class ListingRepository:
                 existing.cadastral_area = listing.cadastral_area
             if listing.geoportal_url:
                 existing.geoportal_url = listing.geoportal_url
+            if listing.mpzp_zone:
+                existing.mpzp_zone = listing.mpzp_zone
+            if listing.mpzp_status:
+                existing.mpzp_status = listing.mpzp_status
+            if listing.flood_risk_zone:
+                existing.flood_risk_zone = listing.flood_risk_zone
 
             # Update qualification
             existing.is_qualified = filter_result.is_qualified
@@ -141,15 +163,7 @@ class ListingRepository:
             existing.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
             existing.pros = filter_result.pros
             existing.cons = filter_result.cons
-            # AI Due Diligence
-            if filter_result.ai_summary:
-                existing.ai_summary = filter_result.ai_summary
-            if filter_result.ai_questions:
-                existing.ai_questions = filter_result.ai_questions
-            if filter_result.contact_phone:
-                existing.contact_phone = filter_result.contact_phone
-            if filter_result.contact_person:
-                existing.contact_person = filter_result.contact_person
+            _apply_ai_fields(existing, filter_result)
             existing.updated_at = datetime.now(UTC)
             existing.last_scraped_at = datetime.now(UTC)
 
@@ -198,6 +212,9 @@ class ListingRepository:
             parcel_id=listing.parcel_id,
             cadastral_area=listing.cadastral_area,
             geoportal_url=listing.geoportal_url,
+            mpzp_zone=listing.mpzp_zone,
+            mpzp_status=listing.mpzp_status,
+            flood_risk_zone=listing.flood_risk_zone,
             access_road_type=listing.access_road_type.value,
             market=listing.market.value,
             finish_condition=(
@@ -222,14 +239,7 @@ class ListingRepository:
         new_model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
         new_model.pros = filter_result.pros
         new_model.cons = filter_result.cons
-        if filter_result.ai_summary:
-            new_model.ai_summary = filter_result.ai_summary
-        if filter_result.ai_questions:
-            new_model.ai_questions = filter_result.ai_questions
-        if filter_result.contact_phone:
-            new_model.contact_phone = filter_result.contact_phone
-        if filter_result.contact_person:
-            new_model.contact_person = filter_result.contact_person
+        _apply_ai_fields(new_model, filter_result)
         if listing.gallery_images:
             new_model.gallery_images = listing.gallery_images
 
