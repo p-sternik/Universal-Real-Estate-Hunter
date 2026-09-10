@@ -44,11 +44,13 @@ class LLMAnalyzer:
         if not self.enabled:
             return None
 
-        prompt = f"""Wyodrębnij fakty z poniższego ogłoszenia nieruchomości i zwróć obiekt JSON.
-Zasady:
-- Bazuj wyłącznie na faktach stwierdzonych wprost w tekście.
-- Przy braku jednoznacznego potwierdzenia w tekście przypisz false lub null.
-- Ignoruj marketingowe deklaracje przyszłości ("droga w planach", "możliwość garażu").
+        prompt = f"""Wyodrębnij stan faktyczny z poniższego ogłoszenia nieruchomości i zwróć obiekt JSON.
+
+Reguły rozstrzygania stanu faktycznego:
+1. Stan wliczony w cenę: Klasyfikuj wyłącznie stan nieruchomości objęty aktualną ceną z ogłoszenia. Opcje dostępne za dopłatą traktuj jako nieobecne.
+2. Ostatni odcinek dojazdu: O jakości dojazdu decyduje bezpośredni wjazd na posesję. Jeśli ostatni odcinek jest polny/nieutwardzony, dojazd jest zły.
+3. Media i instalacje: Klasyfikuj jako obecne tylko przy bezpośrednim przyłączu na działce/w budynku. Media "w drodze", "w planach" lub "w trakcie projektowania" traktuj jako brak przyłącza.
+4. Koszty i status prawny: Wyodrębnij każdą dopłatę niewliczoną w cenę główną oraz wszelkie ograniczenia prawne (służebności, brak odbioru, cena netto).
 
 Dane nieruchomości:
 Tytuł: {listing.title}
@@ -59,15 +61,18 @@ Treść ogłoszenia:
 
 Zwróć poprawny JSON o schemacie:
 {{
-  "is_corner": boolean,              // true wyłącznie dla segmentu skrajnego, narożnego lub ostatniego w szeregu
-  "is_middle": boolean,              // true wyłącznie dla segmentu środkowego lub wewnętrznego
-  "has_parking_or_garage": boolean,  // true jeśli posiada garaż lub min. 2 dedykowane miejsca postojowe
-  "road_is_bad": boolean,            // true jeśli dojazd to droga gruntowa, polna, nieutwardzona lub w planach
-  "terrain_risk": boolean,           // true jeśli występuje skarpa, osuwisko, teren zalewowy lub podmokły
-  "extracted_plot_m2": float | null, // metraż działki lub ogródka w m² wymieniony w opisie (np. 3.5 ara -> 350.0), inaczej null
-  "hidden_costs": [string],          // wykryte dopłaty (np. "udział w drodze 25 000 zł", "cena netto + 23% VAT", "brak pieca")
-  "pros": [string],                  // do 4 kluczowych atutów technicznych (np. "pompa ciepła", "podłogówka", "światłowód")
-  "cons": [string]                   // do 4 kluczowych mankamentów technicznych lub prawnych
+  "finish_condition": "deweloperski" | "pod_klucz" | "surowy_zamkniety" | "surowy_otwarty" | "do_remontu" | "do_wykonczenia" | null,
+  "is_corner": boolean | null,         // true wyłącznie dla segmentu skrajnego/narożnego w szeregówce; null jeśli to dom wolnostojący/bliźniak
+  "is_middle": boolean | null,         // true dla segmentu środkowego w szeregówce; null jeśli to nie szeregówka
+  "has_parking_or_garage": boolean,    // true jeśli w cenie jest garaż lub min. 2 wyznaczone miejsca postojowe na posesji
+  "road_is_bad": boolean,              // true jeśli bezpośredni dojazd to droga gruntowa, polna, nieutwardzona lub w planach
+  "terrain_risk": boolean,             // true jeśli występuje skarpa, osuwisko, podmokłość lub wysoki spadek
+  "sewerage": "miejska" | "szambo" | "oczyszczalnia" | "brak" | null, // stan faktyczny przyłącza na działce/w domu
+  "extracted_plot_m2": float | null,   // powierzchnia działki/ogródka w m² podana w tekście (np. 3.2 ara -> 320.0), inaczej null
+  "hidden_costs": [string],            // dopłaty nieuwzględnione w cenie (np. "udział w drodze 20 000 zł", "cena netto + 23% VAT", "brak pieca")
+  "legal_risks": [string],             // ryzyka prawne/formalne (np. "brak odbioru technicznego", "samowola", "służebność przejazdu")
+  "pros": [string],                    // do 4 kluczowych atutów technicznych wliczonych w cenę (np. "pompa ciepła", "podłogówka", "światłowód")
+  "cons": [string]                     // do 4 kluczowych mankamentów technicznych, lokalizacyjnych lub kosztowych
 }}"""
 
         # 1. Try OpenRouter if key is present

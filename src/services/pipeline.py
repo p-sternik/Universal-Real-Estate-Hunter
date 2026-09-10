@@ -144,7 +144,7 @@ class ScraperPipeline:
                         filter_result.pros.append(p)
             if existing_model.cons:
                 for c in existing_model.cons:
-                    if (c.startswith("[LLM]") or c.startswith("⚠️ [Ukryty koszt]")) and c not in filter_result.cons:
+                    if (c.startswith("[LLM]") or c.startswith("⚠️ [Ukryty koszt]") or c.startswith("⚖️ [Ryzyko prawne]")) and c not in filter_result.cons:
                         filter_result.cons.append(c)
 
         result["qualified"] = filter_result.is_qualified

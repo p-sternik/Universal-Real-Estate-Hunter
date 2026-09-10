@@ -110,13 +110,40 @@ class QualificationEngine:
                     stage2_reasons.append("LLM: Wykryto nieutwardzoną / polną drogę dojazdową")
                 if llm_insights.get("has_parking_or_garage"):
                     has_parking = True
+                if llm_insights.get("terrain_risk"):
+                    cons.append("⚠️ [LLM] Wykryto ryzyko ukształtowania terenu (skarpa / osuwisko / podmokłość)")
                 if llm_insights.get("extracted_plot_m2") and not listing.area_plot:
                     try:
                         listing.area_plot = float(llm_insights["extracted_plot_m2"])
                     except (ValueError, TypeError):
                         pass
+
+                finish_raw = str(llm_insights.get("finish_condition") or "").lower()
+                finish_map = {
+                    "deweloperski": FinishCondition.DEWELOPERSKI,
+                    "pod_klucz": FinishCondition.DO_ZAMIESZKANIA,
+                    "do_zamieszkania": FinishCondition.DO_ZAMIESZKANIA,
+                    "do_wykonczenia": FinishCondition.DO_WYKONCZENIA,
+                    "surowy_zamkniety": FinishCondition.SUROWY_ZAMKNIETY,
+                    "surowy_otwarty": FinishCondition.SUROWY_OTWARTY,
+                    "do_remontu": FinishCondition.DO_REMONTU,
+                }
+                if finish_raw in finish_map:
+                    listing.finish_condition = finish_map[finish_raw]
+
+                sewer_raw = str(llm_insights.get("sewerage") or "").lower()
+                sewer_map = {
+                    "miejska": SewerageType.MIEJSKA,
+                    "szambo": SewerageType.SZAMBO,
+                    "oczyszczalnia": SewerageType.OCZYSZCZALNIA,
+                }
+                if sewer_raw in sewer_map:
+                    listing.sewerage = sewer_map[sewer_raw]
+
                 for hc in llm_insights.get("hidden_costs", []):
                     cons.append(f"⚠️ [Ukryty koszt] {hc}")
+                for lr in llm_insights.get("legal_risks", []):
+                    cons.append(f"⚖️ [Ryzyko prawne] {lr}")
                 for p in llm_insights.get("pros", []):
                     if p not in pros:
                         pros.append(f"[LLM] {p}")
