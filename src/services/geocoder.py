@@ -117,15 +117,18 @@ class NominatimGeocoder:
         lon: float,
         display_name: str,
     ) -> None:
-        cache_entry = GeocacheModel(
-            query=query_key,
-            latitude=lat,
-            longitude=lon,
-            display_name=display_name,
-            cached_at=datetime.now(UTC),
-        )
-        session.add(cache_entry)
-        await session.flush()
+        try:
+            cache_entry = GeocacheModel(
+                query=query_key,
+                latitude=lat,
+                longitude=lon,
+                display_name=display_name,
+                cached_at=datetime.now(UTC),
+            )
+            session.add(cache_entry)
+            await session.commit()
+        except Exception as e:
+            logger.debug(f"[Geocoder] Failed to persist cache for '{query_key}': {e}")
 
     def _find_district_fallback(
         self,

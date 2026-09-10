@@ -189,6 +189,12 @@ class ScraperPipeline:
                 if lat and lon:
                     listing.coordinates = (lat, lon)
                     is_exact_coords = is_exact
+                    acc_tag = "precyzyjny punkt" if is_exact else "centroid / rejon"
+                    global_tracker.add_log(
+                        f"📍 [Geokoder] {listing.title[:30]}: ({lat:.4f}, {lon:.4f}) [{acc_tag}]",
+                        level="info",
+                        category="geo",
+                    )
             elif existing_model and existing_model.is_exact_coords is not None:
                 is_exact_coords = bool(existing_model.is_exact_coords)
 
@@ -236,6 +242,24 @@ class ScraperPipeline:
                     ):
                         if (v := geo_audit.get(k)) is not None:
                             setattr(listing, k, v)
+
+                    # Log summary of spatial audit
+                    parts = []
+                    if listing.parcel_id:
+                        p_short = listing.parcel_id.split(".")[-1] if "." in listing.parcel_id else listing.parcel_id
+                        parts.append(f"działka {p_short}")
+                    if listing.broadband_status:
+                        parts.append(f"FTTH: {listing.broadband_status}")
+                    if listing.terrain_slope_pct is not None:
+                        parts.append(f"stok: {listing.terrain_slope_pct:.1f}%")
+                    if listing.walkability_pka_name:
+                        parts.append(f"PKA: {listing.walkability_pka_name}")
+                    if parts:
+                        global_tracker.add_log(
+                            f"🏛️ [Rejestry] {listing.title[:25]}: " + " | ".join(parts),
+                            level="info",
+                            category="geo",
+                        )
                 except Exception as e:
                     logger.debug(f"[Pipeline] Geoportal audit skipped: {e}")
 
@@ -509,6 +533,25 @@ class ScraperPipeline:
 
         result["qualified"] = filter_result.is_qualified
 
+        if not filter_result.is_qualified:
+            reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
+            reason_str = "; ".join(reasons)[:60] if reasons else "Odrzucono przez reguły"
+            global_tracker.add_log(
+                f"❌ [Odrzucono] {listing.title[:35]}: {reason_str}",
+                level="warning",
+                category="rejected",
+            )
+            logger.info(f"[Pipeline] Odrzucono '{listing.title[:40]}': {reason_str}")
+        else:
+            global_tracker.add_log(
+                f"⭐ [Zakwalifikowano] {listing.title[:35]} ({listing.price:,.0f} zł) — Wynik: {filter_result.score:.0f} pkt",
+                level="success",
+                category="success",
+            )
+            logger.info(
+                f"[Pipeline] Zakwalifikowano '{listing.title[:40]}' ({listing.price:,.0f} zł, {filter_result.score:.0f} pkt)"
+            )
+
         # 4. Save or update in database
         db_model, is_new, price_changed = await repo.save_or_update(
             listing, filter_result, is_exact_coords=is_exact_coords
@@ -679,7 +722,7 @@ class ScraperPipeline:
 
         t_process_start = time.perf_counter()
         step_idx = 0
-        for prof, prof_name, _sc_name, listings, _err in scrape_results:
+        for prof, _prof_name, _sc_name, listings, _err in scrape_results:
             if global_tracker.is_cancelled():
                 logger.info("[Pipeline] Cancellation detected before processing batch, breaking loop.")
                 break
@@ -724,7 +767,7 @@ class ScraperPipeline:
 
             results = await asyncio.gather(*[safe_process(item) for item in listings])
 
-            for item, res in results:
+            for _item, res in results:
                 if res["is_new"]:
                     total_new += 1
                 if res["is_duplicate_fingerprint"]:
@@ -733,11 +776,6 @@ class ScraperPipeline:
                     total_price_changes += 1
                 if res["qualified"]:
                     total_qualified += 1
-                    if res["is_new"]:
-                        global_tracker.add_log(
-                            f"⭐ Nowa oferta [{prof_name}]: {item.title[:45]} ({item.price:,.0f} zł)",
-                            level="success",
-                        )
                 if res["notified"]:
                     total_notified += 1
 
@@ -960,10 +998,23 @@ class ScraperPipeline:
 
                 item.updated_at = datetime.now(UTC)
                 updated_count += 1
+                await session.commit()
+                parts = []
+                if item.parcel_id:
+                    p_short = item.parcel_id.split(".")[-1] if "." in item.parcel_id else item.parcel_id
+                    parts.append(f"działka {p_short}")
+                if item.broadband_status:
+                    parts.append(f"FTTH: {item.broadband_status}")
+                if item.terrain_slope_pct is not None:
+                    parts.append(f"stok: {item.terrain_slope_pct:.1f}%")
+                global_tracker.add_log(
+                    f"🏛️ [Backfill] #{item.id} {item.title[:25]}: " + (", ".join(parts) or "zaktualizowano"),
+                    level="info",
+                    category="geo",
+                )
             except Exception as e:
                 logger.debug(f"[Pipeline] Backfill spatial audit error for #{item.id}: {e}")
 
         if updated_count > 0:
-            await session.commit()
             logger.info(f"[Pipeline] Backfilled spatial due diligence for {updated_count} existing listings.")
         return updated_count

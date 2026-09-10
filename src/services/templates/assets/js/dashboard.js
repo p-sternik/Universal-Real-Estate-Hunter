@@ -1758,10 +1758,27 @@
             }).catch(() => {});
         }
 
+        let currentLogFilter = 'all';
+        let lastScrapeStatus = null;
+
+        function setLogFilter(filterName, btn) {
+            currentLogFilter = filterName;
+            const container = document.getElementById('progLogFilters');
+            if (container) {
+                container.querySelectorAll('.log-filter-btn').forEach(b => b.classList.remove('active'));
+            }
+            if (btn) btn.classList.add('active');
+            if (lastScrapeStatus) {
+                renderScrapeStatus(lastScrapeStatus);
+            }
+        }
+        window.setLogFilter = setLogFilter;
+
         function formatLogEntry(l) {
             const time = escapeHtml(l.time || '');
             const rawMsg = l.message || '';
             const level = l.level || 'info';
+            const cat = l.category || 'info';
 
             let portalBadge = '';
             let msgText = rawMsg;
@@ -1772,12 +1789,18 @@
             }
 
             let levelBadge = '';
-            if (level === 'error') {
+            if (cat === 'geo' || level === 'geo' || rawMsg.includes('[Geokoder]') || rawMsg.includes('[Rejestry]') || rawMsg.includes('[Geoportal]') || rawMsg.includes('[Backfill]')) {
+                levelBadge = `<span class="log-level-badge log-level-geo">REJESTRY</span>`;
+            } else if (cat === 'rejected' || level === 'rejected' || rawMsg.includes('[Odrzucono]')) {
+                levelBadge = `<span class="log-level-badge log-level-rejected">ODRZUCONA</span>`;
+            } else if (cat === 'ai' || level === 'ai' || rawMsg.includes('[AI Audit]')) {
+                levelBadge = `<span class="log-level-badge log-level-ai">AI AUDIT</span>`;
+            } else if (cat === 'success' || level === 'success' || rawMsg.includes('[Zakwalifikowano]') || rawMsg.includes('⭐')) {
+                levelBadge = `<span class="log-level-badge log-level-success">KWALIFIKACJA</span>`;
+            } else if (level === 'error' || cat === 'error') {
                 levelBadge = `<span class="log-level-badge log-level-error">BŁĄD</span>`;
-            } else if (level === 'warning') {
+            } else if (level === 'warning' || cat === 'warning') {
                 levelBadge = `<span class="log-level-badge log-level-warning">UWAGA</span>`;
-            } else if (level === 'success') {
-                levelBadge = `<span class="log-level-badge log-level-success">NOWA</span>`;
             }
 
             let escapedMsg = escapeHtml(msgText);
@@ -1799,6 +1822,7 @@
             const btnCancel = document.getElementById('btnCancelScrape');
 
             if (!panel || !st) return;
+            lastScrapeStatus = st;
 
             const pct = Math.min(100, Math.max(0, st.percentage || 0));
             document.getElementById('progPercent').innerText = pct + '%';
@@ -1814,10 +1838,39 @@
                 elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
 
             if (st.logs && st.logs.length > 0) {
-                const logsHtml = st.logs.map(formatLogEntry).join('');
+                // Update log filter counts
+                const allCnt = st.logs.length;
+                const succCnt = st.logs.filter(l => l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐')))).length;
+                const geoCnt = st.logs.filter(l => l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]')))).length;
+                const rejCnt = st.logs.filter(l => l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]'))).length;
+                const errCnt = st.logs.filter(l => l.category === 'error' || l.level === 'error' || l.level === 'warning' || l.category === 'warning').length;
+
+                const elAll = document.getElementById('cntLogAll');
+                if (elAll) elAll.innerText = allCnt;
+                const elSucc = document.getElementById('cntLogSuccess');
+                if (elSucc) elSucc.innerText = succCnt;
+                const elGeo = document.getElementById('cntLogGeo');
+                if (elGeo) elGeo.innerText = geoCnt;
+                const elRej = document.getElementById('cntLogRejected');
+                if (elRej) elRej.innerText = rejCnt;
+                const elErr = document.getElementById('cntLogError');
+                if (elErr) elErr.innerText = errCnt;
+
+                let filteredLogs = st.logs;
+                if (currentLogFilter === 'success') {
+                    filteredLogs = st.logs.filter(l => l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐'))));
+                } else if (currentLogFilter === 'geo') {
+                    filteredLogs = st.logs.filter(l => l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]'))));
+                } else if (currentLogFilter === 'rejected') {
+                    filteredLogs = st.logs.filter(l => l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]')));
+                } else if (currentLogFilter === 'error') {
+                    filteredLogs = st.logs.filter(l => l.category === 'error' || l.level === 'error' || l.level === 'warning' || l.category === 'warning');
+                }
+
+                const logsHtml = filteredLogs.map(formatLogEntry).join('');
                 const logBox = document.getElementById('progLogs');
                 if (logBox) {
-                    logBox.innerHTML = logsHtml;
+                    logBox.innerHTML = logsHtml || '<div class="log-row" style="color:var(--text-muted);font-style:italic;padding:4px 0;">Brak zdarzeń w tej kategorii.</div>';
                     logBox.scrollTop = logBox.scrollHeight;
                 }
             }

@@ -168,3 +168,48 @@ async def test_live_dashboard_listings_includes_gunb_and_gesut():
         assert "risk_shield" in item["land_audit"]
         assert "gesut_audit" in item["land_audit"]
         assert item["land_audit"]["tco_audit"]["total_acquisition_cost"] >= 350_000
+
+
+@pytest.mark.asyncio
+async def test_global_tracker_logging_categories_and_retention():
+    """Verify log categorization, retention, and payload formatting."""
+    tracker = global_tracker
+    tracker.start_session(total_portals=1)
+
+    tracker.add_log("📍 [Geokoder] Słocina: (50.04, 22.01) [precyzyjny punkt]", level="info", category="geo")
+    tracker.add_log("🏛️ [Rejestry] Dom: działka 123/4 | FTTH: TAK", level="info", category="geo")
+    tracker.add_log("❌ [Odrzucono] Działka: cena za wysoka", level="warning", category="rejected")
+    tracker.add_log("🤖 [AI Audit] Gotowe dla Dom w 2.1s", level="info", category="ai")
+    tracker.add_log("⭐ [Zakwalifikowano] Super dom (750 000 zł) — Wynik: 95 pkt", level="success", category="success")
+
+    payload = tracker.get_status_payload()
+    logs = payload["logs"]
+    assert len(logs) >= 5
+
+    categories = [l.get("category") for l in logs]
+    assert "geo" in categories
+    assert "rejected" in categories
+    assert "ai" in categories
+    assert "success" in categories
+
+
+@pytest.mark.asyncio
+async def test_sqlite_get_session_retry_on_locked(monkeypatch):
+    """Verify get_session retries on SQLite database is locked error before succeeding."""
+    from src.storage.database import get_session
+
+    attempts = 0
+
+    async def mock_commit():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 3:
+            import sqlite3
+
+            raise sqlite3.OperationalError("database is locked")
+
+    async with get_session() as session:
+        monkeypatch.setattr(session, "commit", mock_commit)
+
+    # Commits twice failing with 'database is locked', then succeeds on 3rd attempt
+    assert attempts == 3

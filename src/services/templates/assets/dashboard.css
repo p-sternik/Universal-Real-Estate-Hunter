@@ -554,17 +554,61 @@
         .prog-metrics { display: flex; gap: 18px; font-size: var(--font-size-xs); color: var(--text-muted); flex-wrap: wrap; }
         .prog-metrics strong { color: var(--text-secondary); font-weight: var(--font-weight-semibold); }
 
+        .prog-logs-header {
+            margin-top: 10px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+        .prog-logs-title {
+            font-size: var(--font-size-xs);
+            font-weight: var(--font-weight-semibold);
+            color: var(--text-secondary);
+        }
+        .prog-logs-filters {
+            display: flex;
+            gap: 5px;
+            flex-wrap: wrap;
+        }
+        .log-filter-btn {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--r-xs);
+            font-size: var(--font-size-2xs);
+            padding: 2px 8px;
+            color: var(--text-muted);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .log-filter-btn:hover {
+            color: var(--text-primary);
+            border-color: var(--text-muted);
+        }
+        .log-filter-btn.active {
+            background: rgba(37, 99, 235, 0.12);
+            color: #2563eb;
+            border-color: rgba(37, 99, 235, 0.4);
+            font-weight: 600;
+        }
+        [data-theme="dark"] .log-filter-btn.active {
+            background: rgba(59, 130, 246, 0.2);
+            color: #60a5fa;
+            border-color: rgba(59, 130, 246, 0.4);
+        }
+
         .prog-logs {
-            margin-top: 8px;
-            max-height: 110px;
+            margin-top: 6px;
+            max-height: 160px;
             overflow-y: auto;
             font-family: var(--font-mono);
             font-size: var(--font-size-2xs);
-            border-top: 1px solid var(--border);
-            padding-top: 6px;
             display: flex;
             flex-direction: column;
-            gap: 2px;
+            gap: 3px;
         }
 
         .log-row { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); }
@@ -582,6 +626,13 @@
         .log-level-error { background: var(--red-bg); color: var(--red-text); }
         .log-level-warning { background: var(--amber-bg); color: var(--amber-text); }
         .log-level-success { background: var(--green-bg); color: var(--green-text); }
+        .log-level-geo { background: rgba(14, 165, 233, 0.15); color: #0284c7; }
+        [data-theme="dark"] .log-level-geo { background: rgba(14, 165, 233, 0.25); color: #38bdf8; }
+        .log-level-rejected { background: rgba(245, 158, 11, 0.15); color: #d97706; }
+        [data-theme="dark"] .log-level-rejected { background: rgba(245, 158, 11, 0.25); color: #fbbf24; }
+        .log-level-ai { background: rgba(168, 85, 247, 0.15); color: #9333ea; }
+        [data-theme="dark"] .log-level-ai { background: rgba(168, 85, 247, 0.25); color: #c084fc; }
+
         .log-portal { flex: none; color: var(--blue-text); font-family: var(--font-sans); font-size: var(--font-size-2xs); }
         .log-msg { min-width: 0; }
         .log-msg strong { color: var(--text-primary); font-weight: 600; }

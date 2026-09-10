@@ -1,3 +1,4 @@
+import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -17,6 +18,14 @@ from .models import Base
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
+_sqlite_write_lock: asyncio.Lock | None = None
+
+
+def get_sqlite_write_lock() -> asyncio.Lock:
+    global _sqlite_write_lock
+    if _sqlite_write_lock is None:
+        _sqlite_write_lock = asyncio.Lock()
+    return _sqlite_write_lock
 
 
 def get_engine() -> AsyncEngine:
@@ -70,12 +79,32 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Async context manager providing an isolated session."""
+    """Async context manager providing an isolated session with write-lock & retry protection for SQLite."""
     session_factory = get_session_factory()
     async with session_factory() as session:
         try:
             yield session
-            await session.commit()
+            is_sqlite = "sqlite" in settings.DATABASE_URL
+            if is_sqlite:
+                write_lock = get_sqlite_write_lock()
+                async with write_lock:
+                    max_retries = 5
+                    for attempt in range(max_retries):
+                        try:
+                            await session.commit()
+                            break
+                        except Exception as exc:
+                            if "database is locked" in str(exc) and attempt < max_retries - 1:
+                                backoff = 0.25 * (2**attempt)
+                                logger.warning(
+                                    f"[Database] SQLite locked during commit, retrying in {backoff:.2f}s "
+                                    f"(attempt {attempt + 1}/{max_retries})..."
+                                )
+                                await asyncio.sleep(backoff)
+                            else:
+                                raise
+            else:
+                await session.commit()
         except Exception:
             await session.rollback()
             raise

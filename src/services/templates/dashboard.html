@@ -275,6 +275,16 @@
                 <div>Duplikaty: <strong id="progDups">0</strong></div>
                 <div>Czas: <strong id="progElapsed">0s</strong></div>
             </div>
+            <div class="prog-logs-header">
+                <span class="prog-logs-title">Dziennik zdarzeń na żywo</span>
+                <div class="prog-logs-filters" id="progLogFilters">
+                    <button type="button" class="log-filter-btn active" data-filter="all" onclick="setLogFilter('all', this)">Wszystkie (<span id="cntLogAll">0</span>)</button>
+                    <button type="button" class="log-filter-btn" data-filter="success" onclick="setLogFilter('success', this)">Zakwalifikowane (<span id="cntLogSuccess">0</span>)</button>
+                    <button type="button" class="log-filter-btn" data-filter="geo" onclick="setLogFilter('geo', this)">Geoportal / Rejestry (<span id="cntLogGeo">0</span>)</button>
+                    <button type="button" class="log-filter-btn" data-filter="rejected" onclick="setLogFilter('rejected', this)">Odrzucone (<span id="cntLogRejected">0</span>)</button>
+                    <button type="button" class="log-filter-btn" data-filter="error" onclick="setLogFilter('error', this)">Błędy / Uwagi (<span id="cntLogError">0</span>)</button>
+                </div>
+            </div>
             <div id="progLogs" class="prog-logs"></div>
         </section>
 

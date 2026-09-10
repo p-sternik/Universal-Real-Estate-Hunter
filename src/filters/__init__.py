@@ -1,4 +1,5 @@
 import re
+import time
 from typing import Any
 
 from src.models.enums import (
@@ -147,8 +148,23 @@ class QualificationEngine:
         contact_person = None
 
         if not skip_llm:
+            from src.services.progress import global_tracker
+
+            global_tracker.add_log(
+                f"🤖 [AI Audit] Weryfikacja LLM dla: {listing.title[:32]}...",
+                level="info",
+                category="ai",
+            )
+            t_llm_start = time.perf_counter()
             llm_insights = await self.llm.analyze_description(listing)
+            t_llm_sec = time.perf_counter() - t_llm_start
             if llm_insights:
+                v_tag = llm_insights.get("worth_interest") or "zakończono"
+                global_tracker.add_log(
+                    f"🤖 [AI Audit] Gotowe dla {listing.title[:28]} ({t_llm_sec:.1f}s, werdykt: {v_tag})",
+                    level="info",
+                    category="ai",
+                )
                 if llm_insights.get("is_corner"):
                     is_corner = True
                     listing.segment_subtype = SegmentSubtype.SKRAJNY

@@ -121,11 +121,29 @@ class ProgressTracker:
         self.items_qualified += qualified
         self.duplicates_found += duplicates
 
-    def add_log(self, message: str, level: str = "info"):
+    def add_log(self, message: str, level: str = "info", category: str | None = None):
         now_str = datetime.now(UTC).strftime("%H:%M:%S")
-        entry = {"time": now_str, "message": message, "level": level}
+        if not category:
+            if any(k in message for k in ("[Geokoder]", "[Geoportal]", "[Rejestry]", "[SIDUSIS]")) or level == "geo":
+                cat = "geo"
+            elif "[Odrzucono]" in message or level == "rejected":
+                cat = "rejected"
+            elif any(k in message for k in ("[AI Audit]", "[AI]", "LLM")) or level == "ai":
+                cat = "ai"
+            elif level == "success" or "[Zakwalifikowano]" in message or "⭐" in message:
+                cat = "success"
+            elif level == "error":
+                cat = "error"
+            elif level == "warning":
+                cat = "warning"
+            else:
+                cat = "info"
+        else:
+            cat = category
+
+        entry = {"time": now_str, "message": message, "level": level, "category": cat}
         self.logs.append(entry)
-        if len(self.logs) > 60:
+        if len(self.logs) > 300:
             self.logs.pop(0)
 
     def request_cancel(self):
@@ -188,7 +206,7 @@ class ProgressTracker:
             "items_scraped": self.items_scraped,
             "items_qualified": self.items_qualified,
             "duplicates_found": self.duplicates_found,
-            "logs": self.logs[-25:],
+            "logs": self.logs[-150:],
         }
 
 
