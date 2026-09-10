@@ -120,13 +120,13 @@ class SearchProfile(BaseModel):
     enabled: bool = True
     category: str = "dom"  # "dom", "mieszkanie", "dzialka"
     city: str = "Rzeszów"
-    distance_radius: int = 15
-    min_price: float = 0.0
-    max_price: float = 1_300_000.0
+    distance_radius: Optional[int] = 15
+    min_price: Optional[float] = 0.0
+    max_price: Optional[float] = 1_300_000.0
     min_price_per_m2: Optional[float] = None
     max_price_per_m2: Optional[float] = None
-    min_area_home: float = 90.0
-    max_area_home: float = 145.0
+    min_area_home: Optional[float] = 90.0
+    max_area_home: Optional[float] = 145.0
     min_area_plot: Optional[float] = 250.0
     max_area_plot: Optional[float] = None
     min_rooms: Optional[int] = None
@@ -159,26 +159,27 @@ class SearchProfile(BaseModel):
         cat = {"dom": "dom", "mieszkanie": "mieszkanie", "dzialka": "dzialka"}.get(self.category, "dom")
         base = f"https://www.otodom.pl/pl/wyniki/sprzedaz/{cat}/{path}"
 
-        params = [f"distanceRadius={self.distance_radius}", "limit=36"]
-        if self.min_price > 0:
+        radius = self.distance_radius if self.distance_radius is not None else 15
+        params = [f"distanceRadius={radius}", "limit=36"]
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"priceMin={int(self.min_price)}")
-        if self.max_price > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"priceMax={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if self.min_area_plot and self.min_area_plot > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"areaMin={int(self.min_area_plot)}")
-            if self.max_area_plot and self.max_area_plot > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"areaMax={int(self.max_area_plot)}")
         else:
-            if self.min_area_home > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"areaMin={int(self.min_area_home)}")
-            if self.max_area_home > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"areaMax={int(self.max_area_home)}")
             if self.category == "dom":
-                if self.min_area_plot and self.min_area_plot > 0:
+                if self.min_area_plot is not None and self.min_area_plot > 0:
                     params.append(f"terrainAreaMin={int(self.min_area_plot)}")
-                if self.max_area_plot and self.max_area_plot > 0:
+                if self.max_area_plot is not None and self.max_area_plot > 0:
                     params.append(f"terrainAreaMax={int(self.max_area_plot)}")
 
         if self.market_type == "pierwotny":
@@ -205,21 +206,22 @@ class SearchProfile(BaseModel):
         cat = {"dom": "domy", "mieszkanie": "mieszkania", "dzialka": "dzialki"}.get(self.category, "domy")
         base = f"https://www.olx.pl/nieruchomosci/{cat}/sprzedaz/{slug}/"
 
-        params = [f"search%5Bdist%5D={self.distance_radius}"]
-        if self.min_price > 0:
+        radius = self.distance_radius if self.distance_radius is not None else 15
+        params = [f"search%5Bdist%5D={radius}"]
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"search%5Bfilter_float_price%3Afrom%5D={int(self.min_price)}")
-        if self.max_price > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"search%5Bfilter_float_price%3Ato%5D={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if self.min_area_plot and self.min_area_plot > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"search%5Bfilter_float_m%3Afrom%5D={int(self.min_area_plot)}")
-            if self.max_area_plot and self.max_area_plot > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"search%5Bfilter_float_m%3Ato%5D={int(self.max_area_plot)}")
         else:
-            if self.min_area_home > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"search%5Bfilter_float_m%3Afrom%5D={int(self.min_area_home)}")
-            if self.max_area_home > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"search%5Bfilter_float_m%3Ato%5D={int(self.max_area_home)}")
 
         if self.market_type == "pierwotny":
@@ -249,20 +251,20 @@ class SearchProfile(BaseModel):
         base = f"https://{slug}.nieruchomosci-online.pl/{cat},sprzedaz/"
 
         params = []
-        if self.min_price > 0:
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"cena_od={int(self.min_price)}")
-        if self.max_price > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"cena_do={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if self.min_area_plot and self.min_area_plot > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"powierzchnia_od={int(self.min_area_plot)}")
-            if self.max_area_plot and self.max_area_plot > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"powierzchnia_do={int(self.max_area_plot)}")
         else:
-            if self.min_area_home > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"powierzchnia_od={int(self.min_area_home)}")
-            if self.max_area_home > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"powierzchnia_do={int(self.max_area_home)}")
 
         if self.min_rooms and self.min_rooms > 0:
@@ -280,20 +282,20 @@ class SearchProfile(BaseModel):
         base = f"https://www.morizon.pl/{cat}/{slug}/"
 
         params = []
-        if self.min_price > 0:
+        if self.min_price is not None and self.min_price > 0:
             params.append(f"ps%5Bprice_from%5D={int(self.min_price)}")
-        if self.max_price > 0:
+        if self.max_price is not None and self.max_price > 0:
             params.append(f"ps%5Bprice_to%5D={int(self.max_price)}")
 
         if self.category == "dzialka":
-            if self.min_area_plot and self.min_area_plot > 0:
+            if self.min_area_plot is not None and self.min_area_plot > 0:
                 params.append(f"ps%5Bliving_area_from%5D={int(self.min_area_plot)}")
-            if self.max_area_plot and self.max_area_plot > 0:
+            if self.max_area_plot is not None and self.max_area_plot > 0:
                 params.append(f"ps%5Bliving_area_to%5D={int(self.max_area_plot)}")
         else:
-            if self.min_area_home > 0:
+            if self.min_area_home is not None and self.min_area_home > 0:
                 params.append(f"ps%5Bliving_area_from%5D={int(self.min_area_home)}")
-            if self.max_area_home > 0:
+            if self.max_area_home is not None and self.max_area_home > 0:
                 params.append(f"ps%5Bliving_area_to%5D={int(self.max_area_home)}")
 
         if params:

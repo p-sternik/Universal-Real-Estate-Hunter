@@ -251,3 +251,70 @@ def test_config_manager_profile_crud(tmp_path):
     deleted = mgr_reloaded.delete_profile("dzialki_podkarpacie")
     assert deleted is True
     assert len(mgr_reloaded.get_config().profiles) == 1
+
+
+def test_profile_with_null_and_none_fields(tmp_path):
+    """Verify that null/None values for max_area_home, min_price, etc. are valid and don't crash."""
+    config_file = tmp_path / "search_config.json"
+    mgr = ConfigManager(config_path=str(config_file))
+
+    # Update config with explicit None values (as sent by frontend JSON)
+    payload = {
+        "profiles": [
+            {
+                "id": "plot_or_unlimited",
+                "name": "Działki bez limitu metrażu domu",
+                "category": "dzialka",
+                "city": "Rzeszów",
+                "distance_radius": None,
+                "min_price": None,
+                "max_price": None,
+                "min_area_home": None,
+                "max_area_home": None,
+                "min_area_plot": 500,
+                "max_area_plot": None,
+                "enabled": True,
+            }
+        ]
+    }
+    cfg = mgr.update_config(payload)
+    prof = cfg.profiles[0]
+    assert prof.max_area_home is None
+    assert prof.min_area_home is None
+    assert prof.max_price is None
+
+    # Test all URL generators work with None values
+    otodom_url = prof.get_otodom_url()
+    assert "https://www.otodom.pl" in otodom_url
+    assert "areaMin=" in otodom_url
+    assert "areaMax=" not in otodom_url
+
+    olx_url = prof.get_olx_url()
+    assert "https://www.olx.pl" in olx_url
+
+    no_url = prof.get_nieruchomosci_online_url()
+    assert "https://" in no_url
+
+    morizon_url = prof.get_morizon_url()
+    assert "https://" in morizon_url
+
+    # Test Stage 1 filter evaluates cleanly
+    stage1 = Stage1Filter(profile=prof)
+    sample_listing = ListingSchema(
+        id="listing-null-test",
+        portal="Otodom",
+        title="Działka budowlana w Rzeszowie",
+        url="https://otodom.pl/oferta/d1",
+        price=200_000,
+        price_per_m2=200.0,
+        area_home=0.0,
+        area_plot=1000.0,
+        category=PropertyCategory.DZIALKA,
+        location_raw="Rzeszów",
+        city="Rzeszów",
+        property_fingerprint="fp_null_1",
+        raw_description="Piękna działka pod budowę",
+    )
+    passed, reasons, wl = stage1.evaluate(sample_listing)
+    assert passed is True
+    assert len(reasons) == 0

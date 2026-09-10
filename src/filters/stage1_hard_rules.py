@@ -47,9 +47,9 @@ class Stage1Filter:
         self.max_price = max_price if max_price is not None else getattr(cfg, "max_price", 1_300_000.0)
         self.min_price_per_m2 = min_price_per_m2 if min_price_per_m2 is not None else getattr(cfg, "min_price_per_m2", None)
         self.max_price_per_m2 = max_price_per_m2 if max_price_per_m2 is not None else getattr(cfg, "max_price_per_m2", None)
-        self.min_area_home = min_area_home if min_area_home is not None else getattr(cfg, "min_area_home", 90.0)
-        self.max_area_home = max_area_home if max_area_home is not None else getattr(cfg, "max_area_home", 145.0)
-        self.min_area_plot = min_area_plot if min_area_plot is not None else getattr(cfg, "min_area_plot", 250.0)
+        self.min_area_home = min_area_home if min_area_home is not None else getattr(cfg, "min_area_home", None)
+        self.max_area_home = max_area_home if max_area_home is not None else getattr(cfg, "max_area_home", None)
+        self.min_area_plot = min_area_plot if min_area_plot is not None else getattr(cfg, "min_area_plot", None)
         self.max_area_plot = max_area_plot if max_area_plot is not None else getattr(cfg, "max_area_plot", None)
         self.min_rooms = min_rooms if min_rooms is not None else getattr(cfg, "min_rooms", None)
         self.max_rooms = max_rooms if max_rooms is not None else getattr(cfg, "max_rooms", None)
@@ -200,9 +200,9 @@ class Stage1Filter:
             return False, reasons, None
 
         # 2. Budget checks
-        if min_p > 0 and listing.price < min_p:
+        if min_p is not None and min_p > 0 and listing.price < min_p:
             reasons.append(f"Cena {listing.price:,.0f} zł mniejsza niż wymagane minimum {min_p:,.0f} zł")
-        if max_p > 0 and listing.price > max_p:
+        if max_p is not None and max_p > 0 and listing.price > max_p:
             reasons.append(f"Cena {listing.price:,.0f} zł przekracza budżet {max_p:,.0f} zł")
 
         if listing.price_per_m2 and listing.price_per_m2 > 0:
@@ -239,9 +239,9 @@ class Stage1Filter:
         # 5. Category-specific criteria
         if category == "mieszkanie":
             # Apartment area check
-            if listing.area_home < min_area:
+            if min_area is not None and min_area > 0 and listing.area_home < min_area:
                 reasons.append(f"Metraż mieszkania {listing.area_home:.1f} m² mniejszy niż wymagane {min_area} m²")
-            elif max_area and listing.area_home > max_area:
+            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
                 reasons.append(f"Metraż mieszkania {listing.area_home:.1f} m² większy niż dopuszczalne {max_area} m²")
 
             # Rooms check
@@ -260,9 +260,9 @@ class Stage1Filter:
 
         elif category == "dom":
             # House area check
-            if listing.area_home < min_area:
+            if min_area is not None and min_area > 0 and listing.area_home < min_area:
                 reasons.append(f"Metraż domu {listing.area_home:.1f} m² mniejszy niż wymagane {min_area} m²")
-            elif max_area and listing.area_home > max_area:
+            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
                 reasons.append(f"Metraż domu {listing.area_home:.1f} m² większy niż dopuszczalne {max_area} m²")
 
             # Plot area check

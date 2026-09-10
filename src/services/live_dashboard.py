@@ -71,9 +71,10 @@ class LiveDashboardServer:
                         del_cnt = await repo.delete_by_profile(profile_id=rid, profile_name=r_name)
                         logger.info(f"[LiveDashboard] Usunięto profil '{rid}' oraz {del_cnt} powiązanych ofert.")
 
+        price_display = f"{updated.max_price:,.0f} PLN" if updated.max_price is not None else "brak limitu"
         logger.info(
             f"[LiveDashboard] Updated search config: city={updated.city}, "
-            f"radius={updated.distance_radius}km, max_price={updated.max_price:,.0f} PLN"
+            f"radius={updated.distance_radius}km, max_price={price_display}"
         )
         resp_data = updated.model_dump()
         active = updated.get_active_profile()
