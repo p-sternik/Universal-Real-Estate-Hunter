@@ -6,6 +6,19 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.3.0 (2026-09-10)
+
+### Code Style
+
+- Apply pre-commit lint and format fixes
+  ([`18bd44a`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/18bd44a15a8b27749897ca76e18d760377f822ff))
+
+### Features
+
+- Negotiation intelligence, scrape cancellation, and dashboard static split
+  ([`295fc61`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/295fc6189a19f0f614925c5e7b73306cac8d5c84))
+
+
 ## v1.2.0 (2026-09-10)
 
 ### Documentation
