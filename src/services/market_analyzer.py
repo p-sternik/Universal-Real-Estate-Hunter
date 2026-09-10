@@ -1,0 +1,782 @@
+import math
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from typing import Any
+
+from src.models.listing import FilterResult, ListingSchema
+
+
+@dataclass
+class NegotiationAdvice:
+    """Actionable negotiation intelligence for a property listing."""
+
+    market_median_m2: float | None
+    price_deviation_pct: float | None
+    days_on_market: int
+    negotiation_leverage: str  # "WYSOKA" | "ŚREDNIA" | "NISKA"
+    fair_market_value: float | None
+    suggested_opening_offer: float | None
+    arguments: list[str] = field(default_factory=list)
+
+
+def resolve_local_median(
+    medians: dict[str, float],
+    city: str | None,
+    district: str | None,
+    category: str | None,
+) -> float | None:
+    """
+    Finds the best matching market median:
+    1. Exact match: (city, district, category)
+    2. City fallback: (city, category)
+    """
+    city_clean = (city or "").strip().lower()
+    dist_clean = (district or "").strip().lower()
+    cat_clean = (category or "dom").strip().lower()
+
+    if not city_clean:
+        return None
+
+    if dist_clean:
+        key_dist = f"{city_clean}:{dist_clean}:{cat_clean}"
+        if key_dist in medians:
+            return medians[key_dist]
+
+    key_city = f"{city_clean}::{cat_clean}"
+    return medians.get(key_city)
+
+
+def analyze_negotiation(
+    listing: ListingSchema | Any,
+    filter_result: FilterResult | None = None,
+    market_median_m2: float | None = None,
+    price_drop_amount: float = 0.0,
+    price_drop_pct: float = 0.0,
+    price_history_count: int = 1,
+) -> NegotiationAdvice:
+    """
+    Synthesizes property characteristics, market median, price history,
+    and spatial defects into concrete negotiation advice.
+    """
+    # 1. Days on market
+    created_at = getattr(listing, "created_at", None)
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=UTC)
+        now = datetime.now(UTC)
+        days_on_market = max(1, (now - created_at).days)
+    else:
+        days_on_market = 1
+
+    # 2. Price deviation from market median
+    price_per_m2 = float(getattr(listing, "price_per_m2", 0.0) or 0.0)
+    price = float(getattr(listing, "price", 0.0) or 0.0)
+    area_home = float(getattr(listing, "area_home", 0.0) or 0.0)
+
+    price_deviation_pct: float | None = None
+    if market_median_m2 and market_median_m2 > 0 and price_per_m2 > 0:
+        price_deviation_pct = round(((price_per_m2 - market_median_m2) / market_median_m2) * 100.0, 1)
+
+    # 3. Fair Market Value (FMV) calculation
+    fair_market_value: float | None = None
+    finish_cond = str(getattr(listing, "finish_condition", "") or "").lower()
+    road_type = str(getattr(listing, "access_road_type", "") or "").lower()
+    sewer_type = str(getattr(listing, "sewerage", "") or "").lower()
+    flood_zone = str(getattr(listing, "flood_risk_zone", "") or "").upper()
+    subtype = str(getattr(listing, "segment_subtype", "") or "").lower()
+
+    if market_median_m2 and area_home > 0:
+        # Base benchmark value
+        base_fmv = market_median_m2 * area_home
+        # Adjustments based on verified technical attributes
+        adjustment_factor = 1.0
+
+        if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia")):
+            adjustment_factor -= 0.05
+        elif any(f in finish_cond for f in ("remont", "surowy")):
+            adjustment_factor -= 0.15
+        elif "pod_klucz" in finish_cond or "zamieszkania" in finish_cond:
+            adjustment_factor += 0.05
+
+        if any(r in road_type for r in ("nieutwardzona", "polna", "gruntowa")):
+            adjustment_factor -= 0.03
+        if any(s in sewer_type for s in ("szambo", "brak")):
+            adjustment_factor -= 0.02
+        if "POWODZ" in flood_zone:
+            adjustment_factor -= 0.07
+
+        fair_market_value = round(base_fmv * adjustment_factor / 1000.0) * 1000.0
+
+    # 4. Suggested Opening Offer
+    if fair_market_value and fair_market_value > 0 and price > 0:
+        # Target: 6% below Fair Market Value, capped to never exceed 95% of listing price
+        opening_candidate = round((fair_market_value * 0.94) / 1000.0) * 1000.0
+        suggested_opening = min(opening_candidate, round((price * 0.95) / 1000.0) * 1000.0)
+        # Avoid absurd lowball below 70% of listing price
+        suggested_opening = max(suggested_opening, round((price * 0.70) / 1000.0) * 1000.0)
+    elif price > 0:
+        # Fallback based on days on market and price drops
+        discount_rate = 0.05
+        if days_on_market >= 60:
+            discount_rate += 0.05
+        if price_drop_amount > 0:
+            discount_rate += 0.03
+        suggested_opening = round((price * (1.0 - discount_rate)) / 1000.0) * 1000.0
+    else:
+        suggested_opening = None
+
+    # 5. Negotiation Leverage Scoring
+    leverage_points = 0
+    if days_on_market >= 60:
+        leverage_points += 2
+    elif days_on_market >= 30:
+        leverage_points += 1
+
+    if price_history_count >= 2 or price_drop_amount > 0:
+        leverage_points += 2
+
+    if price_deviation_pct is not None and price_deviation_pct >= 10.0:
+        leverage_points += 2
+    elif price_deviation_pct is not None and price_deviation_pct >= 4.0:
+        leverage_points += 1
+
+    if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia", "remont", "surowy")):
+        leverage_points += 1
+    if any(r in road_type for r in ("nieutwardzona", "polna", "gruntowa")):
+        leverage_points += 1
+    if any(s in sewer_type for s in ("szambo", "brak")):
+        leverage_points += 1
+    if "POWODZ" in flood_zone:
+        leverage_points += 2
+
+    if leverage_points >= 4:
+        negotiation_leverage = "WYSOKA"
+    elif leverage_points >= 2:
+        negotiation_leverage = "ŚREDNIA"
+    else:
+        negotiation_leverage = "NISKA"
+
+    # 6. Hard Negotiation Arguments
+    arguments: list[str] = []
+
+    if days_on_market >= 45:
+        arguments.append(f"Oferta znajduje się na rynku od {days_on_market} dni bez sprzedaży (presja czasowa).")
+
+    if price_drop_amount > 0:
+        arguments.append(
+            f"Cena została już obniżona o {price_drop_amount:,.0f} zł (-{price_drop_pct:.1f}%), co świadczy o gotowości sprzedającego do ustępstw."
+        )
+
+    if price_deviation_pct is not None and price_deviation_pct >= 5.0 and market_median_m2:
+        arguments.append(
+            f"Cena ofertowa ({price_per_m2:,.0f} zł/m²) przewyższa lokalną medianę ({market_median_m2:,.0f} zł/m²) o {price_deviation_pct:+.1f}%."
+        )
+
+    if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia")):
+        arguments.append(
+            "Stan do wykończenia / deweloperski wymaga wniesienia natychmiastowego wkładu min. 1000–2500 zł/m² na wykończenie wnętrz."
+        )
+    elif any(f in finish_cond for f in ("remont", "surowy")):
+        arguments.append("Stan surowy lub do remontu wymaga znacznego budżetu i rezerw na prace budowlane.")
+
+    if any(r in road_type for r in ("nieutwardzona", "polna", "gruntowa")):
+        arguments.append("Dojazd drogą nieutwardzoną generuje konieczność własnych nakładów na nawierzchnię.")
+
+    if any(s in sewer_type for s in ("szambo", "brak")):
+        arguments.append(
+            "Brak kanalizacji miejskiej (zbiornik bezodpływowy / szambo oznacza wyższy koszt eksploatacji)."
+        )
+
+    if "POWODZ" in flood_zone:
+        arguments.append("Lokalizacja w strefie zagrożenia powodziowego ISOK (wyższa składka ubezpieczenia i ryzyko).")
+
+    if "srodkowy" in subtype or "środkowy" in subtype:
+        arguments.append("Segment środkowy szeregowca (brak bezpośredniego dostępu do ogrodu od frontu).")
+
+    if filter_result and filter_result.cons:
+        for c in filter_result.cons:
+            if "Ukryty koszt" in c or "Ryzyko prawne" in c:
+                clean_c = c.replace("⚠️", "").replace("⚖️", "").strip()
+                if clean_c not in arguments:
+                    arguments.append(clean_c)
+
+    return NegotiationAdvice(
+        market_median_m2=market_median_m2,
+        price_deviation_pct=price_deviation_pct,
+        days_on_market=days_on_market,
+        negotiation_leverage=negotiation_leverage,
+        fair_market_value=fair_market_value,
+        suggested_opening_offer=suggested_opening,
+        arguments=arguments[:6],
+    )
+
+
+TERYT_VOIVODESHIPS = {
+    "02": "dolnośląskie",
+    "04": "kujawsko-pomorskie",
+    "06": "lubelskie",
+    "08": "lubuskie",
+    "10": "łódzkie",
+    "12": "małopolskie",
+    "14": "mazowieckie",
+    "16": "opolskie",
+    "18": "podkarpackie",
+    "20": "podlaskie",
+    "22": "pomorskie",
+    "24": "śląskie",
+    "26": "świętokrzyskie",
+    "28": "warmińsko-mazurskie",
+    "30": "wielkopolskie",
+    "32": "zachodniopomorskie",
+}
+
+
+def _prop(obj: Any, field: str, default: Any = None) -> Any:
+    if isinstance(obj, dict):
+        return obj.get(field, default)
+    return getattr(obj, field, default)
+
+
+def calculate_notary_and_court_fee(price: float) -> float:
+    """
+    Computes statutory notary maximum fee under Polish law (Rozporządzenie MS)
+    plus 23% VAT plus standard court register entry fees (400 PLN).
+    """
+    if price <= 0:
+        return 0.0
+    if price <= 3000:
+        base = 100.0
+    elif price <= 10000:
+        base = 100.0 + (price - 3000.0) * 0.03
+    elif price <= 30000:
+        base = 310.0 + (price - 10000.0) * 0.02
+    elif price <= 60000:
+        base = 710.0 + (price - 30000.0) * 0.01
+    elif price <= 1000000:
+        base = 1010.0 + (price - 60000.0) * 0.004
+    elif price <= 2000000:
+        base = 4770.0 + (price - 1000000.0) * 0.002
+    else:
+        base = 6770.0 + (price - 2000000.0) * 0.00125
+    return float(round(base * 1.23 + 400.0))
+
+
+RZESZOW_CENTER = (50.0375, 22.0047)  # Rynek / Dworzec Główny
+
+PKA_STATIONS = [
+    ("Rzeszów Główny", 50.0435, 22.0083),
+    ("Rzeszów Zachodni", 50.0440, 21.9860),
+    ("Rzeszów Staromieście", 50.0635, 22.0125),
+    ("Rzeszów Pobitno", 50.0380, 22.0310),
+    ("Rzeszów Załęże", 50.0520, 22.0450),
+    ("Rzeszów Zwięczyca", 49.9920, 21.9560),
+    ("Trzebownisko / Jasionka", 50.0980, 22.0350),
+    ("Głogów Małopolski", 50.1510, 21.9610),
+    ("Boguchwała", 49.9810, 21.9400),
+    ("Strażów", 50.0580, 22.1150),
+]
+
+EXPRESSWAY_HUBS = [
+    ("Węzeł Rzeszów Północ (A4/S19)", 50.095, 22.005),
+    ("Węzeł Rzeszów Wschód (A4)", 50.065, 22.080),
+    ("Węzeł Rzeszów Zachód (A4/S19)", 50.075, 21.915),
+    ("Węzeł Rzeszów Południe (S19)", 49.998, 21.925),
+    ("Węzeł Świlcza (S19/DK94)", 50.062, 21.910),
+    ("Węzeł Jasionka (S19)", 50.108, 22.055),
+]
+
+
+def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    radius_km = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlon / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return round(radius_km * c, 2)
+
+
+def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> dict[str, Any]:
+    price = float(_prop(listing, "price", 0.0) or 0.0)
+    area = float(_prop(listing, "area_home", 0.0) or _prop(listing, "area_plot", 0.0) or 100.0)
+    market = str(_prop(listing, "market", "") or "").lower()
+    finish = str(_prop(listing, "finish_condition", "") or "").lower()
+    clean_finish = finish.replace("_", " ")
+    is_private = _prop(listing, "is_private_owner", None)
+    sewerage = str(_prop(listing, "sewerage", "") or "").lower().replace("_", " ")
+    road = str(_prop(listing, "access_road_type", "") or "").lower().replace("_", " ")
+
+    # 1. Finishing cost estimation
+    if "deweloperski" in clean_finish or "do wykończenia" in clean_finish:
+        rate = 1800
+        finishing_cost = round(area * rate)
+        finish_label = f"Stan deweloperski — adaptacja i wykończenie ({area:.0f} m² × 1 800 zł/m²)"
+    elif "do remontu" in clean_finish:
+        rate = 2200
+        finishing_cost = round(area * rate)
+        finish_label = f"Do remontu generalnego — instalacje i wykończenie ({area:.0f} m² × 2 200 zł/m²)"
+    elif "do zamieszkania" in clean_finish:
+        rate = 0
+        finishing_cost = 0
+        finish_label = "Stan do zamieszkania — gotowy, brak nakładów na start"
+    else:
+        rate = 800
+        finishing_cost = round(area * rate)
+        finish_label = f"Stan nieokreślony — bufor ostrożnościowy na odświeżenie ({area:.0f} m² × 800 zł/m²)"
+
+    # 2. PCC Tax (2% on secondary market, 0% on primary developer market)
+    if "pierwotny" in market or ("deweloper" in market):
+        pcc_tax = 0.0
+        pcc_label = "Rynek pierwotny — faktura VAT (0% PCC)"
+    else:
+        pcc_tax = round(price * 0.02)
+        pcc_label = "Rynek wtórny — podatek od czynności cywilnoprawnych (2% PCC)"
+
+    # 3. Notary fee
+    notary_fee = calculate_notary_and_court_fee(price)
+    notary_label = "Taksa notarialna (MS) + 23% VAT + opłaty sądowe (KW, wpis hipoteki)"
+
+    # 4. Agency fee
+    if is_private is True:
+        agency_fee = 0.0
+        agency_label = "Oferta bezpośrednia od właściciela (0% prowizji agencji)"
+    else:
+        agency_fee = round(price * 0.02)
+        agency_label = "Pośrednik / Agencja — szacowana prowizja kupującego (~2% brutto)"
+
+    # 5. Infrastructure extra cost (sewerage/road)
+    infra_cost = 0.0
+    infra_details: list[str] = []
+    if any(s in sewerage for s in ("szambo", "brak")):
+        infra_cost += 18000.0
+        infra_details.append("Brak kanalizacji: montaż przydomowej oczyszczalni ścieków (~18 000 zł) lub roczny koszt szamba (~4 800 zł/rok)")
+    if any(r in road for r in ("nieutwardzona", "gruntowa", "polna")):
+        infra_cost += 12000.0
+        infra_details.append("Dojazd drogą gruntową: partycypacja w utwardzeniu / podbudowie (~12 000 zł)")
+
+    total_cost = round(price + finishing_cost + pcc_tax + notary_fee + agency_fee + infra_cost)
+    hidden_costs = total_cost - price
+    hidden_pct = round((hidden_costs / price * 100), 1) if price > 0 else 0.0
+
+    if hidden_pct >= 25.0:
+        severity = "danger"
+        verdict = f"WYSOKIE KOSZTY WEJŚCIA (+{hidden_costs:,.0f} zł, +{hidden_pct:.1f}%)"
+    elif hidden_pct >= 10.0:
+        severity = "warning"
+        verdict = f"UMIARKOWANE NAKŁADY DODATKOWE (+{hidden_costs:,.0f} zł, +{hidden_pct:.1f}%)"
+    else:
+        severity = "success"
+        verdict = f"NISKIE KOSZTY STARTOWE (+{hidden_costs:,.0f} zł, +{hidden_pct:.1f}%)"
+
+    breakdown = [
+        {"item": "Cena ofertowa nieruchomości", "amount": price, "desc": "Cena wywoławcza w ogłoszeniu", "is_base": True},
+        {"item": "Wykończenie / Adaptacja wnętrz", "amount": float(finishing_cost), "desc": finish_label},
+        {"item": "Podatek PCC (2%)", "amount": float(pcc_tax), "desc": pcc_label},
+        {"item": "Taksa notarialna i sądowa", "amount": float(notary_fee), "desc": notary_label},
+        {"item": "Prowizja biura nieruchomości", "amount": float(agency_fee), "desc": agency_label},
+    ]
+    if infra_cost > 0:
+        breakdown.append({
+            "item": "Infrastruktura (Kanalizacja / Droga)",
+            "amount": float(infra_cost),
+            "desc": "; ".join(infra_details),
+        })
+
+    return {
+        "purchase_price": price,
+        "total_acquisition_cost": total_cost,
+        "hidden_costs_total": hidden_costs,
+        "hidden_costs_pct": hidden_pct,
+        "verdict": verdict,
+        "severity": severity,
+        "breakdown": breakdown,
+    }
+
+
+def calculate_commute_audit(listing: Any) -> dict[str, Any]:
+    lat = _prop(listing, "latitude", None)
+    lon = _prop(listing, "longitude", None)
+    city = str(_prop(listing, "city", "") or "").strip()
+    district = str(_prop(listing, "district", "") or "").strip()
+
+    if lat is None or lon is None or (float(lat) == 0.0 and float(lon) == 0.0):
+        loc = f"{city} ({district})" if city and district else (city or "Okolice Rzeszowa")
+        return {
+            "has_coords": False,
+            "verdict": "LOKALIZACJA PRZYBLIŻONA",
+            "severity": "info",
+            "desc": f"Brak precyzyjnych współrzędnych GPS. Lokalizacja ogólna: {loc}.",
+            "dist_center_km": None,
+            "commute_time_min": None,
+            "nearest_pka": None,
+            "nearest_expressway": None,
+            "findings": [
+                {
+                    "badge": "📍 Przybliżony Adres",
+                    "title": f"Lokalizacja: {loc}",
+                    "desc": "Dokładne odległości do stacji PKA i centrum zostaną wyliczone po podaniu ulicy lub numeru działki.",
+                    "severity": "info",
+                }
+            ],
+        }
+
+    flat = float(lat)
+    flon = float(lon)
+
+    # 1. Distance to City Center (Rynek Rzeszów)
+    dist_center = haversine_km(flat, flon, RZESZOW_CENTER[0], RZESZOW_CENTER[1])
+    commute_min = max(5, round(dist_center * 1.5 + 4))
+
+    # 2. Nearest PKA Station
+    pka_distances = [(name, haversine_km(flat, flon, plat, plon)) for name, plat, plon in PKA_STATIONS]
+    pka_distances.sort(key=lambda x: x[1])
+    nearest_pka_name, nearest_pka_dist = pka_distances[0]
+
+    # 3. Nearest Expressway Hub (A4 / S19)
+    hub_distances = [(name, haversine_km(flat, flon, hlat, hlon)) for name, hlat, hlon in EXPRESSWAY_HUBS]
+    hub_distances.sort(key=lambda x: x[1])
+    nearest_hub_name, nearest_hub_dist = hub_distances[0]
+
+    findings: list[dict[str, str]] = []
+
+    # Center
+    if dist_center <= 5.0:
+        findings.append({
+            "badge": "🏙️ Blisko Centrum",
+            "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+            "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
+            "severity": "success",
+        })
+    elif dist_center <= 12.0:
+        findings.append({
+            "badge": "🚗 Strefa Podmiejska",
+            "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+            "desc": "Standardowy czas dojazdu w aglomeracji rzeszowskiej. Dogodne połączenie drogowe.",
+            "severity": "info",
+        })
+    else:
+        findings.append({
+            "badge": "⏱️ Dłuższy Dojazd",
+            "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+            "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
+            "severity": "warning",
+        })
+
+    # PKA
+    if nearest_pka_dist <= 1.5:
+        findings.append({
+            "badge": "🚆 Kolej Aglomeracyjna PKA < 1.5 km",
+            "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+            "desc": "Dojście pieszo lub rowerem do stacji PKA! Szybki transport do centrum w 10–12 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
+            "severity": "success",
+        })
+    elif nearest_pka_dist <= 3.5:
+        findings.append({
+            "badge": "🚆 Stacja PKA w Zasięgu Auta (Park & Ride)",
+            "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+            "desc": "Dojazd autem 3–5 min do stacji PKA. Możliwość korzystania z pociągu aglomeracyjnego.",
+            "severity": "info",
+        })
+    else:
+        findings.append({
+            "badge": "🚌 Brak Bliskiej Kolei",
+            "title": f"Najbliższa stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+            "desc": "Brak bezpośredniego dostępu do PKA. Komunikacja oparta w 100% na transporcie kołowym (autobusy / auto).",
+            "severity": "info",
+        })
+
+    # Expressway
+    if nearest_hub_dist < 0.45:
+        findings.append({
+            "badge": "⚠️ Bliskość Węzła Szybkich Dróg (<450m)",
+            "title": f"{nearest_hub_name} ({nearest_hub_dist*1000:.0f} m)",
+            "desc": "Bardzo bliskie sąsiedztwo trasy szybkiego ruchu. Ryzyko uciążliwego hałasu komunikacyjnego i spalin.",
+            "severity": "warning",
+        })
+    elif nearest_hub_dist <= 5.0:
+        findings.append({
+            "badge": "🛣️ Wygodny Wylot na A4 / S19",
+            "title": f"{nearest_hub_name} ({nearest_hub_dist:.1f} km)",
+            "desc": "Szybki wjazd na obwodnicę i autostradę w kilka minut bez wjeżdżania do zatłoczonego centrum.",
+            "severity": "success",
+        })
+
+    if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
+        commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
+        commute_sev = "success"
+    elif dist_center <= 14.0 or nearest_pka_dist <= 2.5:
+        commute_verdict = "DOBRA KOMUNIKACJA AGLOMERACYJNA"
+        commute_sev = "info"
+    else:
+        commute_verdict = "LOKALIZACJA WYMAGAJĄCA SAMOCHODU"
+        commute_sev = "warning"
+
+    return {
+        "has_coords": True,
+        "dist_center_km": dist_center,
+        "commute_time_min": commute_min,
+        "nearest_pka": {"name": nearest_pka_name, "distance_km": nearest_pka_dist},
+        "nearest_expressway": {"name": nearest_hub_name, "distance_km": nearest_hub_dist},
+        "verdict": commute_verdict,
+        "severity": commute_sev,
+        "findings": findings,
+    }
+
+
+def calculate_risk_shield(listing: Any) -> dict[str, Any]:
+    mpzp_status = str(_prop(listing, "mpzp_status", "") or "").upper()
+    mpzp_zone = str(_prop(listing, "mpzp_zone", "") or "")
+    flood_zone = str(_prop(listing, "flood_risk_zone", "") or "").upper()
+    cons = _prop(listing, "cons", []) or []
+    cadastral_area = _prop(listing, "cadastral_area", None)
+    area_plot = _prop(listing, "area_plot", None)
+
+    findings: list[dict[str, str]] = []
+
+    # 1. MPZP
+    if mpzp_status == "OBOWIĄZUJĄCY" and mpzp_zone:
+        findings.append({
+            "badge": "🛡️ Ochrona Planistyczna MPZP",
+            "title": f"Plan Miejscowy Obowiązujący (Strefa: {mpzp_zone})",
+            "desc": "Teren objęty uchwalonym MPZP. Gwarancja stabilności otoczenia — sąsiad nie wybuduje obiektu sprzecznego z przeznaczeniem w planie.",
+            "severity": "success",
+        })
+    else:
+        findings.append({
+            "badge": "⚠️ Brak Planu Miejscowego (Ryzyko WZ)",
+            "title": "Brak MPZP — Zagrożenie niekontrolowaną zabudową sąsiedzką",
+            "desc": "Brak planu oznacza, że sąsiedzi mogą w każdej chwili wystąpić o Warunki Zabudowy (WZ) na uciążliwą inwestycję (np. gęste szeregowce, warsztat, myjnię, maszt GSM).",
+            "severity": "warning",
+        })
+
+    # 2. Flood Risk (ISOK)
+    if "POWODZ" in flood_zone or "ZAGROŻENIE_POWODZIOWE" in flood_zone:
+        findings.append({
+            "badge": "🚨 Strefa Zagrożenia Powodziowego (ISOK)",
+            "title": "Wysokie ryzyko zalania wodami 100-letnimi",
+            "desc": "Nieruchomość zlokalizowana w strefie zalewowej wyznaczonej przez Wody Polskie. Poważne trudności z uzyskaniem kredytu hipotecznego i drastycznie wyższe koszty ubezpieczenia.",
+            "severity": "danger",
+        })
+    else:
+        findings.append({
+            "badge": "🌊 Teren Bezpieczny Hydrologicznie",
+            "title": "Brak zagrożenia powodziowego (ISOK Hydroportal)",
+            "desc": "Działka leży całkowicie poza strefami bezpośredniego i szczególnego zagrożenia powodziowego.",
+            "severity": "success",
+        })
+
+    # 3. Cadastral Area Discrepancy (Oferta vs EGiB)
+    if cadastral_area and area_plot and float(area_plot) > 0:
+        c_area = float(cadastral_area)
+        o_area = float(area_plot)
+        diff = abs(c_area - o_area)
+        pct = diff / o_area
+        if pct >= 0.05 and diff >= 15.0:
+            sev = "danger" if pct >= 0.15 else "warning"
+            findings.append({
+                "badge": f"⚠️ Rozbieżność Powierzchni Działki ({diff:.0f} m²)",
+                "title": "Różnica między ogłoszeniem a państwowym katastrem (EGiB)",
+                "desc": f"W ogłoszeniu podano {o_area:.0f} m², a w oficjalnej ewidencji gruntów działka ma {c_area:.0f} m² (różnica: {diff:.0f} m², {pct*100:.1f}%). Może to wynikać z wliczenia udziału w drodze wewnętrznej lub błędu pośrednika.",
+                "severity": sev,
+            })
+
+    # 4. Industrial & Environmental neighborhood
+    has_industrial_risk = any(
+        ("Ba" in c or "Bi" in c or "przemysłow" in c.lower() or "kolej" in c.lower())
+        for c in cons
+    )
+    if has_industrial_risk:
+        findings.append({
+            "badge": "🚨 Sąsiedztwo Przemysłowe / Ba / Bi",
+            "title": "Wykryto tereny komercyjne lub uciążliwe w promieniu 120m",
+            "desc": "W bezpośrednim sąsiedztwie zidentyfikowano działki o przeznaczeniu przemysłowym, składowym lub kolejowym.",
+            "severity": "danger",
+        })
+
+    has_danger = any(f["severity"] == "danger" for f in findings)
+    has_warn = any(f["severity"] == "warning" for f in findings)
+    if has_danger:
+        risk_verdict = "WYKRYTO POWAŻNE RYZYKO ŚRODOWISKOWE LUB PRAWNE"
+        risk_sev = "danger"
+    elif has_warn:
+        risk_verdict = "WYMAGA UWAGI (BRAK MPZP LUB ROZBIEŻNOŚĆ KATASTRALNA)"
+        risk_sev = "warning"
+    else:
+        risk_verdict = "TEREN BEZPIECZNY PLANISTYCZNIE I ŚRODOWISKOWO"
+        risk_sev = "success"
+
+    return {
+        "verdict": risk_verdict,
+        "severity": risk_sev,
+        "findings": findings,
+    }
+
+
+def calculate_gesut_audit(listing: Any) -> dict[str, Any]:
+    gesut_findings: list[dict[str, str]] = []
+    sewerage = str(_prop(listing, "sewerage", "") or "").lower()
+    road = str(_prop(listing, "access_road_type", "") or "").lower()
+    heating = str(_prop(listing, "heating", "") or "").lower()
+    has_fiber = bool(_prop(listing, "has_fiber", False))
+
+    # A) Sewerage
+    if any(s in sewerage for s in ("szambo", "brak")):
+        gesut_findings.append({
+            "badge": "⚠️ Szambo / Brak Kanalizacji",
+            "title": "Bieżące koszty asenizacyjne (~300–500 zł/mc)",
+            "desc": "Brak podłączenia do sieci miejskiej. Konieczność wywozu ścieków co 2–3 tyg. Sprawdź na mapie GESUT (brązowa linia 'ks'), czy w drodze biegnie kolektor i jaki byłby koszt przyłącza (ok. 150–300 zł/mb).",
+            "severity": "warning",
+        })
+    elif "miejska" in sewerage:
+        gesut_findings.append({
+            "badge": "✅ Sieć Kanalizacji Miejskiej",
+            "title": "Pełen komfort sanitarny",
+            "desc": "Nieruchomość włączona do sieci miejskiej. Brak konieczności zamawiania wywozu nieczystości i niższe koszty ścieków.",
+            "severity": "success",
+        })
+    elif "przydomowa" in sewerage:
+        gesut_findings.append({
+            "badge": "🌱 Przydomowa Oczyszczalnia Ścieków",
+            "title": "Niskie koszty bieżące",
+            "desc": "Niski koszt utrzymania (~200 zł/rok). Weryfikuj na mapie GESUT odległość od ewentualnej studni i granic działki.",
+            "severity": "success",
+        })
+    else:
+        gesut_findings.append({
+            "badge": "❓ Nieznany Status Kanalizacji",
+            "title": "Brak deklaracji w ofercie",
+            "desc": "Sprawdź w Geoportalu na warstwie GESUT obecność sieci sanitarnej w drodze lub zapytaj sprzedawcę o rodzaj odprowadzania ścieków.",
+            "severity": "info",
+        })
+
+    # B) Road access
+    if any(r in road for r in ("nieutwardzona", "polna", "gruntowa")):
+        gesut_findings.append({
+            "badge": "⚠️ Droga Nieutwardzona",
+            "title": "Ryzyko braku uzbrojenia w pasie drogowym",
+            "desc": "Dojazd drogą gruntową utrudnia doprowadzenie mediów i może wymagać własnych nakładów finansowych na przyłącza oraz utwardzenie nawierzchni.",
+            "severity": "warning",
+        })
+    elif any(r in road for r in ("asfaltowa", "kostka", "utwardzona")):
+        gesut_findings.append({
+            "badge": "✅ Dojazd Utwardzony",
+            "title": "Dostęp do infrastruktury drogowej",
+            "desc": "Dojazd drogą o twardej nawierzchni. Główne sieci GESUT (woda, gaz, prąd) z reguły biegną w pasie drogowym.",
+            "severity": "success",
+        })
+
+    # C) Heating / Gas
+    if "gazowe" in heating:
+        gesut_findings.append({
+            "badge": "🔥 Ogrzewanie Gazowe",
+            "title": "Weryfikacja sieci vs butla LPG",
+            "desc": "Sprawdź na warstwie GESUT obecność gazociągu sieciowego (żółta linia 'g'). Jeśli w drodze brak gazu, ogrzewanie bazuje na zbiorniku naziemnym/podziemnym na działce.",
+            "severity": "info",
+        })
+    elif "pompa" in heating:
+        gesut_findings.append({
+            "badge": "⚡ Pompa Ciepła",
+            "title": "Zapotrzebowanie na moc przyłączeniową",
+            "desc": "Wymaga stabilnego przyłącza elektroenergetycznego (GESUT / dystrybutor energii — rekomendowane min. 14–17 kW).",
+            "severity": "info",
+        })
+
+    # D) Fiber
+    if has_fiber:
+        gesut_findings.append({
+            "badge": "✅ Światłowód / Szerokopasmowy",
+            "title": "Szybki internet na działce",
+            "desc": "Obecność łącza światłowodowego (pomarańczowa linia 't' w GESUT). Istotna zaleta przy pracy zdalnej.",
+            "severity": "success",
+        })
+    else:
+        gesut_findings.append({
+            "badge": "📶 Brak Potwierdzonego Światłowodu",
+            "title": "Weryfikacja zasięgu telekomunikacyjnego",
+            "desc": "Sprawdź w GESUT sieć telekomunikacyjną lub w rejestrze SIDUSIS (gov.pl) planowane inwestycje z dofinansowań unijnych.",
+            "severity": "info",
+        })
+
+    # E) Transit pipes / Technical collision guide
+    gesut_findings.append({
+        "badge": "ℹ️ Przewodnik Kolizji w GESUT",
+        "title": "Strefy ochronne wyłączające pas gruntu z zabudowy",
+        "desc": "Na mapie Geoportalu sprawdź kolizje: linie elektroenergetyczne (czerwone 'e' — strefa ochronna 3–15m bez prawa zabudowy) oraz gazociągi podwyższonych ciśnień (żółte 'g' — strefa kontrolowana z zakazem budowy).",
+        "severity": "info",
+    })
+
+    has_danger_gesut = any(f["severity"] == "danger" for f in gesut_findings)
+    has_warn_gesut = any(f["severity"] == "warning" for f in gesut_findings)
+    if has_danger_gesut:
+        gesut_verdict = "WYKRYTO ISTOTNE RYZYKA TECHNICZNE"
+        gesut_severity = "danger"
+    elif has_warn_gesut:
+        gesut_verdict = "CZĘŚCIOWE UZBROJENIE / WYMAGA WERYFIKACJI"
+        gesut_severity = "warning"
+    else:
+        gesut_verdict = "KOMPLETNE UZBROJENIE TERENU"
+        gesut_severity = "success"
+
+    return {
+        "verdict": gesut_verdict,
+        "severity": gesut_severity,
+        "findings": gesut_findings,
+    }
+
+
+def analyze_land_and_utilities(listing: Any, market_median_m2: float | None = None) -> dict[str, Any]:
+    """
+    Automated high-ROI intelligence synthesis (100% automated, zero manual lookups):
+    1. TCO & True Acquisition Cost Calculator (finishing, PCC, notary, agency, infrastructure)
+    2. Commute & Proximity Matrix (Center, PKA rail, S19/A4 hubs)
+    3. Risk Shield (MPZP protection, ISOK flood, Cadastral discrepancy, industrial neighbors)
+    4. GESUT Utilities Audit (water, sewerage, heating/gas, fiber, road access)
+    """
+    parcel_id = str(_prop(listing, "parcel_id", "") or "").strip()
+    city = str(_prop(listing, "city", "") or "").strip()
+    district = str(_prop(listing, "district", "") or "").strip()
+    street = str(_prop(listing, "street", "") or "").strip()
+    cadastral_area = _prop(listing, "cadastral_area", None)
+
+    voivodeship = ""
+    short_nr = ""
+    obreb = ""
+    if parcel_id:
+        p_parts = parcel_id.split(".")
+        short_nr = p_parts[-1] if p_parts else ""
+        obreb = p_parts[-2] if len(p_parts) >= 2 else ""
+        teryt_prefix = parcel_id[:2]
+        voivodeship = TERYT_VOIVODESHIPS.get(teryt_prefix, "")
+
+    v_cap = voivodeship.capitalize() if voivodeship else ""
+    clipboard_text = f"Numer działki: {short_nr}\nWojewództwo: {v_cap}\nIdentyfikator TERYT: {parcel_id}" if parcel_id else ""
+
+    cadastral_packet = {
+        "voivodeship": v_cap,
+        "city": city,
+        "district": district,
+        "street": street,
+        "parcel_id": parcel_id or None,
+        "parcel_short": short_nr or None,
+        "obreb": obreb or None,
+        "cadastral_area": cadastral_area,
+        "clipboard_text": clipboard_text,
+    }
+
+    tco = calculate_tco_audit(listing, market_median_m2=market_median_m2)
+    commute = calculate_commute_audit(listing)
+    risk = calculate_risk_shield(listing)
+    gesut = calculate_gesut_audit(listing)
+
+    return {
+        "cadastral_packet": cadastral_packet,
+        "search_packet": cadastral_packet,  # backwards compatibility
+        "tco_audit": tco,
+        "commute_audit": commute,
+        "risk_shield": risk,
+        "gesut_audit": gesut,
+    }

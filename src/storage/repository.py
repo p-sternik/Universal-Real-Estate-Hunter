@@ -1,7 +1,10 @@
+import statistics
+from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 from sqlalchemy import delete, desc, or_, select
+from sqlalchemy import exc as sa_exc
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.listing import FilterResult, ListingSchema
@@ -244,7 +247,35 @@ class ListingRepository:
             new_model.gallery_images = listing.gallery_images
 
         self.session.add(new_model)
-        await self.session.flush()
+        try:
+            await self.session.flush()
+        except sa_exc.IntegrityError:
+            # Another concurrent task already inserted this URL — roll back the
+            # failed INSERT and fall through to an UPDATE on the winner row.
+            await self.session.rollback()
+            logger.warning(f"Race condition on INSERT for URL {listing.url!r} — retrying as UPDATE")
+            existing = await self.get_by_url(listing.url)
+            if existing is None:
+                existing = await self.get_by_portal_id(listing.portal, listing.id)
+            if existing is None:
+                raise  # unexpected — re-raise so the caller sees it
+
+            existing.title = new_model.title
+            existing.price = new_model.price
+            existing.price_per_m2 = new_model.price_per_m2
+            existing.area_home = new_model.area_home
+            existing.area_plot = new_model.area_plot
+            existing.is_qualified = new_model.is_qualified
+            existing.qualification_status = new_model.qualification_status
+            existing.qualification_score = new_model.qualification_score
+            existing.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
+            existing.pros = filter_result.pros
+            existing.cons = filter_result.cons
+            _apply_ai_fields(existing, filter_result)
+            existing.updated_at = datetime.now(UTC)
+            existing.last_scraped_at = datetime.now(UTC)
+            await self.session.flush()
+            return existing, False, False
 
         # Add initial price history entry
         initial_history = PriceHistoryModel(
@@ -332,3 +363,47 @@ class ListingRepository:
         await self.session.commit()
         logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
         return len(listing_ids)
+
+    async def get_market_medians(self) -> dict[str, float]:
+        """
+        Computes median price per m2 aggregated by:
+        - city:district:category -> float
+        - city::category -> float
+        Returns a dictionary mapping composite keys to median price/m2.
+        """
+        stmt = select(
+            ListingModel.city,
+            ListingModel.district,
+            ListingModel.category,
+            ListingModel.price_per_m2,
+        ).where(
+            ListingModel.price_per_m2 > 0,
+            ListingModel.city.isnot(None),
+        )
+        res = await self.session.execute(stmt)
+        rows = res.all()
+
+        district_buckets: dict[str, list[float]] = defaultdict(list)
+        city_buckets: dict[str, list[float]] = defaultdict(list)
+
+        for city, district, category, price_m2 in rows:
+            city_clean = (city or "").strip().lower()
+            dist_clean = (district or "").strip().lower()
+            cat_clean = (category or "dom").strip().lower()
+            if not city_clean or price_m2 <= 0:
+                continue
+
+            val = float(price_m2)
+            city_buckets[f"{city_clean}::{cat_clean}"].append(val)
+            if dist_clean:
+                district_buckets[f"{city_clean}:{dist_clean}:{cat_clean}"].append(val)
+
+        medians: dict[str, float] = {}
+        for k, vals in district_buckets.items():
+            if vals:
+                medians[k] = round(float(statistics.median(vals)), 1)
+        for k, vals in city_buckets.items():
+            if vals:
+                medians[k] = round(float(statistics.median(vals)), 1)
+
+        return medians

@@ -734,10 +734,10 @@ async def test_qualification_engine_llm_visualisations_detection():
 def test_llm_slice_description_head_and_tail():
     from src.filters.llm_analyzer import LLMAnalyzer
 
-    desc = "A" * 2000 + "MIDDLE-CONTENT-THAT-SHOULD-BE-DROPPED" + "B" * 700
+    desc = "A" * 4000 + "MIDDLE-CONTENT-THAT-SHOULD-BE-DROPPED" + "B" * 1500
     sliced = LLMAnalyzer._slice_description(desc)
-    assert "A" * 2000 in sliced
-    assert "B" * 700 in sliced
+    assert "A" * 4000 in sliced
+    assert "B" * 1500 in sliced
     assert "MIDDLE-CONTENT" not in sliced
     assert "[...]" in sliced
 
@@ -790,3 +790,70 @@ async def test_qualification_engine_llm_disabled_flag():
     assert res.ai_summary is None
     assert res.ai_questions == []
     assert res.contact_phone == "+48600123456"  # regex fallback still active
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_llm_overrides_portal_do_wykonczenia_to_pod_klucz():
+    from unittest.mock import AsyncMock
+
+    engine = QualificationEngine(llm_enabled=True)
+
+    # Mock LLM output simulating the forensic due diligence prompt analysis
+    engine.llm.analyze_description = AsyncMock(
+        return_value={
+            "summary": "Wieliczka, 110 m², 790 000 zł (7 181 zł/m²). Dom w pełni wykończony pod klucz, do wykończenia jedynie taras.",
+            "worth_interest": True,
+            "verdict": "Tak — 7 181 zł/m² przy standardzie gotowym do zamieszkania to bardzo atrakcyjna oferta.",
+            "questions_for_agent": [
+                "Czy taras wymaga jedynie ułożenia deski kompozytowej, czy również wylewki?",
+                "Jaka jest powierzchnia działki przynależnej do segmentu?",
+            ],
+            "contact_phone": "+48501234567",
+            "contact_person": "Jan Kowalski",
+            "finish_condition": "pod_klucz",
+            "finish_note": "Wnętrze mieszkalne w pełni wykończone i umeblowane; do wykończenia jedynie taras i ogród.",
+            "has_visualisations": False,
+            "visualisation_note": None,
+            "is_corner": True,
+            "is_middle": False,
+            "has_parking_or_garage": True,
+            "road_is_bad": False,
+            "terrain_risk": False,
+            "sewerage": "miejska",
+            "extracted_plot_m2": 320.0,
+            "hidden_costs": [],
+            "legal_risks": [],
+            "discrepancies": [
+                "Portal oznacza stan jako 'do wykończenia', podczas gdy opis potwierdza w pełni wykończone wnętrze mieszkalne (kuchnia, łazienki, podłogi gotowe)."
+            ],
+            "pros": ["Wykończone wnętrze pod klucz", "Klimatyzacja w salonie i sypialni"],
+            "cons": [],
+        }
+    )
+
+    listing = create_sample_listing(
+        finish_condition=FinishCondition.DO_WYKONCZENIA,
+        raw_description=(
+            "Segment skrajny, ul. Parkowa, Wieliczka. "
+            "Dom całkowicie wykończony z materiałów premium, zamieszkały od 2 lat. "
+            "W pełni umeblowana kuchnia ze sprzętem Siemens, 2 wykończone łazienki, dębowy parkiet. "
+            "Do wykończenia pozostał jedynie taras (deska) oraz ogród. Garaż w bryle budynku. Dojazd asfaltowy."
+        ),
+    )
+
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+
+    # Ground truth: finish condition must be resolved to DO_ZAMIESZKANIA
+    assert res.finish_condition == FinishCondition.DO_ZAMIESZKANIA
+    # Obsolete "Do wykończenia" con must be purged
+    assert not any(c.startswith("Do wykończenia") for c in res.cons)
+    # Finish note for DO_ZAMIESZKANIA must be appended to pros with ✨ [Stan]
+    assert any("✨ [Stan] Wnętrze mieszkalne w pełni wykończone" in p for p in res.pros)
+    # Discrepancy logged
+    assert any("Rozbieżność portal vs opis" in c for c in res.cons)
+    # Standard finish pro added
+    assert any("Standard wykończenia: gotowy do zamieszkania / pod klucz" in p for p in res.pros)
+    # Contact phone and AI verdict extracted
+    assert res.contact_phone == "+48501234567"
+    assert res.contact_person == "Jan Kowalski"
+    assert res.worth_interest is True

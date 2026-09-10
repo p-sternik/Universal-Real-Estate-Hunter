@@ -8,6 +8,7 @@ from loguru import logger
 from config import settings
 from src.models.enums import QualificationStatus
 from src.models.listing import FilterResult, ListingSchema
+from src.services.market_analyzer import NegotiationAdvice
 
 
 class DiscordNotifier:
@@ -34,7 +35,12 @@ class DiscordNotifier:
             return self.COLOR_REVIEW
         return self.COLOR_DEFAULT
 
-    def format_embed(self, listing: ListingSchema, filter_result: FilterResult) -> dict[str, Any]:
+    def format_embed(
+        self,
+        listing: ListingSchema,
+        filter_result: FilterResult,
+        negotiation_advice: NegotiationAdvice | None = None,
+    ) -> dict[str, Any]:
         """Format listing and filtration details into Discord Embed JSON."""
         color = self._get_color_for_status(filter_result.status)
 
@@ -194,6 +200,32 @@ class DiscordNotifier:
                 }
             )
 
+        if negotiation_advice and (
+            negotiation_advice.price_deviation_pct is not None
+            or negotiation_advice.suggested_opening_offer
+            or negotiation_advice.negotiation_leverage == "WYSOKA"
+        ):
+            leverage_icon = {"WYSOKA": "🟢", "ŚREDNIA": "🟡", "NISKA": "⚪"}.get(
+                negotiation_advice.negotiation_leverage, "⚪"
+            )
+            neg_lines = [f"**Pozycja:** {leverage_icon} {negotiation_advice.negotiation_leverage}"]
+            if negotiation_advice.market_median_m2 and negotiation_advice.price_deviation_pct is not None:
+                med_fmt = f"{negotiation_advice.market_median_m2:,.0f} zł/m²".replace(",", " ")
+                neg_lines.append(f"**Mediana rynku:** {med_fmt} ({negotiation_advice.price_deviation_pct:+.1f}%)")
+            if negotiation_advice.suggested_opening_offer:
+                offer_fmt = f"{negotiation_advice.suggested_opening_offer:,.0f} zł".replace(",", " ")
+                neg_lines.append(f"**Sugerowane otwarcie:** {offer_fmt}")
+            if negotiation_advice.arguments:
+                neg_lines.append(f"**Główny argument:** {negotiation_advice.arguments[0]}")
+
+            fields.append(
+                {
+                    "name": "💼 Wywiad negocjacyjny",
+                    "value": "\n".join(neg_lines),
+                    "inline": False,
+                }
+            )
+
         embed = {
             "title": title_display[:256],
             "url": listing.url,
@@ -211,7 +243,11 @@ class DiscordNotifier:
         return embed
 
     async def send_notification(
-        self, listing: ListingSchema, filter_result: FilterResult, webhook_url: str | None = None
+        self,
+        listing: ListingSchema,
+        filter_result: FilterResult,
+        webhook_url: str | None = None,
+        negotiation_advice: NegotiationAdvice | None = None,
     ) -> bool:
         """Send rich Discord notification."""
         target_webhook = webhook_url or self.webhook_url
@@ -219,7 +255,7 @@ class DiscordNotifier:
             logger.warning("[DiscordNotifier] Webhook URL not configured. Skipping Discord alert.")
             return False
 
-        embed = self.format_embed(listing, filter_result)
+        embed = self.format_embed(listing, filter_result, negotiation_advice=negotiation_advice)
         payload = {
             "username": "Real Estate Hunter",
             "avatar_url": "https://img.icons8.com/fluency/96/real-estate.png",

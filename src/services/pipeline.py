@@ -10,6 +10,7 @@ from src.models.listing import ListingSchema
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.config_manager import SearchProfile
 from src.services.discord_notifier import DiscordNotifier
+from src.services.market_analyzer import analyze_negotiation, resolve_local_median
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingRepository, get_session, init_db
@@ -49,6 +50,7 @@ class ScraperPipeline:
         listing: ListingSchema,
         repo: ListingRepository,
         profile: Any | None = None,
+        market_medians: dict[str, float] | None = None,
     ) -> dict:
         result = {
             "is_new": False,
@@ -266,9 +268,26 @@ class ScraperPipeline:
                 f"[Pipeline] Alerting on qualified offer: {listing.title} "
                 f"[{filter_result.status.value}] (Score: {filter_result.score:.1f})"
             )
+            # Calculate market negotiation advice
+            if market_medians is None:
+                market_medians = await repo.get_market_medians()
+            local_median = resolve_local_median(
+                market_medians,
+                listing.city,
+                listing.district,
+                getattr(listing, "category", "dom"),
+            )
+            advice = analyze_negotiation(
+                listing=listing,
+                filter_result=filter_result,
+                market_median_m2=local_median,
+            )
+
             webhook_url = getattr(profile, "discord_webhook_url", None)
-            discord_ok = await self.discord.send_notification(listing, filter_result, webhook_url=webhook_url)
-            telegram_ok = await self.telegram.send_notification(listing, filter_result)
+            discord_ok = await self.discord.send_notification(
+                listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice
+            )
+            telegram_ok = await self.telegram.send_notification(listing, filter_result, negotiation_advice=advice)
 
             if discord_ok or telegram_ok:
                 await repo.mark_as_notified(db_model.id)
@@ -355,10 +374,14 @@ class ScraperPipeline:
 
         # 1. Scrape all portals in parallel
         async def scrape_portal(prof, prof_name, scraper):
+            if global_tracker.is_cancelled():
+                return prof, prof_name, scraper.name, [], None
             global_tracker.update_portal(f"{scraper.name} ({prof_name})", 1, getattr(scraper, "max_pages", 1), 10)
             scraper.progress_cb = global_tracker.update_portal_page
             try:
                 listings = await scraper.scrape()
+                if global_tracker.is_cancelled():
+                    return prof, prof_name, scraper.name, [], None
                 global_tracker.record_items(count=len(listings))
                 global_tracker.add_log(f"[{scraper.name} - {prof_name}] Pobrano {len(listings)} ogłoszeń.")
                 logger.info(f"[{scraper.name} - {prof_name}] Scraped {len(listings)} listings.")
@@ -381,6 +404,10 @@ class ScraperPipeline:
 
         step_idx = 0
         for prof, prof_name, _sc_name, listings, _err in scrape_results:
+            if global_tracker.is_cancelled():
+                logger.info("[Pipeline] Cancellation detected before processing batch, breaking loop.")
+                break
+
             step_idx += 1
             total_scraped += len(listings)
             base_pct = int(((step_idx - 1) / total_steps) * 85)
@@ -389,13 +416,34 @@ class ScraperPipeline:
                 continue
 
             processed = 0
+            async with get_session() as session:
+                repo = ListingRepository(session)
+                batch_medians = await repo.get_market_medians()
 
-            async def safe_process(item, prof=prof, total_listings=len(listings)):
+            empty_cancel_res = {
+                "is_new": False,
+                "is_duplicate_fingerprint": False,
+                "price_changed": False,
+                "qualified": False,
+                "notified": False,
+            }
+
+            async def safe_process(
+                item,
+                prof=prof,
+                total_listings=len(listings),
+                medians=batch_medians,
+                cancel_res=empty_cancel_res,
+            ):
                 nonlocal processed
+                if global_tracker.is_cancelled():
+                    return item, cancel_res
                 async with sem:
+                    if global_tracker.is_cancelled():
+                        return item, cancel_res
                     async with get_session() as session:
                         repo = ListingRepository(session)
-                        res = await self.process_listing(item, repo, profile=prof)
+                        res = await self.process_listing(item, repo, profile=prof, market_medians=medians)
                     processed += 1
                     if processed % 5 == 0 or processed == total_listings:
                         global_tracker.update_processing(processed, total_listings)
@@ -436,7 +484,13 @@ class ScraperPipeline:
             "price_changes": total_price_changes,
             "qualified": total_qualified,
             "notified": total_notified,
+            "cancelled": global_tracker.is_cancelled(),
         }
+
+        if global_tracker.is_cancelled():
+            global_tracker.cancel_session()
+            logger.info("=== Cycle Cancelled by User ===")
+            return summary
 
         global_tracker.complete_session(summary)
 

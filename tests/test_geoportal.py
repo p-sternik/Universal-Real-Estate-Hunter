@@ -15,6 +15,9 @@ def test_geoportal_url_generator():
     assert "locatePoint" in url_coords
     assert "50.04" in url_coords
 
+    gunb_url = svc.generate_gunb_url()
+    assert gunb_url == "https://wyszukiwarka.gunb.gov.pl/"
+
 
 @pytest.mark.asyncio
 async def test_get_mpzp_info_active():

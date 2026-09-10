@@ -24,6 +24,7 @@ class ProgressTracker:
         self.items_qualified = 0
         self.duplicates_found = 0
         self.percentage = 0
+        self.cancel_requested = False
         self.logs: list[dict[str, str]] = []
         self._listeners: list[Callable[[dict[str, Any]], None]] = []
         self._rich_progress: Progress | None = None
@@ -35,6 +36,7 @@ class ProgressTracker:
 
     def start_session(self, total_portals: int = 3):
         self.is_running = True
+        self.cancel_requested = False
         self.current_portal = ""
         self.current_step = "Inicjalizacja scrapingu..."
         self.items_scraped = 0
@@ -126,8 +128,34 @@ class ProgressTracker:
         if len(self.logs) > 60:
             self.logs.pop(0)
 
+    def request_cancel(self):
+        """Signals cooperative cancellation of the running scrape cycle."""
+        self.cancel_requested = True
+        self.current_step = "Zatrzymywanie procesu..."
+        self.add_log("🛑 Zażądano zatrzymania scrapingu przez użytkownika.", level="warning")
+        self._refresh_rich()
+
+    def is_cancelled(self) -> bool:
+        return self.cancel_requested
+
+    def cancel_session(self):
+        """Marks the session as stopped by user request."""
+        self.is_running = False
+        self.cancel_requested = False
+        self.current_step = "Zatrzymano przez użytkownika"
+        self.add_log("🛑 Cykl scrapingu został przerwany przez użytkownika.", level="warning")
+        if self._rich_progress and self._task_id is not None:
+            self._rich_progress.update(
+                self._task_id,
+                description="[bold yellow]Zatrzymano!",
+                completed=self.percentage,
+            )
+            self._rich_progress.stop()
+            self._rich_progress = None
+
     def complete_session(self, summary: dict[str, Any]):
         self.is_running = False
+        self.cancel_requested = False
         self.percentage = 100
         self.current_step = "Zakończono pomyślnie!"
         self.add_log(
@@ -150,6 +178,7 @@ class ProgressTracker:
             elapsed = int((datetime.now(UTC) - self._session_started_at).total_seconds())
         return {
             "is_running": self.is_running,
+            "cancel_requested": self.cancel_requested,
             "current_portal": self.current_portal,
             "current_step": self.current_step,
             "percentage": self.percentage,
@@ -159,7 +188,7 @@ class ProgressTracker:
             "items_scraped": self.items_scraped,
             "items_qualified": self.items_qualified,
             "duplicates_found": self.duplicates_found,
-            "logs": self.logs[-20:],
+            "logs": self.logs[-25:],
         }
 
 

@@ -33,6 +33,12 @@ class GeoportalService:
         self.headers = {"User-Agent": "ApartmentHunter-Geoportal/1.0 (property-research-suite; contact@local)"}
         self._cache: dict[str, Any] = {}
 
+    @staticmethod
+    def generate_gunb_url(parcel_id: str | None = None) -> str:
+        """Generates direct URL to GUNB building permit (RWDZ) search portal."""
+        _ = parcel_id
+        return "https://wyszukiwarka.gunb.gov.pl/"
+
     def generate_geoportal_url(
         self,
         parcel_id: str | None = None,
@@ -293,6 +299,8 @@ class GeoportalService:
             "main_parcel_number": None,
             "cadastral_area": None,
             "geoportal_url": self.generate_geoportal_url(lat=lat, lon=lon),
+            "gunb_url": self.generate_gunb_url(),
+            "gesut_url": self.generate_geoportal_url(lat=lat, lon=lon),
             "surrounding_risks": [],
             "surrounding_parcels_count": 0,
             "mpzp_zone": None,
@@ -313,6 +321,8 @@ class GeoportalService:
             result["main_parcel_id"] = main_pid
             result["main_parcel_number"] = main_pid.split(".")[-1]
             result["geoportal_url"] = self.generate_geoportal_url(parcel_id=main_pid)
+            result["gunb_url"] = self.generate_gunb_url(parcel_id=main_pid)
+            result["gesut_url"] = self.generate_geoportal_url(parcel_id=main_pid)
 
             main_area, main_centroid = await self.get_parcel_geometry_and_area(client, main_pid)
             result["cadastral_area"] = main_area

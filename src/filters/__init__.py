@@ -137,14 +137,23 @@ class QualificationEngine:
                     "do_remontu": FinishCondition.DO_REMONTU,
                 }
                 if finish_raw in finish_map:
-                    listing.finish_condition = finish_map[finish_raw]
+                    new_condition = finish_map[finish_raw]
+                    if (
+                        new_condition == FinishCondition.DO_ZAMIESZKANIA
+                        and listing.finish_condition != FinishCondition.DO_ZAMIESZKANIA
+                    ):
+                        # Clean up any obsolete "Do wykończenia" con from stage 2 regex
+                        cons = [c for c in cons if not c.startswith("Do wykończenia")]
+                        if "Standard wykończenia: gotowy do zamieszkania / pod klucz" not in pros:
+                            pros.append("Standard wykończenia: gotowy do zamieszkania / pod klucz")
+                    listing.finish_condition = new_condition
 
                 finish_note = str(llm_insights.get("finish_note") or "").strip()
-                if finish_note and listing.finish_condition not in (
-                    FinishCondition.DO_ZAMIESZKANIA,
-                    FinishCondition.NIEOKRESLONY,
-                ):
-                    cons.append(f"🔧 [LLM] Stan: {finish_note}")
+                if finish_note:
+                    if listing.finish_condition == FinishCondition.DO_ZAMIESZKANIA:
+                        pros.append(f"✨ [Stan] {finish_note}")
+                    else:
+                        cons.append(f"🔧 [LLM] Stan: {finish_note}")
 
                 if llm_insights.get("has_visualisations") and not has_visualisations:
                     listing.has_visualisations = True

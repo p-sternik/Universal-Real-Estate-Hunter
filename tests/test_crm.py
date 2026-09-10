@@ -370,3 +370,44 @@ async def test_live_dashboard_reset_data_endpoint():
         async with get_session() as session:
             repo = ListingRepository(session)
             assert await repo.get_by_url("https://otodom.pl/oferta/reset-api-1") is None
+
+
+@pytest.mark.asyncio
+async def test_live_dashboard_serves_split_assets():
+    server = LiveDashboardServer(port=8084)
+    async with TestClient(TestServer(server.app)) as client:
+        # Index is markup-only and links to the split assets
+        index_resp = await client.get("/")
+        assert index_resp.status == 200
+        index_html = await index_resp.text()
+        assert '<link rel="stylesheet" href="/assets/dashboard.css">' in index_html
+        assert '<script src="/assets/js/transport.js"></script>' in index_html
+        assert '<script src="/assets/js/dashboard.js"></script>' in index_html
+        assert "<style>" not in index_html
+
+        # CSS asset with correct content type and ETag
+        css_resp = await client.get("/assets/dashboard.css")
+        assert css_resp.status == 200
+        assert css_resp.content_type == "text/css"
+        assert css_resp.headers.get("ETag")
+        css_body = await css_resp.text()
+        assert ":root" in css_body
+        etag = css_resp.headers["ETag"]
+
+        # Conditional request returns 304
+        cached_resp = await client.get("/assets/dashboard.css", headers={"If-None-Match": etag})
+        assert cached_resp.status == 304
+
+        # JS assets served with application/javascript
+        for js_path in ("/assets/js/transport.js", "/assets/js/dashboard.js"):
+            js_resp = await client.get(js_path)
+            assert js_resp.status == 200
+            assert js_resp.content_type == "application/javascript"
+            js_body = await js_resp.text()
+            assert "Transport" in js_body or "allListings" in js_body
+
+        # Missing and path-traversal requests are rejected
+        missing_resp = await client.get("/assets/nope.css")
+        assert missing_resp.status == 404
+        traversal_resp = await client.get("/assets/%2e%2e/pyproject.toml")
+        assert traversal_resp.status == 404

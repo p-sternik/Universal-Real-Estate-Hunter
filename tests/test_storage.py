@@ -211,9 +211,8 @@ async def test_repository_gallery_images(async_session: AsyncSession):
         "https://example.com/photo3.jpg",
     ]
     listing = ListingSchema(
-        id="otodom-gal-123",
+        id="gal_123",
         portal="Otodom",
-        portal_id="gal_123",
         url="https://otodom.pl/oferta/gal-123",
         title="Dom z galerią zdjęć",
         price=850_000,

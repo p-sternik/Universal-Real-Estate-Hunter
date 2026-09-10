@@ -4,6 +4,7 @@ from loguru import logger
 from config import settings
 from src.models.enums import QualificationStatus
 from src.models.listing import FilterResult, ListingSchema
+from src.services.market_analyzer import NegotiationAdvice
 
 
 class TelegramNotifier:
@@ -23,7 +24,12 @@ class TelegramNotifier:
     def is_configured(self) -> bool:
         return bool(self.bot_token and self.chat_id)
 
-    def format_message(self, listing: ListingSchema, filter_result: FilterResult) -> str:
+    def format_message(
+        self,
+        listing: ListingSchema,
+        filter_result: FilterResult,
+        negotiation_advice: NegotiationAdvice | None = None,
+    ) -> str:
         status_tag = (
             "⭐ <b>WHITELIST</b>"
             if filter_result.status == QualificationStatus.QUALIFIED_WHITELIST
@@ -65,6 +71,26 @@ class TelegramNotifier:
         if filter_result.ai_verdict:
             lines.append(f"\n⚖️ <b>Werdykt AI {filter_result.verdict_icon}:</b> {filter_result.ai_verdict}")
 
+        if negotiation_advice and (
+            negotiation_advice.price_deviation_pct is not None
+            or negotiation_advice.suggested_opening_offer
+            or negotiation_advice.negotiation_leverage == "WYSOKA"
+        ):
+            leverage_icon = {"WYSOKA": "🟢", "ŚREDNIA": "🟡", "NISKA": "⚪"}.get(
+                negotiation_advice.negotiation_leverage, "⚪"
+            )
+            lines.append(
+                f"\n💼 <b>Negocjacje:</b> Pozycja {leverage_icon} <b>{negotiation_advice.negotiation_leverage}</b>"
+            )
+            if negotiation_advice.market_median_m2 and negotiation_advice.price_deviation_pct is not None:
+                med_fmt = f"{negotiation_advice.market_median_m2:,.0f} zł/m²".replace(",", " ")
+                lines.append(f"  • Rynek: <b>{med_fmt}</b> ({negotiation_advice.price_deviation_pct:+.1f}%)")
+            if negotiation_advice.suggested_opening_offer:
+                offer_fmt = f"{negotiation_advice.suggested_opening_offer:,.0f} zł".replace(",", " ")
+                lines.append(f"  • Sugerowane otwarcie: <b>{offer_fmt}</b>")
+            if negotiation_advice.arguments:
+                lines.append(f"  • Argument: <i>{negotiation_advice.arguments[0]}</i>")
+
         parcel_id = getattr(listing, "parcel_id", None)
         if getattr(listing, "geoportal_url", None):
             p_nr = parcel_id.split(".")[-1] if parcel_id else "mapa"
@@ -77,11 +103,16 @@ class TelegramNotifier:
         lines.append(f"\n🔗 <a href='{listing.url}'>Zobacz ogłoszenie na {listing.portal}</a>")
         return "\n".join(lines)
 
-    async def send_notification(self, listing: ListingSchema, filter_result: FilterResult) -> bool:
+    async def send_notification(
+        self,
+        listing: ListingSchema,
+        filter_result: FilterResult,
+        negotiation_advice: NegotiationAdvice | None = None,
+    ) -> bool:
         if not self.is_configured():
             return False
 
-        text = self.format_message(listing, filter_result)
+        text = self.format_message(listing, filter_result, negotiation_advice=negotiation_advice)
         url = f"https://api.telegram.org/bot{self.bot_token}/sendMessage"
         payload = {
             "chat_id": self.chat_id,

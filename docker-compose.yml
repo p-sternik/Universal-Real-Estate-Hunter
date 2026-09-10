@@ -1,6 +1,8 @@
 services:
   # Web Dashboard Service (Interactive CRM, Map, Configuration UI)
   dashboard:
+    # Publiczny gotowy obraz z GHCR (po release). Lokalnie nadal działa `docker compose up --build`.
+    image: ghcr.io/p-sternik/universal-real-estate-hunter:${IMAGE_TAG:-latest}
     build: .
     container_name: estate_hunter_dashboard
     restart: unless-stopped
@@ -25,6 +27,7 @@ services:
 
   # Automated Background Scraper & Monitoring Daemon
   scraper:
+    image: ghcr.io/p-sternik/universal-real-estate-hunter:${IMAGE_TAG:-latest}
     build: .
     container_name: estate_hunter_scraper
     restart: unless-stopped

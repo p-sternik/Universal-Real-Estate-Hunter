@@ -3,6 +3,7 @@ import gzip
 import hashlib
 import json
 import webbrowser
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,11 +13,19 @@ from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.services.config_manager import config_manager
+from src.services.market_analyzer import analyze_land_and_utilities, analyze_negotiation, resolve_local_median
 from src.services.pipeline import ScraperPipeline
 from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session
 
 MIN_COMPRESS_SIZE = 1024
-COMPRESSIBLE_CT = ("application/json", "text/html", "text/plain")
+COMPRESSIBLE_CT = ("application/javascript", "application/json", "text/css", "text/html", "text/plain")
+
+
+def _as_utc(dt: "datetime | None") -> "datetime | None":
+    """Return dt with UTC tzinfo, normalising naive datetimes stored by SQLite."""
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=UTC) if dt.tzinfo is None else dt
 
 
 @web.middleware
@@ -38,6 +47,21 @@ async def gzip_middleware(request: web.Request, handler):
 
 
 TEMPLATE_PATH = Path(__file__).parent / "templates" / "dashboard.html"
+ASSET_DIR = Path(__file__).parent / "templates" / "assets"
+
+ASSET_CONTENT_TYPES = {
+    ".css": "text/css",
+    ".js": "application/javascript",
+    ".json": "application/json",
+    ".map": "application/json",
+    ".svg": "image/svg+xml",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".ico": "image/x-icon",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+}
 
 if TEMPLATE_PATH.exists():
     INDEX_HTML = TEMPLATE_PATH.read_text(encoding="utf-8")
@@ -50,10 +74,12 @@ class LiveDashboardServer:
         self.host = host
         self.port = port
         self.app = web.Application(middlewares=[gzip_middleware])
+        self._active_scrape_task: asyncio.Task[Any] | None = None
         self._setup_routes()
 
     def _setup_routes(self):
         self.app.router.add_get("/", self.handle_index)
+        self.app.router.add_get("/assets/{path:.*}", self.handle_assets)
         self.app.router.add_get("/api/listings", self.handle_get_listings)
         self.app.router.add_get("/api/listings/{id}/price-history", self.handle_get_price_history)
         self.app.router.add_patch("/api/listings/{id}/status", self.handle_update_status)
@@ -61,6 +87,7 @@ class LiveDashboardServer:
         self.app.router.add_post("/api/geocode/backfill", self.handle_backfill_coords)
         self.app.router.add_get("/api/scrape/status", self.handle_scrape_status)
         self.app.router.add_post("/api/scrape", self.handle_trigger_scrape)
+        self.app.router.add_post("/api/scrape/cancel", self.handle_cancel_scrape)
         self.app.router.add_get("/api/config", self.handle_get_config)
         self.app.router.add_post("/api/config", self.handle_update_config)
         self.app.router.add_get("/api/profiles", self.handle_get_profiles)
@@ -200,6 +227,24 @@ class LiveDashboardServer:
                 logger.warning(f"Could not read template dynamically: {e}")
         return web.Response(text=content, content_type="text/html", charset="utf-8")
 
+    async def handle_assets(self, request: web.Request) -> web.Response:
+        rel = str(request.match_info.get("path", ""))
+        asset_path = (ASSET_DIR / rel).resolve()
+        assets_root = ASSET_DIR.resolve()
+        if not asset_path.is_relative_to(assets_root) or not asset_path.is_file():
+            return web.Response(status=404, text="Not found")
+        content = asset_path.read_bytes()
+        etag = f'"{hashlib.md5(content, usedforsecurity=False).hexdigest()}"'
+        if request.headers.get("If-None-Match") == etag:
+            return web.Response(status=304)
+        ctype = ASSET_CONTENT_TYPES.get(asset_path.suffix.lower(), "application/octet-stream")
+        return web.Response(
+            body=content,
+            content_type=ctype,
+            charset=None,
+            headers={"ETag": etag, "Cache-Control": "no-cache"},
+        )
+
     async def handle_get_price_history(self, request: web.Request) -> web.Response:
         listing_id = int(request.match_info["id"])
         async with get_session() as session:
@@ -248,6 +293,15 @@ class LiveDashboardServer:
             res = await session.execute(stmt)
             items = res.scalars().all()
 
+            repo = ListingRepository(session)
+            market_medians = await repo.get_market_medians()
+
+            now_utc = datetime.now(UTC)
+            max_scraped_at = None
+            for it in items:
+                if (sa := _as_utc(it.last_scraped_at)) and (max_scraped_at is None or sa > max_scraped_at):
+                    max_scraped_at = sa
+
             data: list[dict[str, Any]] = []
             for item in items:
                 # Compute price drop from price_history
@@ -262,6 +316,46 @@ class LiveDashboardServer:
                     if initial_price and initial_price > item.price:
                         price_drop_amount = round(initial_price - item.price)
                         price_drop_pct = round((price_drop_amount / initial_price) * 100, 1)
+
+                # Delta analysis (cycle additions & updates)
+                created_utc = _as_utc(item.created_at)
+                updated_utc = _as_utc(item.updated_at)
+
+                is_new_cycle = bool(
+                    created_utc
+                    and (
+                        (max_scraped_at is not None and (max_scraped_at - created_utc).total_seconds() <= 10800)
+                        or (now_utc - created_utc).total_seconds() <= 86400
+                    )
+                )
+
+                is_updated_cycle = bool(
+                    len(ph) >= 2
+                    or (
+                        updated_utc
+                        and created_utc
+                        and (updated_utc - created_utc).total_seconds() > 300
+                        and (
+                            (max_scraped_at is not None and (max_scraped_at - updated_utc).total_seconds() <= 10800)
+                            or (now_utc - updated_utc).total_seconds() <= 86400
+                        )
+                    )
+                )
+
+                local_median = resolve_local_median(
+                    market_medians,
+                    item.city,
+                    item.district,
+                    item.category,
+                )
+                neg_advice = analyze_negotiation(
+                    listing=item,
+                    market_median_m2=local_median,
+                    price_drop_amount=float(price_drop_amount or 0.0),
+                    price_drop_pct=float(price_drop_pct or 0.0),
+                    price_history_count=len(ph),
+                )
+                land_audit = analyze_land_and_utilities(item, market_median_m2=local_median)
 
                 data.append(
                     {
@@ -282,32 +376,32 @@ class LiveDashboardServer:
                         "city": item.city,
                         "latitude": item.latitude,
                         "longitude": item.longitude,
-                        "is_exact_coords": getattr(item, "is_exact_coords", True),
-                        "parcel_id": getattr(item, "parcel_id", None),
-                        "cadastral_area": getattr(item, "cadastral_area", None),
-                        "geoportal_url": getattr(item, "geoportal_url", None),
-                        "mpzp_zone": getattr(item, "mpzp_zone", None),
-                        "mpzp_status": getattr(item, "mpzp_status", None),
-                        "flood_risk_zone": getattr(item, "flood_risk_zone", None),
-                        "user_status": getattr(item, "user_status", "NEW") or "NEW",
-                        "user_notes": getattr(item, "user_notes", "") or "",
+                        "is_exact_coords": item.is_exact_coords,
+                        "parcel_id": item.parcel_id,
+                        "cadastral_area": item.cadastral_area,
+                        "geoportal_url": item.geoportal_url,
+                        "mpzp_zone": item.mpzp_zone,
+                        "mpzp_status": item.mpzp_status,
+                        "flood_risk_zone": item.flood_risk_zone,
+                        "user_status": item.user_status or "NEW",
+                        "user_notes": item.user_notes or "",
                         "access_road_type": item.access_road_type,
-                        "market": getattr(item, "market", "nieokreślony"),
-                        "finish_condition": getattr(item, "finish_condition", "nieokreślony") or "nieokreślony",
-                        "has_visualisations": bool(getattr(item, "has_visualisations", False)),
-                        "sewerage": getattr(item, "sewerage", "nieznana") or "nieznana",
-                        "heating": getattr(item, "heating", "nieznane") or "nieznane",
-                        "has_fiber": bool(getattr(item, "has_fiber", False)),
-                        "year_built": getattr(item, "year_built", None),
-                        "category": getattr(item, "category", "dom") or "dom",
-                        "rooms": getattr(item, "rooms", None),
-                        "floor": getattr(item, "floor", None),
-                        "floors_in_building": getattr(item, "floors_in_building", None),
-                        "is_private_owner": getattr(item, "is_private_owner", None),
-                        "profile_id": getattr(item, "profile_id", None) or "default",
-                        "profile_name": getattr(item, "profile_name", None),
+                        "market": item.market,
+                        "finish_condition": item.finish_condition or "nieokreślony",
+                        "has_visualisations": item.has_visualisations,
+                        "sewerage": item.sewerage,
+                        "heating": item.heating,
+                        "has_fiber": item.has_fiber,
+                        "year_built": item.year_built,
+                        "category": item.category or "dom",
+                        "rooms": item.rooms,
+                        "floor": item.floor,
+                        "floors_in_building": item.floors_in_building,
+                        "is_private_owner": item.is_private_owner,
+                        "profile_id": item.profile_id or "default",
+                        "profile_name": item.profile_name,
                         "main_image_url": item.main_image_url,
-                        "gallery_images": getattr(item, "gallery_images", []) or [],
+                        "gallery_images": item.gallery_images,
                         "is_qualified": item.is_qualified,
                         "qualification_status": item.qualification_status,
                         "qualification_score": item.qualification_score,
@@ -315,18 +409,32 @@ class LiveDashboardServer:
                         "pros": item.pros,
                         "cons": item.cons,
                         "created_at": item.created_at.isoformat() if item.created_at else None,
+                        "updated_at": item.updated_at.isoformat() if item.updated_at else None,
+                        "last_scraped_at": item.last_scraped_at.isoformat() if item.last_scraped_at else None,
+                        "is_new_cycle": is_new_cycle,
+                        "is_updated_cycle": is_updated_cycle,
                         # AI Due Diligence
-                        "ai_summary": getattr(item, "ai_summary", None),
-                        "ai_verdict": getattr(item, "ai_verdict", None),
-                        "worth_interest": getattr(item, "worth_interest", None),
-                        "ai_questions": getattr(item, "ai_questions", []) or [],
-                        "contact_phone": getattr(item, "contact_phone", None),
-                        "contact_person": getattr(item, "contact_person", None),
+                        "ai_summary": item.ai_summary,
+                        "ai_verdict": item.ai_verdict,
+                        "worth_interest": item.worth_interest,
+                        "ai_questions": item.ai_questions,
+                        "contact_phone": item.contact_phone,
+                        "contact_person": item.contact_person,
                         # Price Drop History
                         "price_drop_amount": price_drop_amount,
                         "price_drop_pct": price_drop_pct,
                         "initial_price": initial_price,
                         "price_history_count": len(ph),
+                        # Negotiation & Market Intelligence
+                        "market_median_m2": neg_advice.market_median_m2,
+                        "price_deviation_pct": neg_advice.price_deviation_pct,
+                        "days_on_market": neg_advice.days_on_market,
+                        "negotiation_leverage": neg_advice.negotiation_leverage,
+                        "fair_market_value": neg_advice.fair_market_value,
+                        "suggested_opening_offer": neg_advice.suggested_opening_offer,
+                        "negotiation_arguments": neg_advice.arguments,
+                        # Automated Intelligence: TCO, Commute, Risk
+                        "land_audit": land_audit,
                     }
                 )
 
@@ -370,21 +478,61 @@ class LiveDashboardServer:
         count = await backfill_missing_coordinates()
         return web.json_response({"success": True, "updated": count})
 
+    async def _run_scrape_background(self, target_profile: str | None = None) -> None:
+        from src.services.progress import global_tracker
+
+        try:
+            pipeline = ScraperPipeline()
+            await pipeline.run_cycle(target_profile=target_profile)
+        except asyncio.CancelledError:
+            logger.info("[LiveDashboard] Background scrape task cancelled.")
+            global_tracker.cancel_session()
+        except Exception as e:
+            logger.error(f"[LiveDashboard] Background scrape error: {e}", exc_info=True)
+            global_tracker.add_log(f"Błąd krytyczny scrapingu: {e}", level="error")
+            global_tracker.complete_session({"error": str(e)})
+        finally:
+            self._active_scrape_task = None
+
     async def handle_trigger_scrape(self, request: web.Request) -> web.Response:
+        from src.services.progress import global_tracker
+
+        if global_tracker.is_running:
+            return web.json_response(
+                {"status": "already_running", "message": "Scraping jest już w toku."},
+                status=409,
+            )
+
         target_profile = request.query.get("profile")
-        if not target_profile and request.can_read_body:
+        if not target_profile and request.can_read_body and (request.content_length or 0) > 0:
             try:
                 body = await request.json()
-                target_profile = body.get("profile")
+                if isinstance(body, dict):
+                    target_profile = body.get("profile")
             except Exception:
                 pass
-        if target_profile and target_profile.upper() == "ALL":
-            target_profile = None
+
+        if target_profile and isinstance(target_profile, str):
+            target_profile = target_profile.strip()
+            if target_profile.upper() in ("ALL", "NULL", "NONE", ""):
+                target_profile = None
 
         logger.info(f"[LiveDashboard] Manual scrape triggered via Web UI (target_profile: {target_profile}).")
-        pipeline = ScraperPipeline()
-        summary = await pipeline.run_cycle(target_profile=target_profile)
-        return web.json_response(summary)
+        self._active_scrape_task = asyncio.create_task(self._run_scrape_background(target_profile=target_profile))
+        return web.json_response({"status": "started", "message": "Scraping uruchomiony w tle."})
+
+    async def handle_cancel_scrape(self, request: web.Request) -> web.Response:
+        from src.services.progress import global_tracker
+
+        logger.info("[LiveDashboard] Stop scrape requested via Web UI.")
+        if not global_tracker.is_running:
+            return web.json_response(
+                {"status": "not_running", "message": "Scraping nie jest obecnie uruchomiony."},
+                status=200,
+            )
+
+        global_tracker.request_cancel()
+        return web.json_response({"status": "cancelling", "message": "Zażądano zatrzymania scrapingu."})
 
     async def run(self, auto_open: bool = True):
         runner = web.AppRunner(self.app)
