@@ -168,4 +168,3 @@ async def test_live_dashboard_listings_includes_gunb_and_gesut():
         assert "risk_shield" in item["land_audit"]
         assert "gesut_audit" in item["land_audit"]
         assert item["land_audit"]["tco_audit"]["total_acquisition_cost"] >= 350_000
-

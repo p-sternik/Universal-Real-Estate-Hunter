@@ -290,12 +290,7 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     radius_km = 6371.0
     dlat = math.radians(lat2 - lat1)
     dlon = math.radians(lon2 - lon1)
-    a = (
-        math.sin(dlat / 2) ** 2
-        + math.cos(math.radians(lat1))
-        * math.cos(math.radians(lat2))
-        * math.sin(dlon / 2) ** 2
-    )
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
     return round(radius_km * c, 2)
 
@@ -353,7 +348,9 @@ def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> 
     infra_details: list[str] = []
     if any(s in sewerage for s in ("szambo", "brak")):
         infra_cost += 18000.0
-        infra_details.append("Brak kanalizacji: montaż przydomowej oczyszczalni ścieków (~18 000 zł) lub roczny koszt szamba (~4 800 zł/rok)")
+        infra_details.append(
+            "Brak kanalizacji: montaż przydomowej oczyszczalni ścieków (~18 000 zł) lub roczny koszt szamba (~4 800 zł/rok)"
+        )
     if any(r in road for r in ("nieutwardzona", "gruntowa", "polna")):
         infra_cost += 12000.0
         infra_details.append("Dojazd drogą gruntową: partycypacja w utwardzeniu / podbudowie (~12 000 zł)")
@@ -373,18 +370,25 @@ def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> 
         verdict = f"NISKIE KOSZTY STARTOWE (+{hidden_costs:,.0f} zł, +{hidden_pct:.1f}%)"
 
     breakdown = [
-        {"item": "Cena ofertowa nieruchomości", "amount": price, "desc": "Cena wywoławcza w ogłoszeniu", "is_base": True},
+        {
+            "item": "Cena ofertowa nieruchomości",
+            "amount": price,
+            "desc": "Cena wywoławcza w ogłoszeniu",
+            "is_base": True,
+        },
         {"item": "Wykończenie / Adaptacja wnętrz", "amount": float(finishing_cost), "desc": finish_label},
         {"item": "Podatek PCC (2%)", "amount": float(pcc_tax), "desc": pcc_label},
         {"item": "Taksa notarialna i sądowa", "amount": float(notary_fee), "desc": notary_label},
         {"item": "Prowizja biura nieruchomości", "amount": float(agency_fee), "desc": agency_label},
     ]
     if infra_cost > 0:
-        breakdown.append({
-            "item": "Infrastruktura (Kanalizacja / Droga)",
-            "amount": float(infra_cost),
-            "desc": "; ".join(infra_details),
-        })
+        breakdown.append(
+            {
+                "item": "Infrastruktura (Kanalizacja / Droga)",
+                "amount": float(infra_cost),
+                "desc": "; ".join(infra_details),
+            }
+        )
 
     return {
         "purchase_price": price,
@@ -445,65 +449,81 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
 
     # Center
     if dist_center <= 5.0:
-        findings.append({
-            "badge": "🏙️ Blisko Centrum",
-            "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
-            "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
-            "severity": "success",
-        })
+        findings.append(
+            {
+                "badge": "🏙️ Blisko Centrum",
+                "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+                "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
+                "severity": "success",
+            }
+        )
     elif dist_center <= 12.0:
-        findings.append({
-            "badge": "🚗 Strefa Podmiejska",
-            "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
-            "desc": "Standardowy czas dojazdu w aglomeracji rzeszowskiej. Dogodne połączenie drogowe.",
-            "severity": "info",
-        })
+        findings.append(
+            {
+                "badge": "🚗 Strefa Podmiejska",
+                "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+                "desc": "Standardowy czas dojazdu w aglomeracji rzeszowskiej. Dogodne połączenie drogowe.",
+                "severity": "info",
+            }
+        )
     else:
-        findings.append({
-            "badge": "⏱️ Dłuższy Dojazd",
-            "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
-            "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
-            "severity": "warning",
-        })
+        findings.append(
+            {
+                "badge": "⏱️ Dłuższy Dojazd",
+                "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+                "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
+                "severity": "warning",
+            }
+        )
 
     # PKA
     if nearest_pka_dist <= 1.5:
-        findings.append({
-            "badge": "🚆 Kolej Aglomeracyjna PKA < 1.5 km",
-            "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-            "desc": "Dojście pieszo lub rowerem do stacji PKA! Szybki transport do centrum w 10–12 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
-            "severity": "success",
-        })
+        findings.append(
+            {
+                "badge": "🚆 Kolej Aglomeracyjna PKA < 1.5 km",
+                "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+                "desc": "Dojście pieszo lub rowerem do stacji PKA! Szybki transport do centrum w 10–12 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
+                "severity": "success",
+            }
+        )
     elif nearest_pka_dist <= 3.5:
-        findings.append({
-            "badge": "🚆 Stacja PKA w Zasięgu Auta (Park & Ride)",
-            "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-            "desc": "Dojazd autem 3–5 min do stacji PKA. Możliwość korzystania z pociągu aglomeracyjnego.",
-            "severity": "info",
-        })
+        findings.append(
+            {
+                "badge": "🚆 Stacja PKA w Zasięgu Auta (Park & Ride)",
+                "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+                "desc": "Dojazd autem 3–5 min do stacji PKA. Możliwość korzystania z pociągu aglomeracyjnego.",
+                "severity": "info",
+            }
+        )
     else:
-        findings.append({
-            "badge": "🚌 Brak Bliskiej Kolei",
-            "title": f"Najbliższa stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-            "desc": "Brak bezpośredniego dostępu do PKA. Komunikacja oparta w 100% na transporcie kołowym (autobusy / auto).",
-            "severity": "info",
-        })
+        findings.append(
+            {
+                "badge": "🚌 Brak Bliskiej Kolei",
+                "title": f"Najbliższa stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+                "desc": "Brak bezpośredniego dostępu do PKA. Komunikacja oparta w 100% na transporcie kołowym (autobusy / auto).",
+                "severity": "info",
+            }
+        )
 
     # Expressway
     if nearest_hub_dist < 0.45:
-        findings.append({
-            "badge": "⚠️ Bliskość Węzła Szybkich Dróg (<450m)",
-            "title": f"{nearest_hub_name} ({nearest_hub_dist*1000:.0f} m)",
-            "desc": "Bardzo bliskie sąsiedztwo trasy szybkiego ruchu. Ryzyko uciążliwego hałasu komunikacyjnego i spalin.",
-            "severity": "warning",
-        })
+        findings.append(
+            {
+                "badge": "⚠️ Bliskość Węzła Szybkich Dróg (<450m)",
+                "title": f"{nearest_hub_name} ({nearest_hub_dist * 1000:.0f} m)",
+                "desc": "Bardzo bliskie sąsiedztwo trasy szybkiego ruchu. Ryzyko uciążliwego hałasu komunikacyjnego i spalin.",
+                "severity": "warning",
+            }
+        )
     elif nearest_hub_dist <= 5.0:
-        findings.append({
-            "badge": "🛣️ Wygodny Wylot na A4 / S19",
-            "title": f"{nearest_hub_name} ({nearest_hub_dist:.1f} km)",
-            "desc": "Szybki wjazd na obwodnicę i autostradę w kilka minut bez wjeżdżania do zatłoczonego centrum.",
-            "severity": "success",
-        })
+        findings.append(
+            {
+                "badge": "🛣️ Wygodny Wylot na A4 / S19",
+                "title": f"{nearest_hub_name} ({nearest_hub_dist:.1f} km)",
+                "desc": "Szybki wjazd na obwodnicę i autostradę w kilka minut bez wjeżdżania do zatłoczonego centrum.",
+                "severity": "success",
+            }
+        )
 
     if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
         commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
@@ -539,35 +559,43 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
 
     # 1. MPZP
     if mpzp_status == "OBOWIĄZUJĄCY" and mpzp_zone:
-        findings.append({
-            "badge": "🛡️ Ochrona Planistyczna MPZP",
-            "title": f"Plan Miejscowy Obowiązujący (Strefa: {mpzp_zone})",
-            "desc": "Teren objęty uchwalonym MPZP. Gwarancja stabilności otoczenia — sąsiad nie wybuduje obiektu sprzecznego z przeznaczeniem w planie.",
-            "severity": "success",
-        })
+        findings.append(
+            {
+                "badge": "🛡️ Ochrona Planistyczna MPZP",
+                "title": f"Plan Miejscowy Obowiązujący (Strefa: {mpzp_zone})",
+                "desc": "Teren objęty uchwalonym MPZP. Gwarancja stabilności otoczenia — sąsiad nie wybuduje obiektu sprzecznego z przeznaczeniem w planie.",
+                "severity": "success",
+            }
+        )
     else:
-        findings.append({
-            "badge": "⚠️ Brak Planu Miejscowego (Ryzyko WZ)",
-            "title": "Brak MPZP — Zagrożenie niekontrolowaną zabudową sąsiedzką",
-            "desc": "Brak planu oznacza, że sąsiedzi mogą w każdej chwili wystąpić o Warunki Zabudowy (WZ) na uciążliwą inwestycję (np. gęste szeregowce, warsztat, myjnię, maszt GSM).",
-            "severity": "warning",
-        })
+        findings.append(
+            {
+                "badge": "⚠️ Brak Planu Miejscowego (Ryzyko WZ)",
+                "title": "Brak MPZP — Zagrożenie niekontrolowaną zabudową sąsiedzką",
+                "desc": "Brak planu oznacza, że sąsiedzi mogą w każdej chwili wystąpić o Warunki Zabudowy (WZ) na uciążliwą inwestycję (np. gęste szeregowce, warsztat, myjnię, maszt GSM).",
+                "severity": "warning",
+            }
+        )
 
     # 2. Flood Risk (ISOK)
     if "POWODZ" in flood_zone or "ZAGROŻENIE_POWODZIOWE" in flood_zone:
-        findings.append({
-            "badge": "🚨 Strefa Zagrożenia Powodziowego (ISOK)",
-            "title": "Wysokie ryzyko zalania wodami 100-letnimi",
-            "desc": "Nieruchomość zlokalizowana w strefie zalewowej wyznaczonej przez Wody Polskie. Poważne trudności z uzyskaniem kredytu hipotecznego i drastycznie wyższe koszty ubezpieczenia.",
-            "severity": "danger",
-        })
+        findings.append(
+            {
+                "badge": "🚨 Strefa Zagrożenia Powodziowego (ISOK)",
+                "title": "Wysokie ryzyko zalania wodami 100-letnimi",
+                "desc": "Nieruchomość zlokalizowana w strefie zalewowej wyznaczonej przez Wody Polskie. Poważne trudności z uzyskaniem kredytu hipotecznego i drastycznie wyższe koszty ubezpieczenia.",
+                "severity": "danger",
+            }
+        )
     else:
-        findings.append({
-            "badge": "🌊 Teren Bezpieczny Hydrologicznie",
-            "title": "Brak zagrożenia powodziowego (ISOK Hydroportal)",
-            "desc": "Działka leży całkowicie poza strefami bezpośredniego i szczególnego zagrożenia powodziowego.",
-            "severity": "success",
-        })
+        findings.append(
+            {
+                "badge": "🌊 Teren Bezpieczny Hydrologicznie",
+                "title": "Brak zagrożenia powodziowego (ISOK Hydroportal)",
+                "desc": "Działka leży całkowicie poza strefami bezpośredniego i szczególnego zagrożenia powodziowego.",
+                "severity": "success",
+            }
+        )
 
     # 3. Cadastral Area Discrepancy (Oferta vs EGiB)
     if cadastral_area and area_plot and float(area_plot) > 0:
@@ -577,25 +605,28 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
         pct = diff / o_area
         if pct >= 0.05 and diff >= 15.0:
             sev = "danger" if pct >= 0.15 else "warning"
-            findings.append({
-                "badge": f"⚠️ Rozbieżność Powierzchni Działki ({diff:.0f} m²)",
-                "title": "Różnica między ogłoszeniem a państwowym katastrem (EGiB)",
-                "desc": f"W ogłoszeniu podano {o_area:.0f} m², a w oficjalnej ewidencji gruntów działka ma {c_area:.0f} m² (różnica: {diff:.0f} m², {pct*100:.1f}%). Może to wynikać z wliczenia udziału w drodze wewnętrznej lub błędu pośrednika.",
-                "severity": sev,
-            })
+            findings.append(
+                {
+                    "badge": f"⚠️ Rozbieżność Powierzchni Działki ({diff:.0f} m²)",
+                    "title": "Różnica między ogłoszeniem a państwowym katastrem (EGiB)",
+                    "desc": f"W ogłoszeniu podano {o_area:.0f} m², a w oficjalnej ewidencji gruntów działka ma {c_area:.0f} m² (różnica: {diff:.0f} m², {pct * 100:.1f}%). Może to wynikać z wliczenia udziału w drodze wewnętrznej lub błędu pośrednika.",
+                    "severity": sev,
+                }
+            )
 
     # 4. Industrial & Environmental neighborhood
     has_industrial_risk = any(
-        ("Ba" in c or "Bi" in c or "przemysłow" in c.lower() or "kolej" in c.lower())
-        for c in cons
+        ("Ba" in c or "Bi" in c or "przemysłow" in c.lower() or "kolej" in c.lower()) for c in cons
     )
     if has_industrial_risk:
-        findings.append({
-            "badge": "🚨 Sąsiedztwo Przemysłowe / Ba / Bi",
-            "title": "Wykryto tereny komercyjne lub uciążliwe w promieniu 120m",
-            "desc": "W bezpośrednim sąsiedztwie zidentyfikowano działki o przeznaczeniu przemysłowym, składowym lub kolejowym.",
-            "severity": "danger",
-        })
+        findings.append(
+            {
+                "badge": "🚨 Sąsiedztwo Przemysłowe / Ba / Bi",
+                "title": "Wykryto tereny komercyjne lub uciążliwe w promieniu 120m",
+                "desc": "W bezpośrednim sąsiedztwie zidentyfikowano działki o przeznaczeniu przemysłowym, składowym lub kolejowym.",
+                "severity": "danger",
+            }
+        )
 
     has_danger = any(f["severity"] == "danger" for f in findings)
     has_warn = any(f["severity"] == "warning" for f in findings)
@@ -625,89 +656,111 @@ def calculate_gesut_audit(listing: Any) -> dict[str, Any]:
 
     # A) Sewerage
     if any(s in sewerage for s in ("szambo", "brak")):
-        gesut_findings.append({
-            "badge": "⚠️ Szambo / Brak Kanalizacji",
-            "title": "Bieżące koszty asenizacyjne (~300–500 zł/mc)",
-            "desc": "Brak podłączenia do sieci miejskiej. Konieczność wywozu ścieków co 2–3 tyg. Sprawdź na mapie GESUT (brązowa linia 'ks'), czy w drodze biegnie kolektor i jaki byłby koszt przyłącza (ok. 150–300 zł/mb).",
-            "severity": "warning",
-        })
+        gesut_findings.append(
+            {
+                "badge": "⚠️ Szambo / Brak Kanalizacji",
+                "title": "Bieżące koszty asenizacyjne (~300–500 zł/mc)",
+                "desc": "Brak podłączenia do sieci miejskiej. Konieczność wywozu ścieków co 2–3 tyg. Sprawdź na mapie GESUT (brązowa linia 'ks'), czy w drodze biegnie kolektor i jaki byłby koszt przyłącza (ok. 150–300 zł/mb).",
+                "severity": "warning",
+            }
+        )
     elif "miejska" in sewerage:
-        gesut_findings.append({
-            "badge": "✅ Sieć Kanalizacji Miejskiej",
-            "title": "Pełen komfort sanitarny",
-            "desc": "Nieruchomość włączona do sieci miejskiej. Brak konieczności zamawiania wywozu nieczystości i niższe koszty ścieków.",
-            "severity": "success",
-        })
+        gesut_findings.append(
+            {
+                "badge": "✅ Sieć Kanalizacji Miejskiej",
+                "title": "Pełen komfort sanitarny",
+                "desc": "Nieruchomość włączona do sieci miejskiej. Brak konieczności zamawiania wywozu nieczystości i niższe koszty ścieków.",
+                "severity": "success",
+            }
+        )
     elif "przydomowa" in sewerage:
-        gesut_findings.append({
-            "badge": "🌱 Przydomowa Oczyszczalnia Ścieków",
-            "title": "Niskie koszty bieżące",
-            "desc": "Niski koszt utrzymania (~200 zł/rok). Weryfikuj na mapie GESUT odległość od ewentualnej studni i granic działki.",
-            "severity": "success",
-        })
+        gesut_findings.append(
+            {
+                "badge": "🌱 Przydomowa Oczyszczalnia Ścieków",
+                "title": "Niskie koszty bieżące",
+                "desc": "Niski koszt utrzymania (~200 zł/rok). Weryfikuj na mapie GESUT odległość od ewentualnej studni i granic działki.",
+                "severity": "success",
+            }
+        )
     else:
-        gesut_findings.append({
-            "badge": "❓ Nieznany Status Kanalizacji",
-            "title": "Brak deklaracji w ofercie",
-            "desc": "Sprawdź w Geoportalu na warstwie GESUT obecność sieci sanitarnej w drodze lub zapytaj sprzedawcę o rodzaj odprowadzania ścieków.",
-            "severity": "info",
-        })
+        gesut_findings.append(
+            {
+                "badge": "❓ Nieznany Status Kanalizacji",
+                "title": "Brak deklaracji w ofercie",
+                "desc": "Sprawdź w Geoportalu na warstwie GESUT obecność sieci sanitarnej w drodze lub zapytaj sprzedawcę o rodzaj odprowadzania ścieków.",
+                "severity": "info",
+            }
+        )
 
     # B) Road access
     if any(r in road for r in ("nieutwardzona", "polna", "gruntowa")):
-        gesut_findings.append({
-            "badge": "⚠️ Droga Nieutwardzona",
-            "title": "Ryzyko braku uzbrojenia w pasie drogowym",
-            "desc": "Dojazd drogą gruntową utrudnia doprowadzenie mediów i może wymagać własnych nakładów finansowych na przyłącza oraz utwardzenie nawierzchni.",
-            "severity": "warning",
-        })
+        gesut_findings.append(
+            {
+                "badge": "⚠️ Droga Nieutwardzona",
+                "title": "Ryzyko braku uzbrojenia w pasie drogowym",
+                "desc": "Dojazd drogą gruntową utrudnia doprowadzenie mediów i może wymagać własnych nakładów finansowych na przyłącza oraz utwardzenie nawierzchni.",
+                "severity": "warning",
+            }
+        )
     elif any(r in road for r in ("asfaltowa", "kostka", "utwardzona")):
-        gesut_findings.append({
-            "badge": "✅ Dojazd Utwardzony",
-            "title": "Dostęp do infrastruktury drogowej",
-            "desc": "Dojazd drogą o twardej nawierzchni. Główne sieci GESUT (woda, gaz, prąd) z reguły biegną w pasie drogowym.",
-            "severity": "success",
-        })
+        gesut_findings.append(
+            {
+                "badge": "✅ Dojazd Utwardzony",
+                "title": "Dostęp do infrastruktury drogowej",
+                "desc": "Dojazd drogą o twardej nawierzchni. Główne sieci GESUT (woda, gaz, prąd) z reguły biegną w pasie drogowym.",
+                "severity": "success",
+            }
+        )
 
     # C) Heating / Gas
     if "gazowe" in heating:
-        gesut_findings.append({
-            "badge": "🔥 Ogrzewanie Gazowe",
-            "title": "Weryfikacja sieci vs butla LPG",
-            "desc": "Sprawdź na warstwie GESUT obecność gazociągu sieciowego (żółta linia 'g'). Jeśli w drodze brak gazu, ogrzewanie bazuje na zbiorniku naziemnym/podziemnym na działce.",
-            "severity": "info",
-        })
+        gesut_findings.append(
+            {
+                "badge": "🔥 Ogrzewanie Gazowe",
+                "title": "Weryfikacja sieci vs butla LPG",
+                "desc": "Sprawdź na warstwie GESUT obecność gazociągu sieciowego (żółta linia 'g'). Jeśli w drodze brak gazu, ogrzewanie bazuje na zbiorniku naziemnym/podziemnym na działce.",
+                "severity": "info",
+            }
+        )
     elif "pompa" in heating:
-        gesut_findings.append({
-            "badge": "⚡ Pompa Ciepła",
-            "title": "Zapotrzebowanie na moc przyłączeniową",
-            "desc": "Wymaga stabilnego przyłącza elektroenergetycznego (GESUT / dystrybutor energii — rekomendowane min. 14–17 kW).",
-            "severity": "info",
-        })
+        gesut_findings.append(
+            {
+                "badge": "⚡ Pompa Ciepła",
+                "title": "Zapotrzebowanie na moc przyłączeniową",
+                "desc": "Wymaga stabilnego przyłącza elektroenergetycznego (GESUT / dystrybutor energii — rekomendowane min. 14–17 kW).",
+                "severity": "info",
+            }
+        )
 
     # D) Fiber
     if has_fiber:
-        gesut_findings.append({
-            "badge": "✅ Światłowód / Szerokopasmowy",
-            "title": "Szybki internet na działce",
-            "desc": "Obecność łącza światłowodowego (pomarańczowa linia 't' w GESUT). Istotna zaleta przy pracy zdalnej.",
-            "severity": "success",
-        })
+        gesut_findings.append(
+            {
+                "badge": "✅ Światłowód / Szerokopasmowy",
+                "title": "Szybki internet na działce",
+                "desc": "Obecność łącza światłowodowego (pomarańczowa linia 't' w GESUT). Istotna zaleta przy pracy zdalnej.",
+                "severity": "success",
+            }
+        )
     else:
-        gesut_findings.append({
-            "badge": "📶 Brak Potwierdzonego Światłowodu",
-            "title": "Weryfikacja zasięgu telekomunikacyjnego",
-            "desc": "Sprawdź w GESUT sieć telekomunikacyjną lub w rejestrze SIDUSIS (gov.pl) planowane inwestycje z dofinansowań unijnych.",
-            "severity": "info",
-        })
+        gesut_findings.append(
+            {
+                "badge": "📶 Brak Potwierdzonego Światłowodu",
+                "title": "Weryfikacja zasięgu telekomunikacyjnego",
+                "desc": "Sprawdź w GESUT sieć telekomunikacyjną lub w rejestrze SIDUSIS (gov.pl) planowane inwestycje z dofinansowań unijnych.",
+                "severity": "info",
+            }
+        )
 
     # E) Transit pipes / Technical collision guide
-    gesut_findings.append({
-        "badge": "ℹ️ Przewodnik Kolizji w GESUT",
-        "title": "Strefy ochronne wyłączające pas gruntu z zabudowy",
-        "desc": "Na mapie Geoportalu sprawdź kolizje: linie elektroenergetyczne (czerwone 'e' — strefa ochronna 3–15m bez prawa zabudowy) oraz gazociągi podwyższonych ciśnień (żółte 'g' — strefa kontrolowana z zakazem budowy).",
-        "severity": "info",
-    })
+    gesut_findings.append(
+        {
+            "badge": "ℹ️ Przewodnik Kolizji w GESUT",
+            "title": "Strefy ochronne wyłączające pas gruntu z zabudowy",
+            "desc": "Na mapie Geoportalu sprawdź kolizje: linie elektroenergetyczne (czerwone 'e' — strefa ochronna 3–15m bez prawa zabudowy) oraz gazociągi podwyższonych ciśnień (żółte 'g' — strefa kontrolowana z zakazem budowy).",
+            "severity": "info",
+        }
+    )
 
     has_danger_gesut = any(f["severity"] == "danger" for f in gesut_findings)
     has_warn_gesut = any(f["severity"] == "warning" for f in gesut_findings)
@@ -753,7 +806,9 @@ def analyze_land_and_utilities(listing: Any, market_median_m2: float | None = No
         voivodeship = TERYT_VOIVODESHIPS.get(teryt_prefix, "")
 
     v_cap = voivodeship.capitalize() if voivodeship else ""
-    clipboard_text = f"Numer działki: {short_nr}\nWojewództwo: {v_cap}\nIdentyfikator TERYT: {parcel_id}" if parcel_id else ""
+    clipboard_text = (
+        f"Numer działki: {short_nr}\nWojewództwo: {v_cap}\nIdentyfikator TERYT: {parcel_id}" if parcel_id else ""
+    )
 
     cadastral_packet = {
         "voivodeship": v_cap,

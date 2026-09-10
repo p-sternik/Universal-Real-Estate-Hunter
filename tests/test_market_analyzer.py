@@ -502,5 +502,3 @@ def test_analyze_land_and_utilities_safe_listing():
     assert any("Pełen komfort sanitarny" in t for t in gesut_titles)
     assert any("Dostęp do infrastruktury drogowej" in t for t in gesut_titles)
     assert any("Szybki internet na działce" in t for t in gesut_titles)
-
-
