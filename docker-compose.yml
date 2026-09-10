@@ -15,6 +15,12 @@ services:
         required: false
     volumes:
       - estate_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/api/config"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     command: ["python", "main.py", "dashboard", "--host", "0.0.0.0", "--port", "8080", "--no-open"]
 
   # Automated Background Scraper & Monitoring Daemon
@@ -33,6 +39,12 @@ services:
         required: false
     volumes:
       - estate_data:/app/data
+    healthcheck:
+      test: ["CMD-SHELL", "tr '\\0' ' ' < /proc/1/cmdline | grep -q 'main.py run' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      start_period: 15s
+      retries: 3
     command: ["python", "main.py", "run"]
 
 volumes:

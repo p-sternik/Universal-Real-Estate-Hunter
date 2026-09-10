@@ -358,7 +358,7 @@ def test_stage2_utilities_detection():
 
 @pytest.mark.asyncio
 async def test_full_qualification_engine():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     # Perfect house in Whitelist with 'pod klucz', heat pump, city sewer, and fiber
     listing = create_sample_listing(
@@ -388,7 +388,7 @@ async def test_full_qualification_engine():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_scoring_penalties_and_bonuses():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     base_args = {
         "title": "Dom w Rzeszowie",
@@ -425,7 +425,7 @@ async def test_qualification_engine_scoring_penalties_and_bonuses():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_building_type_and_year_scoring():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     base_args = {
         "title": "Dom w Rzeszowie",
@@ -448,7 +448,7 @@ async def test_qualification_engine_building_type_and_year_scoring():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_price_gradient():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     def make(ppm2):
         return create_sample_listing(
@@ -472,7 +472,7 @@ async def test_qualification_engine_price_gradient():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_budget_bonus():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     base = {
         "title": "Dom testowy",
@@ -495,7 +495,7 @@ async def test_qualification_engine_budget_bonus():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_needs_review_when_state_unknown():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     listing = create_sample_listing(
         title="Dom bez danych",
@@ -512,7 +512,7 @@ async def test_qualification_engine_needs_review_when_state_unknown():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_no_double_counting_for_szambo():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     base = {
         "title": "Dom testowy",
@@ -538,7 +538,7 @@ async def test_qualification_engine_no_double_counting_for_szambo():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_year_built_rejects_old_house():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     listing_old = create_sample_listing(
         title="Stary dom",
@@ -642,7 +642,7 @@ def test_stage2_area_plot_writeback_to_model():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_ai_due_diligence_fields_from_llm():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
     engine.llm = AsyncMock()
     engine.llm.analyze_description.return_value = {
         "summary": "Segment skrajny w stanie deweloperskim. Główne ryzyko: brak info o odbiorze budynku.",
@@ -671,7 +671,7 @@ async def test_qualification_engine_ai_due_diligence_fields_from_llm():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_contact_phone_regex_fallback():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     listing = create_sample_listing(
         raw_description="Piękny segment skrajny z garażem. Dojazd asfaltowy. Opiekun oferty: tel. 600-123-456.",
@@ -686,7 +686,7 @@ async def test_qualification_engine_contact_phone_regex_fallback():
 
 @pytest.mark.asyncio
 async def test_qualification_engine_ai_fields_empty_without_phone_or_llm():
-    engine = QualificationEngine()
+    engine = QualificationEngine(llm_enabled=False)
 
     listing = create_sample_listing(raw_description="Piękny segment skrajny z garażem. Dojazd asfaltowy.")
     res = await engine.evaluate_listing(listing, profile=PermissiveProfile(), skip_llm=True)

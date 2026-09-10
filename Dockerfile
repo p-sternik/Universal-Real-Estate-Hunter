@@ -47,9 +47,5 @@ ENV PYTHONUNBUFFERED=1 \
 # Expose web dashboard port
 EXPOSE 8080
 
-# Default healthcheck verifying the live dashboard API
-HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-    CMD curl -f http://localhost:8080/api/config || exit 1
-
 # Default command starts the live interactive web dashboard
 CMD ["python", "main.py", "dashboard", "--host", "0.0.0.0", "--port", "8080", "--no-open"]

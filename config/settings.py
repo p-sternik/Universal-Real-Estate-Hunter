@@ -115,7 +115,8 @@ class Settings(BaseSettings):
     # LLM Settings (Optional)
     USE_LLM_ANALYSIS: bool = False
     OPENROUTER_API_KEY: str | None = None
-    OPENROUTER_MODEL: str = "google/gemma-4-31b-it:free"
+    OPENROUTER_MODEL: str = "nex-agi/nex-n2.5-mini:free"
+    LLM_MAX_CALLS_PER_MINUTE: int = 15
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str | None = None

@@ -1,4 +1,7 @@
+import asyncio
 import json
+import time
+from collections import deque
 from typing import Any
 
 import httpx
@@ -6,6 +9,53 @@ from loguru import logger
 
 from config import settings
 from src.models.listing import ListingSchema
+
+LLM_MAX_RETRIES = 3
+
+_llm_throttle_lock = asyncio.Lock()
+_llm_call_times: deque[float] = deque()
+
+
+async def _throttle_llm_calls() -> None:
+    max_calls = int(getattr(settings, "LLM_MAX_CALLS_PER_MINUTE", 15) or 15)
+    async with _llm_throttle_lock:
+        now = time.monotonic()
+        while _llm_call_times and now - _llm_call_times[0] > 60.0:
+            _llm_call_times.popleft()
+        if len(_llm_call_times) >= max_calls:
+            wait = 60.0 - (now - _llm_call_times[0]) + 0.5
+            logger.info(
+                f"[LLMAnalyzer] Throttling LLM calls for {wait:.0f}s (limit {max_calls} req/min, free-tier OpenRouter)."
+            )
+            await asyncio.sleep(wait)
+            now = time.monotonic()
+            while _llm_call_times and now - _llm_call_times[0] > 60.0:
+                _llm_call_times.popleft()
+        _llm_call_times.append(time.monotonic())
+
+
+def _is_rate_limit_error(e: Exception) -> bool:
+    if type(e).__name__ == "RateLimitError":
+        return True
+    status = getattr(e, "status_code", None) or getattr(getattr(e, "response", None), "status_code", None)
+    return status == 429
+
+
+async def _chat_completion_with_retry(client: Any, **kwargs: Any):
+    for attempt in range(LLM_MAX_RETRIES):
+        try:
+            return await client.chat.completions.create(**kwargs)
+        except Exception as e:
+            if attempt < LLM_MAX_RETRIES - 1 and _is_rate_limit_error(e):
+                delay = min(60.0, 5.0 * (2**attempt))
+                logger.warning(
+                    f"[LLMAnalyzer] Rate limited (429). Retrying in {delay:.0f}s "
+                    f"(attempt {attempt + 1}/{LLM_MAX_RETRIES})..."
+                )
+                await asyncio.sleep(delay)
+                continue
+            raise
+    raise RuntimeError("LLM request failed after exhausting retries")
 
 
 class LLMAnalyzer:
@@ -37,6 +87,11 @@ class LLMAnalyzer:
             cleaned = "\n".join(lines).strip()
         try:
             return json.loads(cleaned)
+        except Exception:
+            pass
+        try:
+            obj, _ = json.JSONDecoder().raw_decode(cleaned)
+            return obj
         except Exception as e:
             logger.warning(f"[LLMAnalyzer] Failed to parse JSON: {e}. Raw content: {cleaned[:200]}")
             return None
@@ -44,6 +99,8 @@ class LLMAnalyzer:
     async def analyze_description(self, listing: ListingSchema) -> dict[str, Any] | None:
         if not self.enabled:
             return None
+
+        await _throttle_llm_calls()
 
         prompt = f"""Wyodrębnij stan faktyczny z poniższego ogłoszenia nieruchomości i zwróć obiekt JSON.
 
@@ -98,7 +155,8 @@ Zwróć poprawny JSON o schemacie:
                         "X-Title": "Universal Real Estate Hunter",
                     },
                 )
-                response = await client.chat.completions.create(
+                response = await _chat_completion_with_retry(
+                    client,
                     model=self.openrouter_model,
                     messages=[
                         {
@@ -125,7 +183,8 @@ Zwróć poprawny JSON o schemacie:
                 if self.openai_base_url:
                     kwargs["base_url"] = self.openai_base_url
                 client = AsyncOpenAI(**kwargs)
-                response = await client.chat.completions.create(
+                response = await _chat_completion_with_retry(
+                    client,
                     model=self.openai_model,
                     response_format={"type": "json_object"},
                     messages=[
