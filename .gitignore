@@ -48,6 +48,9 @@ listings_report.html
 scratch*
 logs/
 *.log
+*.lock
+.scrape*
+scrape_status.json
 
 # Caches & MCP tools
 .playwright-mcp/

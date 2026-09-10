@@ -28,13 +28,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Non-root user with writable app, data, and logs directories
-RUN groupadd -r appuser && useradd -r -m -d /home/appuser -g appuser appuser \
-    && mkdir -p /app/data /app/logs \
-    && chown -R appuser:appuser /app /home/appuser
+RUN groupadd -r appuser && useradd -r -m -d /home/appuser -g appuser appuser
 
 # Copy virtualenv with locked dependencies from builder, then application source
-COPY --from=builder /app/.venv /app/.venv
-COPY . /app
+COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
+COPY --chown=appuser:appuser . /app
+
+# Ensure appuser owns runtime directories with full read/write permissions
+RUN mkdir -p /app/data /app/logs \
+    && chown -R appuser:appuser /app /home/appuser \
+    && chmod -R 777 /app/data /app/logs
 
 USER appuser
 

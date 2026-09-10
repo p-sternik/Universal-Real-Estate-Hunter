@@ -1,7 +1,7 @@
 import asyncio
-import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import event, text
@@ -28,6 +28,49 @@ def get_sqlite_write_lock() -> asyncio.Lock:
     return _sqlite_write_lock
 
 
+def is_sqlite_lock_error(exc: BaseException) -> bool:
+    """Checks if an exception is a transient SQLite lock, busy, or readonly contention error."""
+    msg = str(exc).lower()
+    return any(
+        k in msg
+        for k in (
+            "database is locked",
+            "readonly database",
+            "attempt to write a readonly database",
+            "database is busy",
+            "disk i/o error",
+            "cantlock",
+            "locked",
+            "busy",
+        )
+    )
+
+
+async def safe_commit(session: AsyncSession, max_retries: int = 7, initial_backoff: float = 0.25) -> None:
+    """Commit with retry and write-lock protection for SQLite against locks & readonly contention."""
+    is_sqlite = "sqlite" in settings.DATABASE_URL
+    if not is_sqlite:
+        await session.commit()
+        return
+
+    write_lock = get_sqlite_write_lock()
+    async with write_lock:
+        for attempt in range(max_retries):
+            try:
+                await session.commit()
+                return
+            except Exception as exc:
+                if is_sqlite_lock_error(exc) and attempt < max_retries - 1:
+                    backoff = min(5.0, initial_backoff * (1.8**attempt))
+                    logger.warning(
+                        f"[Database] SQLite lock/readonly contention ({exc}) during commit, "
+                        f"retrying in {backoff:.2f}s (attempt {attempt + 1}/{max_retries})..."
+                    )
+                    await asyncio.sleep(backoff)
+                else:
+                    raise
+
+
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
@@ -37,9 +80,22 @@ def get_engine() -> AsyncEngine:
         if "sqlite" in db_url:
             if db_url.startswith("sqlite+aiosqlite:///"):
                 path = db_url.replace("sqlite+aiosqlite:///", "")
-                dirname = os.path.dirname(path)
-                if dirname:
-                    os.makedirs(dirname, exist_ok=True)
+                p_db = Path(path)
+                if p_db.parent:
+                    p_db.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        p_db.parent.chmod(0o777)
+                    except Exception:
+                        pass
+                try:
+                    if p_db.exists():
+                        p_db.chmod(0o666)
+                    for ext in ("-wal", "-shm"):
+                        p_aux = Path(f"{path}{ext}")
+                        if p_aux.exists():
+                            p_aux.chmod(0o666)
+                except Exception:
+                    pass
             connect_args = {
                 "timeout": 60.0,
             }
@@ -84,27 +140,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     async with session_factory() as session:
         try:
             yield session
-            is_sqlite = "sqlite" in settings.DATABASE_URL
-            if is_sqlite:
-                write_lock = get_sqlite_write_lock()
-                async with write_lock:
-                    max_retries = 5
-                    for attempt in range(max_retries):
-                        try:
-                            await session.commit()
-                            break
-                        except Exception as exc:
-                            if "database is locked" in str(exc) and attempt < max_retries - 1:
-                                backoff = 0.25 * (2**attempt)
-                                logger.warning(
-                                    f"[Database] SQLite locked during commit, retrying in {backoff:.2f}s "
-                                    f"(attempt {attempt + 1}/{max_retries})..."
-                                )
-                                await asyncio.sleep(backoff)
-                            else:
-                                raise
-            else:
-                await session.commit()
+            await safe_commit(session)
         except Exception:
             await session.rollback()
             raise
@@ -246,14 +282,25 @@ async def _migrate_sqlite_columns(conn) -> None:
 
 
 async def init_db() -> None:
-    """Initialize database tables and run lightweight migrations."""
+    """Initialize database tables and run lightweight migrations with contention retry."""
     engine = get_engine()
     logger.info("Initializing database tables...")
-    async with engine.begin() as conn:
-        if "sqlite" in settings.DATABASE_URL:
-            await conn.execute(text("PRAGMA journal_mode=WAL;"))
-            await conn.execute(text("PRAGMA busy_timeout=60000;"))
-            await conn.execute(text("PRAGMA synchronous=NORMAL;"))
-        await conn.run_sync(Base.metadata.create_all)
-        await _migrate_sqlite_columns(conn)
-    logger.info("Database tables initialized and up-to-date.")
+    max_retries = 5
+    for attempt in range(max_retries):
+        try:
+            async with engine.begin() as conn:
+                if "sqlite" in settings.DATABASE_URL:
+                    await conn.execute(text("PRAGMA journal_mode=WAL;"))
+                    await conn.execute(text("PRAGMA busy_timeout=60000;"))
+                    await conn.execute(text("PRAGMA synchronous=NORMAL;"))
+                await conn.run_sync(Base.metadata.create_all)
+                await _migrate_sqlite_columns(conn)
+            logger.info("Database tables initialized and up-to-date.")
+            return
+        except Exception as exc:
+            if is_sqlite_lock_error(exc) and attempt < max_retries - 1:
+                backoff = 0.5 * (2**attempt)
+                logger.warning(f"[Database] SQLite contention during init_db ({exc}), retrying in {backoff:.2f}s...")
+                await asyncio.sleep(backoff)
+            else:
+                raise

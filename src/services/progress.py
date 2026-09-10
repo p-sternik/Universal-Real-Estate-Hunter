@@ -1,10 +1,90 @@
+import json
+import os
+import time
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 from loguru import logger
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
+
+
+def get_shared_status_file() -> str:
+    from config import settings
+
+    db_url = settings.DATABASE_URL
+    if "sqlite" in db_url and db_url.startswith("sqlite+aiosqlite:///"):
+        path = db_url.replace("sqlite+aiosqlite:///", "")
+        p = Path(path)
+        if p.parent:
+            return str(p.parent / "scrape_status.json")
+    return str(Path("data") / "scrape_status.json")
+
+
+def get_shared_cancel_file() -> str:
+    from config import settings
+
+    db_url = settings.DATABASE_URL
+    if "sqlite" in db_url and db_url.startswith("sqlite+aiosqlite:///"):
+        path = db_url.replace("sqlite+aiosqlite:///", "")
+        p = Path(path)
+        if p.parent:
+            return str(p.parent / ".scrape_cancel")
+    return str(Path("data") / ".scrape_cancel")
+
+
+def signal_shared_cancellation() -> None:
+    try:
+        p = Path(get_shared_cancel_file()).resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(datetime.now(UTC).isoformat(), encoding="utf-8")
+    except Exception as e:
+        logger.debug(f"Failed to signal shared cancellation: {e}")
+
+
+def check_shared_cancellation() -> bool:
+    try:
+        return Path(get_shared_cancel_file()).exists()
+    except Exception:
+        return False
+
+
+def clear_shared_cancellation() -> None:
+    try:
+        p = Path(get_shared_cancel_file())
+        if p.exists():
+            p.unlink()
+    except Exception:
+        pass
+
+
+def write_shared_status(payload: dict[str, Any]) -> None:
+    try:
+        p = Path(get_shared_status_file()).resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        temp_p = p.parent / f"{p.name}.tmp.{os.getpid()}"
+        temp_p.write_text(json.dumps(payload), encoding="utf-8")
+        temp_p.replace(p)
+    except Exception as e:
+        logger.debug(f"Failed to write shared status: {e}")
+
+
+def read_shared_status() -> dict[str, Any] | None:
+    try:
+        p = Path(get_shared_status_file())
+        if not p.exists():
+            return None
+        mtime = p.stat().st_mtime
+        content = p.read_text(encoding="utf-8")
+        data = json.loads(content)
+        if data.get("is_running") and (time.time() - mtime > 180):
+            data["is_running"] = False
+            data["current_step"] = "Zatrzymano lub przekroczono limit czasu"
+        return data
+    except Exception:
+        return None
 
 
 class ProgressTracker:
@@ -34,7 +114,14 @@ class ProgressTracker:
         self._portal_base_pct = 0
         self._portal_share = 85
 
+    def _sync_shared_status(self):
+        try:
+            write_shared_status(self.get_status_payload())
+        except Exception:
+            pass
+
     def start_session(self, total_portals: int = 3):
+        clear_shared_cancellation()
         self.is_running = True
         self.cancel_requested = False
         self.current_portal = ""
@@ -49,6 +136,7 @@ class ProgressTracker:
         self._portal_share = 85 / self._total_steps
         self._portal_base_pct = 0
         self.add_log("🚀 Rozpoczęto cykl scrapingu i analizy ofert.")
+        self._sync_shared_status()
 
         try:
             self._rich_progress = Progress(
@@ -82,6 +170,7 @@ class ProgressTracker:
         self.current_step = f"Pobieranie {portal_name} (strona {current_page}/{total_pages})..."
         self.add_log(f"[{portal_name}] Pobieranie strony {current_page}/{total_pages}...")
         self._refresh_rich()
+        self._sync_shared_status()
 
     def update_portal_page(
         self,
@@ -109,12 +198,14 @@ class ProgressTracker:
                 f"Pobieranie {self.current_portal} · strona {page}/{self.total_pages} · {items_done} ogłoszeń"
             )
         self._refresh_rich()
+        self._sync_shared_status()
 
     def update_processing(self, done: int, total: int):
         """Progress during qualification/analysis of scraped listings."""
         self.current_step = f"Analiza ofert ({self.current_portal}): {done}/{total}..."
         self.percentage = min(95, self._portal_base_pct + int(self._portal_share))
         self._refresh_rich()
+        self._sync_shared_status()
 
     def record_items(self, count: int, qualified: int = 0, duplicates: int = 0):
         self.items_scraped += count
@@ -149,17 +240,20 @@ class ProgressTracker:
     def request_cancel(self):
         """Signals cooperative cancellation of the running scrape cycle."""
         self.cancel_requested = True
+        signal_shared_cancellation()
         self.current_step = "Zatrzymywanie procesu..."
         self.add_log("🛑 Zażądano zatrzymania scrapingu przez użytkownika.", level="warning")
         self._refresh_rich()
+        self._sync_shared_status()
 
     def is_cancelled(self) -> bool:
-        return self.cancel_requested
+        return self.cancel_requested or check_shared_cancellation()
 
     def cancel_session(self):
         """Marks the session as stopped by user request."""
         self.is_running = False
         self.cancel_requested = False
+        clear_shared_cancellation()
         self.current_step = "Zatrzymano przez użytkownika"
         self.add_log("🛑 Cykl scrapingu został przerwany przez użytkownika.", level="warning")
         if self._rich_progress and self._task_id is not None:
@@ -170,10 +264,12 @@ class ProgressTracker:
             )
             self._rich_progress.stop()
             self._rich_progress = None
+        self._sync_shared_status()
 
     def complete_session(self, summary: dict[str, Any]):
         self.is_running = False
         self.cancel_requested = False
+        clear_shared_cancellation()
         self.percentage = 100
         self.current_step = "Zakończono pomyślnie!"
         self.add_log(
@@ -189,6 +285,7 @@ class ProgressTracker:
             )
             self._rich_progress.stop()
             self._rich_progress = None
+        self._sync_shared_status()
 
     def get_status_payload(self) -> dict[str, Any]:
         elapsed = 0

@@ -213,3 +213,101 @@ async def test_sqlite_get_session_retry_on_locked(monkeypatch):
 
     # Commits twice failing with 'database is locked', then succeeds on 3rd attempt
     assert attempts == 3
+
+
+@pytest.mark.asyncio
+async def test_sqlite_safe_commit_retry_on_readonly_database(monkeypatch):
+    """Verify safe_commit retries on SQLite 'attempt to write a readonly database' error."""
+    from src.storage.database import get_session
+
+    attempts = 0
+
+    async def mock_commit():
+        nonlocal attempts
+        attempts += 1
+        if attempts < 2:
+            import sqlite3
+
+            raise sqlite3.OperationalError("attempt to write a readonly database")
+
+    async with get_session() as session:
+        monkeypatch.setattr(session, "commit", mock_commit)
+
+    assert attempts == 2
+
+
+def test_is_sqlite_lock_error_detection():
+    """Verify is_sqlite_lock_error identifies all SQLite contention variants."""
+    import sqlite3
+
+    from src.storage.database import is_sqlite_lock_error
+
+    err_locked = sqlite3.OperationalError("database is locked")
+    err_readonly = sqlite3.OperationalError("attempt to write a readonly database")
+    err_busy = sqlite3.OperationalError("database is busy")
+    err_other = sqlite3.OperationalError("no such table: listings")
+
+    assert is_sqlite_lock_error(err_locked) is True
+    assert is_sqlite_lock_error(err_readonly) is True
+    assert is_sqlite_lock_error(err_busy) is True
+    assert is_sqlite_lock_error(err_other) is False
+
+
+@pytest.mark.asyncio
+async def test_scrape_lock_and_pipeline_skips_when_locked(tmp_path, monkeypatch):
+    """Verify ScrapeLock prevents concurrent execution and pipeline.run_cycle skips cleanly."""
+    from src.services.pipeline import ScraperPipeline
+    from src.services.scrape_lock import ScrapeLock
+
+    lock_file = str(tmp_path / "test_scrape.lock")
+    lock1 = ScrapeLock(lock_file)
+    lock2 = ScrapeLock(lock_file)
+
+    assert lock1.acquire({"test": 1}) is True
+    assert lock1.is_locked() is True
+    # Second acquisition fails
+    assert lock2.acquire({"test": 2}) is False
+
+    # Mock get_scrape_lock in pipeline to return lock2
+    monkeypatch.setattr("src.services.scrape_lock.get_scrape_lock", lambda: lock2)
+
+    pipeline = ScraperPipeline()
+    summary = await pipeline.run_cycle()
+    assert summary.get("skipped_reason") == "already_running"
+
+    lock1.release()
+    assert lock1.is_locked() is False
+    assert lock2.acquire({"test": 2}) is True
+    lock2.release()
+
+
+def test_shared_status_and_cancellation_lifecycle(tmp_path, monkeypatch):
+    """Verify progress tracker writes shared status file and shared cancellation flags."""
+    from src.services.progress import (
+        check_shared_cancellation,
+        clear_shared_cancellation,
+        read_shared_status,
+        signal_shared_cancellation,
+        write_shared_status,
+    )
+
+    status_file = str(tmp_path / "status.json")
+    cancel_file = str(tmp_path / ".cancel")
+
+    monkeypatch.setattr("src.services.progress.get_shared_status_file", lambda: status_file)
+    monkeypatch.setattr("src.services.progress.get_shared_cancel_file", lambda: cancel_file)
+
+    clear_shared_cancellation()
+    assert check_shared_cancellation() is False
+
+    signal_shared_cancellation()
+    assert check_shared_cancellation() is True
+
+    clear_shared_cancellation()
+    assert check_shared_cancellation() is False
+
+    write_shared_status({"is_running": True, "percentage": 42})
+    payload = read_shared_status()
+    assert payload is not None
+    assert payload["percentage"] == 42
+    assert payload["is_running"] is True

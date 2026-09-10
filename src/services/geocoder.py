@@ -8,7 +8,7 @@ from loguru import logger
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.storage.database import get_session
+from src.storage.database import get_session, safe_commit
 from src.storage.models import GeocacheModel, ListingModel
 
 # Well-known centroids for Rzeszów districts and surrounding towns
@@ -126,9 +126,13 @@ class NominatimGeocoder:
                 cached_at=datetime.now(UTC),
             )
             session.add(cache_entry)
-            await session.commit()
+            await safe_commit(session)
         except Exception as e:
             logger.debug(f"[Geocoder] Failed to persist cache for '{query_key}': {e}")
+            try:
+                await session.rollback()
+            except Exception:
+                pass
 
     def _find_district_fallback(
         self,
@@ -238,7 +242,7 @@ async def backfill_missing_coordinates(limit: int = 200) -> int:
                 updated_count += 1
                 logger.debug(f"Geocoded '{item.title[:30]}': ({lat:.4f}, {lon:.4f}) [exact={is_exact}]")
 
-        await session.commit()
+        await safe_commit(session)
         logger.success(f"Successfully backfilled {updated_count} listing coordinates.")
 
     return updated_count

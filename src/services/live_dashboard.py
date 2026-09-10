@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from src.services.config_manager import config_manager
 from src.services.market_analyzer import analyze_land_and_utilities, analyze_negotiation, resolve_local_median
 from src.services.pipeline import ScraperPipeline
-from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session
+from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session, safe_commit
 
 MIN_COMPRESS_SIZE = 1024
 COMPRESSIBLE_CT = ("application/javascript", "application/json", "text/css", "text/html", "text/plain")
@@ -233,9 +233,14 @@ class LiveDashboardServer:
         return web.json_response({"success": True, "deleted_listings": deleted, "scope": scope_label})
 
     async def handle_scrape_status(self, request: web.Request) -> web.Response:
-        from src.services.progress import global_tracker
+        from src.services.progress import global_tracker, read_shared_status
 
-        return web.json_response(global_tracker.get_status_payload())
+        payload = global_tracker.get_status_payload()
+        if not payload.get("is_running"):
+            shared = read_shared_status()
+            if shared and shared.get("is_running"):
+                return web.json_response(shared)
+        return web.json_response(payload)
 
     async def handle_index(self, request: web.Request) -> web.Response:
         content = INDEX_HTML
@@ -493,7 +498,7 @@ class LiveDashboardServer:
             item = await repo.update_user_status(listing_id, new_status)
             if not item:
                 return web.json_response({"error": "Listing not found"}, status=404)
-            await session.commit()
+            await safe_commit(session)
             logger.info(f"[LiveDashboard] Listing #{listing_id} status updated to: {new_status}")
             return web.json_response({"success": True, "id": listing_id, "user_status": new_status})
 
@@ -507,7 +512,7 @@ class LiveDashboardServer:
             item = await repo.update_user_notes(listing_id, notes)
             if not item:
                 return web.json_response({"error": "Listing not found"}, status=404)
-            await session.commit()
+            await safe_commit(session)
             logger.info(f"[LiveDashboard] Listing #{listing_id} notes updated.")
             return web.json_response({"success": True, "id": listing_id, "user_notes": notes})
 
@@ -555,10 +560,12 @@ class LiveDashboardServer:
 
     async def handle_trigger_scrape(self, request: web.Request) -> web.Response:
         from src.services.progress import global_tracker
+        from src.services.scrape_lock import get_scrape_lock
 
-        if global_tracker.is_running:
+        lock = get_scrape_lock()
+        if global_tracker.is_running or lock.is_locked():
             return web.json_response(
-                {"status": "already_running", "message": "Scraping jest już w toku."},
+                {"status": "already_running", "message": "Scraping jest już w toku (w tle)."},
                 status=409,
             )
 

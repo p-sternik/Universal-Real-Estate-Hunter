@@ -17,7 +17,7 @@ from src.services.discord_notifier import DiscordNotifier
 from src.services.market_analyzer import analyze_negotiation, resolve_local_median
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
-from src.storage import ListingModel, ListingRepository, get_session, init_db
+from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
 
 
 class ScraperPipeline:
@@ -597,7 +597,33 @@ class ScraperPipeline:
         return result
 
     async def run_cycle(self, target_profile: str | None = None) -> dict:
-        """Run a complete scraping and processing cycle across active profiles."""
+        """Run a complete scraping and processing cycle across active profiles with inter-process lock protection."""
+        from src.services.scrape_lock import get_scrape_lock
+
+        lock = get_scrape_lock()
+        if not lock.acquire(metadata={"profile": target_profile}):
+            holder = lock.get_lock_info() or {}
+            logger.warning(
+                f"[Pipeline] Cykl scrapingu jest już uruchomiony w innym procesie/kontenerze "
+                f"(pid={holder.get('pid')}, host={holder.get('host')}). Pomijanie podwójnego uruchomienia."
+            )
+            return {
+                "total_scraped": 0,
+                "new_listings": 0,
+                "duplicate_fingerprints": 0,
+                "price_changes": 0,
+                "qualified": 0,
+                "notified": 0,
+                "skipped_reason": "already_running",
+            }
+
+        try:
+            return await self._do_run_cycle(target_profile=target_profile)
+        finally:
+            lock.release()
+
+    async def _do_run_cycle(self, target_profile: str | None = None) -> dict:
+        """Internal execution of scraping cycle."""
         cycle_started = time.perf_counter()
         logger.info("=== Starting Scraper Pipeline Cycle ===")
         from src.services.config_manager import config_manager
@@ -998,7 +1024,7 @@ class ScraperPipeline:
 
                 item.updated_at = datetime.now(UTC)
                 updated_count += 1
-                await session.commit()
+                await safe_commit(session)
                 parts = []
                 if item.parcel_id:
                     p_short = item.parcel_id.split(".")[-1] if "." in item.parcel_id else item.parcel_id
@@ -1014,6 +1040,10 @@ class ScraperPipeline:
                 )
             except Exception as e:
                 logger.debug(f"[Pipeline] Backfill spatial audit error for #{item.id}: {e}")
+                try:
+                    await session.rollback()
+                except Exception:
+                    pass
 
         if updated_count > 0:
             logger.info(f"[Pipeline] Backfilled spatial due diligence for {updated_count} existing listings.")

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.listing import FilterResult, ListingSchema
 
+from .database import safe_commit
 from .models import ListingModel, PriceHistoryModel
 
 
@@ -385,7 +386,7 @@ class ListingRepository:
         if listing_ids:
             await self.session.execute(delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids)))
             await self.session.execute(delete(ListingModel).where(ListingModel.id.in_(listing_ids)))
-        await self.session.commit()
+        await safe_commit(self.session)
         logger.warning(f"[ListingRepository] Full reset: deleted {count} listings.")
         return count
 
@@ -406,7 +407,7 @@ class ListingRepository:
         await self.session.execute(delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids)))
         # Delete listings
         await self.session.execute(delete(ListingModel).where(ListingModel.id.in_(listing_ids)))
-        await self.session.commit()
+        await safe_commit(self.session)
         logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
         return len(listing_ids)
 

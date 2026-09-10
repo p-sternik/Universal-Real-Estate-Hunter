@@ -575,6 +575,7 @@ class ConfigManager:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with self.config_path.open("w", encoding="utf-8", newline="\n") as f:
                 json.dump(self._config.model_dump(), f, ensure_ascii=False, indent=2)
+                f.write("\n")
             logger.info(f"[ConfigManager] Zapisano konfigurację do {self.config_path}")
         except Exception as e:
             logger.error(f"[ConfigManager] Nie udało się zapisać konfiguracji: {e}")
