@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 from typing import Any
 
@@ -189,6 +190,17 @@ class ScraperPipeline:
                         "nature_protected_zone",
                         "monument_zone",
                         "cemetery_buffer_zone",
+                        "broadband_status",
+                        "broadband_details",
+                        "parcel_front_width_m",
+                        "parcel_length_m",
+                        "parcel_aspect_ratio",
+                        "parcel_shape_type",
+                        "terrain_slope_pct",
+                        "terrain_aspect",
+                        "walkability_pka_dist_m",
+                        "walkability_pka_name",
+                        "power_lines_risk",
                     ):
                         if (v := geo_audit.get(k)) is not None:
                             setattr(listing, k, v)
@@ -244,6 +256,17 @@ class ScraperPipeline:
             "nature_protected_zone",
             "monument_zone",
             "cemetery_buffer_zone",
+            "broadband_status",
+            "broadband_details",
+            "parcel_front_width_m",
+            "parcel_length_m",
+            "parcel_aspect_ratio",
+            "parcel_shape_type",
+            "terrain_slope_pct",
+            "terrain_aspect",
+            "walkability_pka_dist_m",
+            "walkability_pka_name",
+            "power_lines_risk",
         ):
             if (val := getattr(listing, f, None)) is not None:
                 setattr(filter_result, f, val)
@@ -304,14 +327,14 @@ class ScraperPipeline:
                             "Budynek formalnie ujawniony w państwowej ewidencji budynków (EGiB użytek B/Br)"
                         )
 
-            if listing.egib_soil_class:
-                soil_upper = listing.egib_soil_class.upper()
-                if any(pc in soil_upper for pc in ("RIIIA", "RIIIB", "ŁIII", "PSIII", "RI", "RII")):
-                    filter_result.cons.append(
-                        f"⚠️ Grunt chroniony w EGiB ({listing.egib_soil_class}): Klasa bonitacyjna podlega "
-                        "ustawowej ochronie rolnej (trudności z odrolnieniem i rozbudową)"
-                    )
-                    filter_result.score = max(0.0, filter_result.score - 10.0)
+            if listing.egib_soil_class and re.search(
+                r"\b(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)\b", listing.egib_soil_class, re.IGNORECASE
+            ):
+                filter_result.cons.append(
+                    f"⚠️ Grunt chroniony w EGiB ({listing.egib_soil_class}): Klasa bonitacyjna podlega "
+                    "ustawowej ochronie rolnej (trudności z odrolnieniem i rozbudową)"
+                )
+                filter_result.score = max(0.0, filter_result.score - 10.0)
 
             # Acoustic Noise (>65 dB)
             if (listing.noise_level_db is not None and listing.noise_level_db > 65.0) or (
@@ -354,6 +377,71 @@ class ScraperPipeline:
                     )
                     filter_result.score = max(0.0, filter_result.score - 10.0)
 
+            # Broadband (SIDUSIS)
+            if listing.broadband_status == "ŚWIATŁOWÓD_AKTYWNY":
+                filter_result.pros.append("🌐 Światłowód aktywny FTTH (potwierdzony w SIDUSIS internet.gov.pl)")
+                filter_result.score = min(100.0, filter_result.score + 5.0)
+            elif listing.broadband_status in ("PLANOWANY_KPO", "PLANOWANY_KPO_FERC"):
+                filter_result.pros.append("📡 Planowana rozbudowa światłowodu (KPO / FERC)")
+            elif listing.broadband_status in ("BRAK", "BRAK_ZASIĘGU"):
+                filter_result.cons.append(
+                    "⚠️ Brak stacjonarnego internetu szerokopasmowego (SIDUSIS): Konieczność łączności LTE/5G lub Starlink"
+                )
+                filter_result.score = max(0.0, filter_result.score - 5.0)
+
+            # Parcel shape & Front width
+            if listing.parcel_front_width_m is not None:
+                if listing.parcel_front_width_m < 16.0:
+                    filter_result.cons.append(
+                        f"📐 Wąski front działki ({listing.parcel_front_width_m:.1f} m < 16 m): "
+                        "Restrykcje odległościowe Prawa Budowlanego i utrudnienia w zagospodarowaniu"
+                    )
+                    filter_result.score = max(0.0, filter_result.score - 15.0)
+                elif listing.parcel_shape_type == "REGULARNY" and listing.parcel_front_width_m >= 18.0:
+                    aspect_val = listing.parcel_aspect_ratio or 1.0
+                    filter_result.pros.append(
+                        f"📐 Foremna działka: szerokość frontu {listing.parcel_front_width_m:.0f} m "
+                        f"(proporcje 1:{aspect_val:.1f})"
+                    )
+
+            # Terrain slope & Aspect
+            if listing.terrain_slope_pct is not None:
+                if listing.terrain_slope_pct > 8.0:
+                    filter_result.cons.append(
+                        f"⛰️ Strome nachylenie terenu (spadek {listing.terrain_slope_pct:.1f}%, ekspozycja {listing.terrain_aspect or 'nieokreślona'}): "
+                        "Ryzyko kosztownej niwelacji terenu, budowy murów oporowych i problemów ze spływem wód"
+                    )
+                    filter_result.score = max(0.0, filter_result.score - 15.0)
+                elif (
+                    listing.terrain_aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
+                    and listing.terrain_slope_pct >= 2.0
+                ):
+                    filter_result.pros.append(
+                        f"☀️ Południowa ekspozycja stoku (spadek {listing.terrain_slope_pct:.1f}%) — doskonałe nasłonecznienie pod fotowoltaikę"
+                    )
+                elif listing.terrain_slope_pct <= 3.0:
+                    filter_result.pros.append(f"🟢 Płaski, bezpieczny teren (spadek {listing.terrain_slope_pct:.1f}%)")
+
+            # High Voltage Power lines
+            if listing.power_lines_risk and any(
+                k in listing.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN")
+            ):
+                filter_result.cons.append(
+                    f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({listing.power_lines_risk}): "
+                    "Pas technologiczny, pole elektromagnetyczne i obniżona wartość rynkowa"
+                )
+                filter_result.score = max(0.0, filter_result.score - 20.0)
+
+            # Walkability (PKA)
+            if listing.walkability_pka_dist_m is not None and listing.walkability_pka_dist_m <= 1500:
+                walk_m = listing.walkability_pka_dist_m
+                walk_min = max(1, round(walk_m / 80))
+                pka_n = listing.walkability_pka_name or "PKA"
+                filter_result.pros.append(
+                    f"🚆 Stacja kolejowa PKA ({pka_n}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd do Rzeszowa"
+                )
+                filter_result.score = min(100.0, filter_result.score + 5.0)
+
             if geo_audit:
                 risks = geo_audit.get("surrounding_risks", [])
                 if risks:
@@ -370,6 +458,12 @@ class ScraperPipeline:
                                 "cmentar",
                                 "Gleba",
                                 "EGiB",
+                                "Wąska działka",
+                                "szerokość frontu",
+                                "SIDUSIS",
+                                "Stroma działka",
+                                "nachylenie",
+                                "Linia elektroenergetyczna",
                             )
                         ):
                             filter_result.cons.append(f"⚠️ Geoportal: {r}")

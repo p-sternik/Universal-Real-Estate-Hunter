@@ -194,6 +194,17 @@ async def _migrate_sqlite_columns(conn) -> None:
                     ("nature_protected_zone", "VARCHAR(250)"),
                     ("monument_zone", "VARCHAR(250)"),
                     ("cemetery_buffer_zone", "VARCHAR(100)"),
+                    ("broadband_status", "VARCHAR(100)"),
+                    ("broadband_details", "VARCHAR(250)"),
+                    ("parcel_front_width_m", "FLOAT"),
+                    ("parcel_length_m", "FLOAT"),
+                    ("parcel_aspect_ratio", "FLOAT"),
+                    ("parcel_shape_type", "VARCHAR(100)"),
+                    ("terrain_slope_pct", "FLOAT"),
+                    ("terrain_aspect", "VARCHAR(50)"),
+                    ("walkability_pka_dist_m", "INTEGER"),
+                    ("walkability_pka_name", "VARCHAR(150)"),
+                    ("power_lines_risk", "VARCHAR(150)"),
                 ]
                 for col_name, col_type in tier1_cols:
                     if col_name not in existing_cols:

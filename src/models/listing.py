@@ -57,6 +57,17 @@ class FilterResult(BaseModel):
     nature_protected_zone: str | None = None
     monument_zone: str | None = None
     cemetery_buffer_zone: str | None = None
+    broadband_status: str | None = None
+    broadband_details: str | None = None
+    parcel_front_width_m: float | None = None
+    parcel_length_m: float | None = None
+    parcel_aspect_ratio: float | None = None
+    parcel_shape_type: str | None = None
+    terrain_slope_pct: float | None = None
+    terrain_aspect: str | None = None
+    walkability_pka_dist_m: int | None = None
+    walkability_pka_name: str | None = None
+    power_lines_risk: str | None = None
 
     @property
     def verdict_icon(self) -> str:
@@ -119,6 +130,17 @@ class ListingSchema(BaseModel):
     nature_protected_zone: str | None = None
     monument_zone: str | None = None
     cemetery_buffer_zone: str | None = None
+    broadband_status: str | None = None
+    broadband_details: str | None = None
+    parcel_front_width_m: float | None = None
+    parcel_length_m: float | None = None
+    parcel_aspect_ratio: float | None = None
+    parcel_shape_type: str | None = None
+    terrain_slope_pct: float | None = None
+    terrain_aspect: str | None = None
+    walkability_pka_dist_m: int | None = None
+    walkability_pka_name: str | None = None
+    power_lines_risk: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     scraped_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     skip_detail: bool = False

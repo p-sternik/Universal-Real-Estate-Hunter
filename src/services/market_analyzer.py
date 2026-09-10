@@ -1,4 +1,5 @@
 import math
+import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any
@@ -149,6 +150,20 @@ def analyze_negotiation(
         elif cemetery_buffer == "50-150m":
             adjustment_factor -= 0.03
 
+        front_w = _prop(listing, "parcel_front_width_m", None)
+        slope = _prop(listing, "terrain_slope_pct", None)
+        p_risk = str(_prop(listing, "power_lines_risk", "") or "").upper()
+        b_status = str(_prop(listing, "broadband_status", "") or "").upper()
+
+        if front_w is not None and float(front_w) < 16.0:
+            adjustment_factor -= 0.05
+        if slope is not None and float(slope) > 8.0:
+            adjustment_factor -= 0.04
+        if any(k in p_risk for k in ("LINIA", "400KV", "220KV", "110KV", "WN")):
+            adjustment_factor -= 0.06
+        if b_status in ("BRAK", "BRAK_ZASIĘGU"):
+            adjustment_factor -= 0.02
+
         fair_market_value = round(base_fmv * adjustment_factor / 1000.0) * 1000.0
 
     # 4. Suggested Opening Offer
@@ -206,6 +221,20 @@ def analyze_negotiation(
         leverage_points += 1
     if egib_status == "BRAK_W_EWIDENCJI":
         leverage_points += 2
+
+    front_width = _prop(listing, "parcel_front_width_m", None)
+    slope_pct = _prop(listing, "terrain_slope_pct", None)
+    power_risk = str(_prop(listing, "power_lines_risk", "") or "").upper()
+    broadband = str(_prop(listing, "broadband_status", "") or "").upper()
+
+    if front_width is not None and float(front_width) < 16.0:
+        leverage_points += 2
+    if slope_pct is not None and float(slope_pct) > 8.0:
+        leverage_points += 2
+    if any(k in power_risk for k in ("LINIA", "400KV", "220KV", "110KV", "WN")):
+        leverage_points += 2
+    if broadband in ("BRAK", "BRAK_ZASIĘGU"):
+        leverage_points += 1
 
     if leverage_points >= 4:
         negotiation_leverage = "WYSOKA"
@@ -272,9 +301,27 @@ def analyze_negotiation(
             "Budynek nieujawniony w ewidencji gruntów i budynków EGiB (ryzyko formalnoprawne / brak odbioru)."
         )
 
-    if any(pc in egib_soil for pc in ("RIIIA", "RIIIB", "ŁIII", "PSIII", "RI", "RII")):
+    if egib_soil and re.search(r"\b(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)\b", egib_soil, re.IGNORECASE):
         arguments.append(
             f"Grunt chroniony w ewidencji EGiB ({egib_soil}) — ustawowa ochrona rolna klas I-III utrudnia odrolnienie."
+        )
+
+    if front_width is not None and float(front_width) < 16.0:
+        arguments.append(
+            f"Wąska działka (front {float(front_width):.1f} m < 16 m) rygorystycznie ogranicza zabudowę i obniża płynność odsprzedaży."
+        )
+
+    if slope_pct is not None and float(slope_pct) > 8.0:
+        arguments.append(
+            f"Znaczne nachylenie terenu ({float(slope_pct):.1f}%) generuje konieczność wykonania kosztownych prac ziemnych i murów oporowych."
+        )
+
+    if any(k in power_risk for k in ("LINIA", "400KV", "220KV", "110KV", "WN")):
+        arguments.append("Bezpośrednie sąsiedztwo napowietrznej linii wysokiego napięcia stanowi istotną wadę rynkową.")
+
+    if broadband in ("BRAK", "BRAK_ZASIĘGU"):
+        arguments.append(
+            "Brak stacjonarnego dostępu do internetu szerokopasmowego (światłowodu) utrudnia pracę zdalną."
         )
 
     if "srodkowy" in subtype or "środkowy" in subtype:
@@ -747,7 +794,7 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
             }
         )
 
-    if egib_soil and any(pc in egib_soil.upper() for pc in ("RIIIA", "RIIIB", "ŁIII", "PSIII", "RI", "RII")):
+    if egib_soil and re.search(r"\b(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)\b", egib_soil, re.IGNORECASE):
         findings.append(
             {
                 "badge": f"🌾 Grunt Chroniony w EGiB ({egib_soil})",
@@ -813,6 +860,130 @@ def calculate_risk_shield(listing: Any) -> dict[str, Any]:
                 "title": "Odległość 50–150m od terenu cmentarza",
                 "desc": "Nieruchomość w strefie ograniczeń ujęć wody i rygorów sanitarnych. Wymagane obowiązkowe podłączenie do sieci wodociągowej (zakaz studni pitnych).",
                 "severity": "warning",
+            }
+        )
+
+    # 11. Broadband Internet (SIDUSIS / internet.gov.pl)
+    broadband_status = str(_prop(listing, "broadband_status", "") or "").upper()
+    if broadband_status == "ŚWIATŁOWÓD_AKTYWNY":
+        findings.append(
+            {
+                "badge": "🌐 Światłowód FTTH (internet.gov.pl)",
+                "title": "Potwierdzony zasięg stacjonarnego internetu światłowodowego",
+                "desc": "Budynek w oficjalnym zasięgu sieci światłowodowej zarejestrowanej w SIDUSIS. Idealne warunki do pracy zdalnej.",
+                "severity": "success",
+            }
+        )
+    elif broadband_status in ("PLANOWANY_KPO", "PLANOWANY_KPO_FERC"):
+        findings.append(
+            {
+                "badge": "📡 Planowany Światłowód (KPO / FERC)",
+                "title": "Adres objęty dofinansowaniem budowy sieci szerokopasmowej",
+                "desc": "Nieruchomość znajduje się w planie inwestycyjnym KPO/FERC z gwarancją doprowadzenia łącza światłowodowego.",
+                "severity": "info",
+            }
+        )
+    elif broadband_status in ("BRAK", "BRAK_ZASIĘGU"):
+        findings.append(
+            {
+                "badge": "⚠️ Brak Światłowodu (SIDUSIS)",
+                "title": "Brak stacjonarnego internetu szerokopasmowego w rejestrze państwowym",
+                "desc": "Konieczność korzystania z internetu mobilnego LTE/5G lub instalacji satelitarnej (Starlink).",
+                "severity": "warning",
+            }
+        )
+
+    # 12. Parcel Geometry & Front Width
+    front_width = _prop(listing, "parcel_front_width_m", None)
+    aspect_ratio = _prop(listing, "parcel_aspect_ratio", None)
+    shape_type = str(_prop(listing, "parcel_shape_type", "") or "")
+    if front_width is not None and float(front_width) < 16.0:
+        max_b_width = max(4.0, float(front_width) - 8.0)
+        findings.append(
+            {
+                "badge": f"📐 Wąski Front Działki ({float(front_width):.1f} m)",
+                "title": "Szerokość działki poniżej 16 metrów (tzw. kiszka / sznurówka)",
+                "desc": f"Zgodnie z Prawem Budowlanym (min. 3m/4m od granicy) wąska parcela drastycznie ogranicza szerokość budynku do max {max_b_width:.1f} m.",
+                "severity": "danger",
+            }
+        )
+    elif shape_type == "REGULARNY" and front_width is not None and float(front_width) >= 18.0:
+        findings.append(
+            {
+                "badge": f"📐 Foremna Działka (front {float(front_width):.0f} m)",
+                "title": "Ustawna parcela o regularnych proporcjach",
+                "desc": f"Szerokość frontu {float(front_width):.0f} m (proporcje 1:{float(aspect_ratio or 1.0):.1f}) umożliwia swobodny wybór projektu domu i zagospodarowanie ogrodu.",
+                "severity": "success",
+            }
+        )
+
+    # 13. Terrain Slope & Aspect (NMT GUGiK)
+    slope_pct = _prop(listing, "terrain_slope_pct", None)
+    aspect_dir = str(_prop(listing, "terrain_aspect", "") or "")
+    if slope_pct is not None and float(slope_pct) > 8.0:
+        findings.append(
+            {
+                "badge": f"⛰️ Strome Nachylenie Terenu (spadek {float(slope_pct):.1f}%)",
+                "title": f"Znaczne nachylenie stoku ({aspect_dir or 'brak danych'})",
+                "desc": f"Nachylenie terenu {float(slope_pct):.1f}% wiąże się z ryzykiem spływu wód opadowych, koniecznością budowy kosztownych murów oporowych i utrudnionym podjazdem zimą.",
+                "severity": "danger",
+            }
+        )
+    elif (
+        aspect_dir in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
+        and slope_pct is not None
+        and float(slope_pct) >= 2.0
+    ):
+        findings.append(
+            {
+                "badge": "☀️ Południowa Ekspozycja Stoku (NMT)",
+                "title": f"Stok o nachyleniu {float(slope_pct):.1f}% skierowany na {aspect_dir}",
+                "desc": "Doskonałe warunki nasłonecznienia, optymalna efektywność paneli fotowoltaicznych i naturalne dogrzewanie budynku zimą.",
+                "severity": "success",
+            }
+        )
+    elif slope_pct is not None and float(slope_pct) <= 3.0:
+        findings.append(
+            {
+                "badge": "🟢 Płaski Teren (NMT GUGiK)",
+                "title": f"Bezpieczny, płaski teren (nachylenie {float(slope_pct):.1f}%)",
+                "desc": "Brak konieczności skomplikowanych prac ziemnych i niwelacji. Optymalne warunki posadowienia fundamentów.",
+                "severity": "success",
+            }
+        )
+
+    # 14. High Voltage Power Lines
+    power_risk = str(_prop(listing, "power_lines_risk", "") or "")
+    if any(k in power_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN")):
+        findings.append(
+            {
+                "badge": "⚡ Linia Wysokiego Napięcia (<150m)",
+                "title": "Bezpośrednie sąsiedztwo napowietrznej linii przesyłowej WN",
+                "desc": "Nieruchomość w strefie oddziaływania linii elektroenergetycznej wysokiego napięcia. Pas technologiczny, uciążliwość akustyczna i spadek płynności odsprzedaży.",
+                "severity": "danger",
+            }
+        )
+    elif power_risk == "BEZPIECZNIE":
+        findings.append(
+            {
+                "badge": "⚡ Bezpieczna Odległość od Linii WN",
+                "title": "Brak napowietrznych linii przesyłowych w buforze 200m",
+                "desc": "W promieniu 200m nie zidentyfikowano magistralnych linii 110 kV, 220 kV ani 400 kV.",
+                "severity": "success",
+            }
+        )
+
+    # 15. Walkability & PKA Station Proximity
+    pka_dist_m = _prop(listing, "walkability_pka_dist_m", None)
+    pka_name = _prop(listing, "walkability_pka_name", None)
+    if pka_dist_m is not None and int(pka_dist_m) <= 1500:
+        walk_min = max(1, round(int(pka_dist_m) / 80))
+        findings.append(
+            {
+                "badge": f"🚆 Stacja PKA w Zasięgu Spaceru ({pka_dist_m}m)",
+                "title": f"Piesze dojście do stacji {pka_name or 'PKA'} (~{walk_min} min)",
+                "desc": f"Znakomita dostępność komunikacyjna ({pka_dist_m} m pieszo). Szybkie połączenie szynobusowe z centrum Rzeszowa bez stania w korkach.",
+                "severity": "success",
             }
         )
 

@@ -8,6 +8,16 @@ import httpx
 from loguru import logger
 from PIL import Image
 
+HIGH_VOLTAGE_CORRIDORS = [
+    ("Linia 400 kV SE Widełka - Rzeszów", 50.2033, 21.9567),
+    ("Linia 400 kV Widełka - Krosno Iskra", 50.1500, 21.9600),
+    ("Linia 220 kV Chmielów - Stalowa Wola", 50.3200, 21.7500),
+    ("Linia 110 kV RPZ Baranówka", 50.0580, 21.9880),
+    ("Linia 110 kV RPZ Staroniwa", 50.0270, 21.9750),
+    ("Linia 110 kV RPZ Załęże", 50.0540, 22.0400),
+    ("Linia 110 kV RPZ Piastów", 50.0160, 22.0080),
+]
+
 
 class GeoportalService:
     """
@@ -111,18 +121,79 @@ class GeoportalService:
 
         return None
 
+    @staticmethod
+    def compute_parcel_shape_metrics(pts: list[tuple[float, float]]) -> dict[str, Any]:
+        """
+        Calculates parcel front width, length, aspect ratio, and shape classification
+        using Minimum Oriented Bounding Box (OBB) algorithm in EPSG:2180.
+        """
+        if len(pts) < 3:
+            return {
+                "front_width_m": None,
+                "length_m": None,
+                "aspect_ratio": None,
+                "shape_type": None,
+            }
+
+        min_area = float("inf")
+        best_w, best_l = 0.0, 0.0
+
+        n = len(pts)
+        for i in range(n - 1):
+            dx = pts[i + 1][0] - pts[i][0]
+            dy = pts[i + 1][1] - pts[i][1]
+            dist = math.hypot(dx, dy)
+            if dist < 0.1:
+                continue
+            ux, uy = dx / dist, dy / dist
+            vx, vy = -uy, ux
+
+            proj_u = [p[0] * ux + p[1] * uy for p in pts]
+            proj_v = [p[0] * vx + p[1] * vy for p in pts]
+
+            dim_u = max(proj_u) - min(proj_u)
+            dim_v = max(proj_v) - min(proj_v)
+            area = dim_u * dim_v
+
+            if area < min_area:
+                min_area = area
+                best_w = min(dim_u, dim_v)
+                best_l = max(dim_u, dim_v)
+
+        aspect = round(best_l / max(best_w, 0.1), 2)
+        best_w = round(best_w, 1)
+        best_l = round(best_l, 1)
+
+        if best_w < 16.0 or aspect >= 4.0:
+            shape_type = "WĄSKA_SZNUROWKA"
+        elif aspect > 2.5:
+            shape_type = "WYDŁUŻONY"
+        else:
+            shape_type = "REGULARNY"
+
+        return {
+            "front_width_m": best_w,
+            "length_m": best_l,
+            "aspect_ratio": aspect,
+            "shape_type": shape_type,
+        }
+
     async def get_parcel_geometry_and_area(
         self,
         client: httpx.AsyncClient,
         parcel_id: str,
-    ) -> tuple[float | None, tuple[float, float] | None]:
+        return_details: bool = False,
+    ) -> Any:
         """
         Retrieves parcel geometry in EPSG:2180.
-        Returns: (area_m2, (centroid_x, centroid_y)).
+        Returns: (area_m2, (centroid_x, centroid_y)) or (area_m2, centroid, shape_metrics) if return_details.
         """
         cache_key = f"geom:{parcel_id}"
         if cache_key in self._cache:
-            return self._cache[cache_key]
+            cached = self._cache[cache_key]
+            if return_details:
+                return cached if len(cached) == 3 else (cached[0], cached[1], {})
+            return cached[0], cached[1]
 
         url = f"{self.ULDK_BASE}?request=GetParcelById&id={parcel_id}&result=geom_wkt&srid=2180"
         try:
@@ -145,13 +216,16 @@ class GeoportalService:
                         )
                         cx = sum(p[0] for p in pts) / n
                         cy = sum(p[1] for p in pts) / n
-                        res = (round(area, 1), (cx, cy))
+                        shape_metrics = self.compute_parcel_shape_metrics(pts)
+                        res = (round(area, 1), (cx, cy), shape_metrics)
                         self._cache[cache_key] = res
-                        return res
+                        if return_details:
+                            return res
+                        return res[0], res[1]
         except Exception as e:
             logger.debug(f"[Geoportal] ULDK GetParcelById failed for {parcel_id}: {e}")
 
-        return (None, None)
+        return (None, None, {}) if return_details else (None, None)
 
     async def get_parcel_contours_kieg(
         self,
@@ -835,6 +909,245 @@ class GeoportalService:
         self._cache[cache_key] = result
         return result
 
+    async def get_broadband_status(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        voivodeship: str = "podkarpackie",
+    ) -> dict[str, Any]:
+        """
+        Queries official SIDUSIS (internet.gov.pl) GeoServer WMS GetFeatureInfo.
+        Checks broadband connectivity (FTTH / fixed line coverage / KPO plans).
+        """
+        cache_key = f"broadband:{round(lat, 4)},{round(lon, 4)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        res: dict[str, Any] = {
+            "status": "BRAK_ZASIĘGU",
+            "details": "Brak potwierdzonego zasięgu stacjonarnego internetu szerokopasmowego w SIDUSIS",
+            "has_fiber": False,
+        }
+
+        # Convert WGS84 (lat, lon) to EPSG:3857 (Web Mercator)
+        x = lon * 20037508.34 / 180.0
+        y = math.log(math.tan((90.0 + lat) * math.pi / 360.0)) / (math.pi / 180.0) * 20037508.34 / 180.0
+
+        layer = f"s_{voivodeship.lower()}_buildings"
+        query_url = (
+            f"https://internet.gov.pl/geoserver/public/wms?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&"
+            f"LAYERS={layer}&QUERY_LAYERS={layer}&CRS=EPSG:3857&"
+            f"BBOX={x - 30:.1f},{y - 30:.1f},{x + 30:.1f},{y + 30:.1f}&"
+            f"WIDTH=101&HEIGHT=101&I=50&J=50&INFO_FORMAT=application/json"
+        )
+        try:
+            resp = await client.get(query_url, headers=self.headers, timeout=self.timeout)
+            if resp.status_code == 200:
+                data = resp.json()
+                features = data.get("features", [])
+                if features:
+                    props = features[0].get("properties", {})
+                    status_code = props.get("status") or props.get("id_statusu") or props.get("status_id")
+                    medium = str(props.get("medium") or "").lower()
+                    operator = props.get("nazwa_operatora") or ""
+                    if status_code in (1, 2) or "światłowód" in medium or "ftth" in medium:
+                        op_info = f" ({operator})" if operator else ""
+                        res = {
+                            "status": "ŚWIATŁOWÓD_AKTYWNY",
+                            "details": f"Aktywny zasięg stacjonarnego internetu światłowodowego FTTH{op_info}",
+                            "has_fiber": True,
+                        }
+                    elif status_code in (4, 5) or "kpo" in str(props).lower() or "ferc" in str(props).lower():
+                        plan = props.get("planowany_termin_realizacji") or ""
+                        plan_info = f" (plan: {plan})" if plan else ""
+                        res = {
+                            "status": "PLANOWANY_KPO_FERC",
+                            "details": f"Planowana inwestycja szerokopasmowa ze środków publicznych KPO/FERC{plan_info}",
+                            "has_fiber": False,
+                        }
+                    elif status_code == 3:
+                        res = {
+                            "status": "ZASIĘG_TEORETYCZNY",
+                            "details": "Zasięg teoretyczny – wymaga potwierdzenia warunków technicznych u operatora",
+                            "has_fiber": False,
+                        }
+        except Exception as e:
+            logger.debug(f"[Geoportal] SIDUSIS broadband query failed: {e}")
+
+        self._cache[cache_key] = res
+        return res
+
+    async def get_terrain_slope_and_aspect(
+        self,
+        client: httpx.AsyncClient,
+        cx: float,
+        cy: float,
+    ) -> dict[str, Any]:
+        """
+        Queries official GUGiK NMT REST API (Numeryczny Model Terenu).
+        Calculates elevation, slope percentage and terrain aspect direction.
+        cx: Easting in EPSG:2180 (~740000)
+        cy: Northing in EPSG:2180 (~260000)
+        """
+        cache_key = f"nmt:{round(cx, 1)},{round(cy, 1)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        res: dict[str, Any] = {
+            "elevation_m": None,
+            "slope_pct": None,
+            "aspect": None,
+            "description": None,
+            "severity": "info",
+        }
+
+        pts = [
+            ("C", cy, cx),
+            ("N", cy + 25.0, cx),
+            ("S", cy - 25.0, cx),
+            ("E", cy, cx + 25.0),
+            ("W", cy, cx - 25.0),
+        ]
+        tasks = [
+            client.get(
+                "https://services.gugik.gov.pl/nmt/",
+                params={"request": "GetHbyXY", "x": f"{y:.1f}", "y": f"{x:.1f}"},
+                headers=self.headers,
+                timeout=self.timeout,
+            )
+            for _, y, x in pts
+        ]
+        try:
+            resps = await asyncio.gather(*tasks, return_exceptions=True)
+            elevs: dict[str, float] = {}
+            for (k, _, _), r in zip(pts, resps, strict=True):
+                if not isinstance(r, BaseException) and getattr(r, "status_code", None) == 200:
+                    text_val = str(getattr(r, "text", ""))
+                    val_str = text_val.strip().replace(",", ".")
+                    try:
+                        elevs[k] = float(val_str)
+                    except ValueError:
+                        pass
+
+            if "C" in elevs:
+                res["elevation_m"] = round(elevs["C"], 1)
+
+            if len(elevs) == 5:
+                g_ns = (elevs["N"] - elevs["S"]) / 50.0
+                g_ew = (elevs["E"] - elevs["W"]) / 50.0
+                slope_pct = round(math.hypot(g_ns, g_ew) * 100.0, 1)
+                res["slope_pct"] = slope_pct
+
+                if slope_pct < 2.0:
+                    aspect = "PŁASKI"
+                else:
+                    angle = math.degrees(math.atan2(-g_ew, -g_ns)) % 360.0
+                    if 135.0 <= angle <= 225.0:
+                        aspect = "POŁUDNIOWY"
+                    elif 45.0 < angle < 135.0:
+                        aspect = "WSCHODNI"
+                    elif 225.0 < angle < 315.0:
+                        aspect = "ZACHODNI"
+                    else:
+                        aspect = "PÓŁNOCNY"
+                res["aspect"] = aspect
+
+                if slope_pct > 8.0:
+                    res["severity"] = "danger"
+                    res["description"] = (
+                        f"Strome nachylenie stoku: spadek {slope_pct:.1f}% ({aspect}) – "
+                        "ryzyko konieczności budowy murów oporowych i trudności w odprowadzaniu wód opadowych"
+                    )
+                elif aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI") and slope_pct >= 2.0:
+                    res["severity"] = "success"
+                    res["description"] = (
+                        f"Korzystna południowa ekspozycja stoku: spadek {slope_pct:.1f}% ({aspect}) – "
+                        "doskonałe nasłonecznienie parceli"
+                    )
+                else:
+                    res["severity"] = "info"
+                    res["description"] = f"Umiarkowane nachylenie terenu: {slope_pct:.1f}% ({aspect})"
+        except Exception as e:
+            logger.debug(f"[Geoportal] GUGiK NMT query failed: {e}")
+
+        self._cache[cache_key] = res
+        return res
+
+    def get_walkability_audit(
+        self,
+        lat: float,
+        lon: float,
+    ) -> dict[str, Any]:
+        """
+        Audits walkability: distance to nearest Podkarpacie PKA station/halt
+        and transit availability.
+        """
+        from src.services.market_analyzer import PKA_STATIONS, haversine_km
+
+        pka_distances = [(name, haversine_km(lat, lon, plat, plon)) for name, plat, plon in PKA_STATIONS]
+        pka_distances.sort(key=lambda x: x[1])
+        nearest_pka_name, nearest_pka_dist_km = pka_distances[0]
+        pka_dist_m = int(round(nearest_pka_dist_km * 1000))
+
+        is_near_pka = pka_dist_m <= 1500
+        walk_min = max(1, round(pka_dist_m / 80))
+
+        desc = (
+            f"Stacja PKA: {nearest_pka_name} ({pka_dist_m} m, ~{walk_min} min pieszo) – szybki dojazd do Rzeszowa"
+            if is_near_pka
+            else f"Najbliższa stacja PKA: {nearest_pka_name} ({nearest_pka_dist_km:.1f} km)"
+        )
+
+        return {
+            "pka_name": nearest_pka_name,
+            "nearest_station": nearest_pka_name,
+            "pka_dist_m": pka_dist_m,
+            "distance_m": pka_dist_m,
+            "pka_dist_km": nearest_pka_dist_km,
+            "is_near_pka": is_near_pka,
+            "walk_min": walk_min if is_near_pka else None,
+            "walk_time_min": walk_min if is_near_pka else None,
+            "description": desc,
+        }
+
+    async def get_power_lines_risk(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        cx: float | None = None,
+        cy: float | None = None,
+    ) -> dict[str, Any]:
+        """
+        Audits proximity to high-voltage transmission lines (110kV / 220kV / 400kV).
+        """
+        cache_key = f"power:{round(lat, 4)},{round(lon, 4)}"
+        if cache_key in self._cache:
+            return self._cache[cache_key]
+
+        res: dict[str, Any] = {
+            "risk": "BEZPIECZNIE",
+            "distance_m": None,
+            "description": "Brak napowietrznych linii przesyłowych najwyższych napięć w buforze 200m",
+        }
+
+        from src.services.market_analyzer import haversine_km
+
+        for name, clat, clon in HIGH_VOLTAGE_CORRIDORS:
+            dist_km = haversine_km(lat, lon, clat, clon)
+            dist_m = int(round(dist_km * 1000))
+            if dist_m < 150:
+                res = {
+                    "risk": f"LINIA_WN_{dist_m}M",
+                    "distance_m": dist_m,
+                    "description": f"{name} w odległości {dist_m} m (pas technologiczny, pole EM)",
+                }
+                break
+
+        self._cache[cache_key] = res
+        return res
+
     async def audit_location(
         self,
         lat: float,
@@ -874,6 +1187,17 @@ class GeoportalService:
             "nature_protected_zone": None,
             "monument_zone": None,
             "cemetery_buffer_zone": None,
+            "broadband_status": None,
+            "broadband_details": None,
+            "parcel_front_width_m": None,
+            "parcel_length_m": None,
+            "parcel_aspect_ratio": None,
+            "parcel_shape_type": None,
+            "terrain_slope_pct": None,
+            "terrain_aspect": None,
+            "walkability_pka_dist_m": None,
+            "walkability_pka_name": None,
+            "power_lines_risk": None,
         }
 
         async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
@@ -889,10 +1213,20 @@ class GeoportalService:
             result["gunb_url"] = self.generate_gunb_url(parcel_id=main_pid)
             result["gesut_url"] = self.generate_geoportal_url(parcel_id=main_pid)
 
-            main_area, main_centroid = await self.get_parcel_geometry_and_area(client, main_pid)
+            main_area, main_centroid, shape_metrics = await self.get_parcel_geometry_and_area(
+                client, main_pid, return_details=True
+            )
             result["cadastral_area"] = main_area
+            result["parcel_front_width_m"] = shape_metrics.get("front_width_m")
+            result["parcel_length_m"] = shape_metrics.get("length_m")
+            result["parcel_aspect_ratio"] = shape_metrics.get("aspect_ratio")
+            result["parcel_shape_type"] = shape_metrics.get("shape_type")
+            if shape_metrics.get("front_width_m") and shape_metrics["front_width_m"] < 16.0:
+                result["surrounding_risks"].append(
+                    f"Wąska działka: szerokość frontu {shape_metrics['front_width_m']:.1f} m (<16 m)"
+                )
 
-            # Step 2: MPZP, Flood, SOPO, EGiB, GDOŚ, NID, Noise & GESUT queries (concurrent)
+            # Step 2: Environmental, Zoning, Broadband, Terrain & Utility queries (concurrent)
             mpzp_task = self.get_mpzp_info(client, main_centroid[0], main_centroid[1]) if main_centroid else None
             flood_task = self.get_flood_risk_isok(client, main_centroid[0], main_centroid[1]) if main_centroid else None
             sopo_task = (
@@ -905,6 +1239,17 @@ class GeoportalService:
             nid_task = self.get_nid_monuments(client, main_centroid[0], main_centroid[1]) if main_centroid else None
             noise_task = self.get_noise_level_audit(client, lat, lon)
             gesut_task = self.get_gesut_networks(client, lat, lon)
+            broadband_task = self.get_broadband_status(client, lat, lon)
+            terrain_task = (
+                self.get_terrain_slope_and_aspect(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+            )
+            power_lines_task = self.get_power_lines_risk(
+                client,
+                lat,
+                lon,
+                cx=main_centroid[0] if main_centroid else None,
+                cy=main_centroid[1] if main_centroid else None,
+            )
 
             # Step 3: Surrounding search points (8 directions)
             d_lat = radius_meters / 111139.0
@@ -936,8 +1281,23 @@ class GeoportalService:
                 nid_task or asyncio.sleep(0, result={}),
                 noise_task,
                 gesut_task,
+                broadband_task,
+                terrain_task or asyncio.sleep(0, result={}),
+                power_lines_task,
             )
-            mpzp, flood, sopo, egib, gdos, nid, noise, gesut = env_results
+            (
+                mpzp,
+                flood,
+                sopo,
+                egib,
+                gdos,
+                nid,
+                noise,
+                gesut,
+                broadband,
+                terrain,
+                power_lines,
+            ) = env_results
 
             result["mpzp_zone"] = mpzp.get("zone")
             result["mpzp_status"] = mpzp.get("status")
@@ -972,6 +1332,28 @@ class GeoportalService:
             result["noise_zone"] = noise.get("zone")
             if noise.get("exceeds_threshold"):
                 result["surrounding_risks"].append(noise.get("description") or "Przekroczenie norm hałasu (>65 dB)")
+
+            result["broadband_status"] = broadband.get("status")
+            result["broadband_details"] = broadband.get("details")
+            if broadband.get("status") == "BRAK":
+                result["surrounding_risks"].append("Brak stacjonarnego internetu szerokopasmowego (SIDUSIS)")
+
+            result["terrain_slope_pct"] = terrain.get("slope_pct")
+            result["terrain_aspect"] = terrain.get("aspect")
+            if terrain.get("slope_pct") and terrain["slope_pct"] > 8.0:
+                result["surrounding_risks"].append(
+                    terrain.get("description") or f"Stroma działka: nachylenie {terrain['slope_pct']}%"
+                )
+
+            result["power_lines_risk"] = power_lines.get("risk")
+            if power_lines.get("risk") and "LINIA_" in power_lines["risk"]:
+                result["surrounding_risks"].append(
+                    power_lines.get("description") or "Linia elektroenergetyczna wysokiego napięcia w sąsiedztwie"
+                )
+
+            walkability = self.get_walkability_audit(lat, lon)
+            result["walkability_pka_dist_m"] = walkability.get("pka_dist_m")
+            result["walkability_pka_name"] = walkability.get("pka_name")
 
             # Step 4: Check geometry and contours for surrounding parcels concurrently
             all_contours: list[str] = []

@@ -303,3 +303,155 @@ async def test_get_noise_level_audit_transit_hub():
     assert res["exceeds_threshold"] is True
     assert res["noise_level_db"] >= 68.0
     assert "WYSOKI_HAŁAS" in res["zone"]
+
+
+def test_compute_parcel_shape_metrics_regular():
+    # 25m x 40m rectangular parcel in metric PUWG92
+    pts = [
+        (700000.0, 200000.0),
+        (700025.0, 200000.0),
+        (700025.0, 200040.0),
+        (700000.0, 200040.0),
+        (700000.0, 200000.0),
+    ]
+    metrics = GeoportalService.compute_parcel_shape_metrics(pts)
+    assert metrics["front_width_m"] == 25.0
+    assert metrics["length_m"] == 40.0
+    assert metrics["aspect_ratio"] == 1.6
+    assert metrics["shape_type"] == "REGULARNY"
+
+
+def test_compute_parcel_shape_metrics_narrow_shoestring():
+    # 12m x 70m narrow shoestring parcel
+    pts = [
+        (700000.0, 200000.0),
+        (700012.0, 200000.0),
+        (700012.0, 200070.0),
+        (700000.0, 200070.0),
+        (700000.0, 200000.0),
+    ]
+    metrics = GeoportalService.compute_parcel_shape_metrics(pts)
+    assert metrics["front_width_m"] == 12.0
+    assert metrics["length_m"] == 70.0
+    assert metrics["aspect_ratio"] == 5.83
+    assert metrics["shape_type"] == "WĄSKA_SZNUROWKA"
+
+
+def test_compute_parcel_shape_metrics_insufficient():
+    assert GeoportalService.compute_parcel_shape_metrics([(1.0, 2.0)])["front_width_m"] is None
+
+
+@pytest.mark.asyncio
+async def test_get_broadband_status_ftth():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "features": [
+            {
+                "properties": {
+                    "id_statusu": 1,
+                    "rodzaj_uslugi": "Dostęp do Internetu",
+                    "medium": "Światłowód",
+                    "nazwa_operatora": "Orange Polska",
+                    "predkosc_pobierania": 1000,
+                }
+            }
+        ]
+    }
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_broadband_status(client_mock, 50.04, 22.0, "podkarpackie")
+    assert res["status"] == "ŚWIATŁOWÓD_AKTYWNY"
+    assert "Orange" in (res["details"] or "")
+
+
+@pytest.mark.asyncio
+async def test_get_broadband_status_planned_kpo():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {
+        "features": [
+            {
+                "properties": {
+                    "id_statusu": 4,
+                    "rodzaj_inwestycji": "KPO",
+                    "planowany_termin_realizacji": "2026-Q4",
+                }
+            }
+        ]
+    }
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_broadband_status(client_mock, 50.04, 22.0, "podkarpackie")
+    assert res["status"] == "PLANOWANY_KPO_FERC"
+    assert "2026-Q4" in (res["details"] or "")
+
+
+@pytest.mark.asyncio
+async def test_get_broadband_status_none():
+    svc = GeoportalService()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = {"features": []}
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.return_value = mock_resp
+
+    res = await svc.get_broadband_status(client_mock, 50.04, 22.0, "podkarpackie")
+    assert res["status"] == "BRAK_ZASIĘGU"
+
+
+@pytest.mark.asyncio
+async def test_get_terrain_slope_and_aspect():
+    svc = GeoportalService()
+
+    # Elevation profile: center=200m, N=202m, S=198m, E=200m, W=200m
+    def _mock_nmt(url, params=None, **kwargs):
+        params = params or {}
+        x = float(params.get("x", 0))
+        resp = MagicMock(spec=httpx.Response)
+        resp.status_code = 200
+        if x == 260025.0:  # North (+25m)
+            resp.text = "202.0"
+        elif x == 259975.0:  # South (-25m)
+            resp.text = "198.0"
+        else:
+            resp.text = "200.0"
+        return resp
+
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+    client_mock.get.side_effect = _mock_nmt
+
+    res = await svc.get_terrain_slope_and_aspect(client_mock, 740000.0, 260000.0)
+    assert res["slope_pct"] is not None
+    assert res["slope_pct"] == 8.0  # (202 - 198) / 50m = 4/50 = 8.0%
+    assert res["aspect"] == "POŁUDNIOWY"
+
+
+def test_get_walkability_audit():
+    svc = GeoportalService()
+    # Coordinates near Rzeszów Główny (50.0415, 22.0050)
+    res = svc.get_walkability_audit(50.0420, 22.0060)
+    assert res["nearest_station"] == "Rzeszów Główny"
+    assert res["distance_m"] < 250.0
+    assert res["walk_time_min"] <= 4
+
+
+@pytest.mark.asyncio
+async def test_get_power_lines_risk():
+    svc = GeoportalService()
+    client_mock = AsyncMock(spec=httpx.AsyncClient)
+
+    # Widełka 400kV line coordinates (~50.2033, ~21.9567)
+    risk = await svc.get_power_lines_risk(client_mock, 50.2035, 21.9568, 710000.0, 280000.0)
+    assert risk["risk"] != "BEZPIECZNIE"
+    assert "Widełka" in risk["description"]
+    assert risk["distance_m"] is not None and risk["distance_m"] < 150
+
+    # Far away location
+    safe = await svc.get_power_lines_risk(client_mock, 50.0100, 22.1500, 730000.0, 250000.0)
+    assert safe["risk"] == "BEZPIECZNIE"
+    assert safe["distance_m"] is None

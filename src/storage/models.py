@@ -80,6 +80,17 @@ class ListingModel(Base):
     nature_protected_zone: Mapped[str | None] = mapped_column(String(250), nullable=True)
     monument_zone: Mapped[str | None] = mapped_column(String(250), nullable=True)
     cemetery_buffer_zone: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    broadband_status: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    broadband_details: Mapped[str | None] = mapped_column(String(250), nullable=True)
+    parcel_front_width_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parcel_length_m: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parcel_aspect_ratio: Mapped[float | None] = mapped_column(Float, nullable=True)
+    parcel_shape_type: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    terrain_slope_pct: Mapped[float | None] = mapped_column(Float, nullable=True)
+    terrain_aspect: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    walkability_pka_dist_m: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    walkability_pka_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    power_lines_risk: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     # CRM User Actions & Status
     user_status: Mapped[str] = mapped_column(String(30), default="NEW", index=True)

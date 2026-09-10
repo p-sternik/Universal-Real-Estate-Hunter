@@ -256,3 +256,77 @@ async def test_pipeline_integrates_tier1_spatial_penalties(async_session, monkey
     # Score penalty calculation:
     # 100 - 50 (SOPO) - 15 (EGiB building) - 10 (soil) - 15 (noise) - 10 (GDOŚ) - 15 (NID) - 25 (cemetery <50m) = 0.0 (clamped to 0.0)
     assert model.qualification_score == 0.0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_integrates_advanced_spatial_features(async_session, monkeypatch):
+    """Pipeline applies pros/cons and score modifications for FTTH, parcel front, slope, power lines, and PKA."""
+    from src.services.geoportal import geoportal_service
+
+    mock_audit = AsyncMock(
+        return_value={
+            "main_parcel_id": "186301_1.0221.100/1",
+            "main_parcel_number": "100/1",
+            "cadastral_area": 800.0,
+            "geoportal_url": "https://mapy.geoportal.gov.pl/?identifyParcel=186301_1.0221.100/1",
+            "mpzp_zone": "MN",
+            "mpzp_status": "OBOWIĄZUJĄCY",
+            "flood_risk_zone": "BRAK",
+            "landslide_risk": "BRAK",
+            "egib_building_status": "UJAWNIONY",
+            "egib_soil_class": "RIVa",
+            "noise_level_db": 52.0,
+            "noise_zone": "KOMFORT_AKUSTYCZNY",
+            "nature_protected_zone": None,
+            "monument_zone": None,
+            "cemetery_buffer_zone": "BRAK",
+            "broadband_status": "ŚWIATŁOWÓD_AKTYWNY",
+            "broadband_details": "Orange FTTH",
+            "parcel_front_width_m": 13.5,
+            "parcel_length_m": 60.0,
+            "parcel_aspect_ratio": 4.4,
+            "parcel_shape_type": "WĄSKA_SZNUROWKA",
+            "terrain_slope_pct": 10.2,
+            "terrain_aspect": "POŁUDNIOWY",
+            "walkability_pka_dist_m": 850.0,
+            "walkability_pka_name": "Rzeszów Załęże",
+            "power_lines_risk": "Korytarz linii 400kV",
+            "surrounding_risks": [],
+            "surrounding_parcels_count": 0,
+        }
+    )
+    monkeypatch.setattr(geoportal_service, "audit_location", mock_audit)
+
+    repo = ListingRepository(async_session)
+    listing = make_listing()
+    listing.coordinates = (50.04, 22.0)
+
+    engine_mock = AsyncMock()
+    # Starting score 80.0
+    engine_mock.evaluate_listing.return_value = make_qualified_result(score=80.0)
+    pipeline = make_pipeline(llm_enabled=False, engine_mock=engine_mock)
+
+    await pipeline.process_listing(listing, repo)
+
+    model = await repo.get_by_url(listing.url)
+    assert model is not None
+    assert model.broadband_status == "ŚWIATŁOWÓD_AKTYWNY"
+    assert model.parcel_front_width_m == 13.5
+    assert model.parcel_shape_type == "WĄSKA_SZNUROWKA"
+    assert model.terrain_slope_pct == 10.2
+    assert model.terrain_aspect == "POŁUDNIOWY"
+    assert model.walkability_pka_name == "Rzeszów Załęże"
+    assert model.power_lines_risk == "Korytarz linii 400kV"
+
+    # Pros checks
+    assert any("Światłowód aktywny" in p for p in model.pros)
+    assert any("Stacja kolejowa PKA" in p for p in model.pros)
+
+    # Cons checks
+    assert any("Wąski front działki" in c for c in model.cons)
+    assert any("Strome nachylenie" in c for c in model.cons)
+    assert any("wysokiego napięcia" in c for c in model.cons)
+
+    # Score adjustment:
+    # 80 + 5 (FTTH) - 15 (front < 16m) - 15 (slope > 8%) - 20 (power lines) + 5 (PKA) = 40.0
+    assert model.qualification_score == 40.0

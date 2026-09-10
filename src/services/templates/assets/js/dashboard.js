@@ -1991,6 +1991,31 @@
                 const isFlood = item.flood_risk_zone === 'ZAGROŻENIE_POWODZIOWE';
                 legalRows += `<tr class="${isFlood ? 'row-danger' : 'row-ok'}"><th>Ryzyko powodziowe</th><td class="value">${isFlood ? 'Zagrożenie powodziowe (ISOK)' : 'Brak zagrożenia (ISOK)'}</td></tr>`;
             }
+            if (item.landslide_risk) {
+                const isLandslide = item.landslide_risk !== 'BRAK' && item.landslide_risk !== 'NIEWYSTĘPUJE';
+                legalRows += `<tr class="${isLandslide ? 'row-danger' : 'row-ok'}"><th>Osuwiska (SOPO)</th><td class="value">${escapeHtml(item.landslide_risk)}</td></tr>`;
+            }
+            if (item.parcel_front_width_m) {
+                const isNarrow = item.parcel_front_width_m < 16.0;
+                legalRows += `<tr class="${isNarrow ? 'row-warn' : ''}"><th>Front działki</th><td class="value"><span class="num">${item.parcel_front_width_m} m</span> (${item.parcel_shape_type || 'regularna'}${item.parcel_length_m ? `, dł. ~${item.parcel_length_m} m` : ''})</td></tr>`;
+            }
+            if (item.terrain_slope_pct !== null && item.terrain_slope_pct !== undefined) {
+                const isSteep = item.terrain_slope_pct > 8.0;
+                legalRows += `<tr class="${isSteep ? 'row-warn' : ''}"><th>Nachylenie terenu (NMT)</th><td class="value"><span class="num">${item.terrain_slope_pct}%</span> (ekspozycja ${escapeHtml(item.terrain_aspect || 'płaska')})</td></tr>`;
+            }
+            if (item.broadband_status) {
+                const isFtth = item.broadband_status === 'ŚWIATŁOWÓD_AKTYWNY';
+                const isNone = item.broadband_status === 'BRAK_ZASIĘGU';
+                const cls = isFtth ? 'row-ok' : (isNone ? 'row-warn' : '');
+                legalRows += `<tr class="${cls}"><th>Światłowód (SIDUSIS)</th><td class="value">${escapeHtml(item.broadband_status)}${item.broadband_details ? ` — ${escapeHtml(item.broadband_details)}` : ''}</td></tr>`;
+            }
+            if (item.power_lines_risk) {
+                legalRows += `<tr class="row-danger"><th>Linie wysokiego napięcia</th><td class="value">${escapeHtml(item.power_lines_risk)}</td></tr>`;
+            }
+            if (item.walkability_pka_name) {
+                const distKm = (item.walkability_pka_dist_m / 1000).toFixed(1);
+                legalRows += `<tr><th>Stacja PKA</th><td class="value">${escapeHtml(item.walkability_pka_name)} (~${distKm} km)</td></tr>`;
+            }
 
             const legalHtml = legalRows ? `
                 <div class="audit-block">

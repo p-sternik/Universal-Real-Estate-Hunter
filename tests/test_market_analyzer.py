@@ -620,3 +620,56 @@ def test_calculate_risk_shield_with_tier1_factors():
     assert any("Obszar Chroniony GDOŚ" in b for b in badges)
     assert any("Zabytek" in b for b in badges)
     assert any("Strefa Sanitarna Cmentarza" in b for b in badges)
+
+
+def test_calculate_risk_shield_with_shape_slope_power_fiber_pka():
+    listing = {
+        "mpzp_status": "OBOWIĄZUJĄCY",
+        "mpzp_zone": "MN",
+        "flood_risk_zone": "BRAK",
+        "parcel_front_width_m": 12.0,
+        "parcel_shape_type": "WĄSKA_SZNUROWKA",
+        "parcel_length_m": 80.0,
+        "parcel_aspect_ratio": 6.7,
+        "terrain_slope_pct": 10.5,
+        "terrain_aspect": "PÓŁNOCNY",
+        "power_lines_risk": "Kolizja z korytarzem linii WN 400kV",
+        "broadband_status": "BRAK_ZASIĘGU",
+        "walkability_pka_dist_m": 900.0,
+        "walkability_pka_name": "Rzeszów Załęże",
+    }
+
+    shield = calculate_risk_shield(listing)
+    assert shield["severity"] == "danger"
+    badges = [f["badge"] for f in shield["findings"]]
+    assert any("Wąski Front Działki" in b for b in badges)
+    assert any("Strome Nachylenie Terenu" in b for b in badges)
+    assert any("Linia Wysokiego Napięcia" in b for b in badges)
+    assert any("Brak Światłowodu" in b for b in badges)
+    assert any("Stacja PKA w Zasięgu Spaceru" in b for b in badges)
+
+
+def test_analyze_negotiation_with_shape_slope_power_factors():
+    listing = {
+        "price": 1_000_000,
+        "price_per_m2": 10_000,
+        "area_home": 100.0,
+        "finish_condition": "pod_klucz",
+        "parcel_front_width_m": 13.5,
+        "terrain_slope_pct": 9.2,
+        "power_lines_risk": "Linia WN 400kV w odległości 80m",
+        "broadband_status": "BRAK_ZASIĘGU",
+    }
+
+    advice = analyze_negotiation(listing, market_median_m2=10_000.0)
+    assert advice.negotiation_leverage == "WYSOKA"
+    assert advice.fair_market_value is not None
+    # Adjustments: pod_klucz (+0.05), narrow front (-0.05), slope (-0.04), power line (-0.06), no broadband (-0.02)
+    # Total factor = 1.0 + 0.05 - 0.17 = 0.88 -> FMV ~880,000
+    assert advice.fair_market_value <= 900_000
+
+    args_joined = " ".join(advice.arguments)
+    assert "front" in args_joined.lower()
+    assert "nachylenie" in args_joined.lower() or "spadek" in args_joined.lower()
+    assert "wysokiego napięcia" in args_joined.lower()
+    assert "światłowodu" in args_joined.lower()
