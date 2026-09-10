@@ -24,9 +24,7 @@ async def _throttle_llm_calls() -> None:
             _llm_call_times.popleft()
         if len(_llm_call_times) >= max_calls:
             wait = 60.0 - (now - _llm_call_times[0]) + 0.5
-            logger.info(
-                f"[LLMAnalyzer] Throttling LLM calls for {wait:.0f}s (limit {max_calls} req/min, free-tier OpenRouter)."
-            )
+            logger.info(f"[LLMAnalyzer] Throttling LLM calls for {wait:.0f}s (limit {max_calls} req/min).")
             await asyncio.sleep(wait)
             now = time.monotonic()
             while _llm_call_times and now - _llm_call_times[0] > 60.0:
