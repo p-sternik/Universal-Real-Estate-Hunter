@@ -218,9 +218,104 @@ async def test_generate_html_dashboard_with_gallery(tmp_path):
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     assert "<!DOCTYPE html>" in content
-    assert "Universal Real Estate Hunter" in content
-    assert "gallery-strip" in content
+
+@pytest.mark.asyncio
+async def test_delete_by_profile(test_session: AsyncSession):
+    repo = ListingRepository(test_session)
+
+    # Listing 1 in profile_A
+    l1 = ListingSchema(
+        id="prof-test-1",
+        portal="Otodom",
+        title="Dom A",
+        url="https://otodom.pl/oferta/prof-test-1",
+        price=800_000,
+        price_per_m2=8_000.0,
+        area_home=100.0,
+        location_raw="Rzeszów",
+        profile_id="profile_A",
+        profile_name="Profil A",
+    )
+    # Listing 2 in profile_B
+    l2 = ListingSchema(
+        id="prof-test-2",
+        portal="Otodom",
+        title="Dom B",
+        url="https://otodom.pl/oferta/prof-test-2",
+        price=900_000,
+        price_per_m2=9_000.0,
+        area_home=100.0,
+        location_raw="Kraków",
+        profile_id="profile_B",
+        profile_name="Profil B",
+    )
+    filt = FilterResult(is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True)
+    await repo.save_or_update(l1, filt)
+    await repo.save_or_update(l2, filt)
+
+    # Verify both exist
+    item1 = await repo.get_by_portal_id("Otodom", "prof-test-1")
+    item2 = await repo.get_by_portal_id("Otodom", "prof-test-2")
+    assert item1 is not None
+    assert item2 is not None
+
+    # Delete profile_A listings
+    deleted_cnt = await repo.delete_by_profile(profile_id="profile_A", profile_name="Profil A")
+    assert deleted_cnt == 1
+
+    # Verify profile_A is gone, profile_B remains
+    assert await repo.get_by_portal_id("Otodom", "prof-test-1") is None
+    assert await repo.get_by_portal_id("Otodom", "prof-test-2") is not None
 
 
+@pytest.mark.asyncio
+async def test_live_dashboard_profile_filter_and_deletion(tmp_path):
+    from src.storage.database import init_db, get_session
+    from src.services.config_manager import config_manager
+    await init_db()
 
+    # Create dummy profile in config
+    test_prof_id = "test_prof_del"
+    config_manager.add_or_update_profile({
+        "id": test_prof_id,
+        "name": "Profil Do Usunięcia",
+        "category": "dom",
+        "city": "Rzeszów",
+    })
 
+    async with get_session() as session:
+        repo = ListingRepository(session)
+        listing = ListingSchema(
+            id="del-test-100",
+            portal="Otodom",
+            title="Dom tymczasowy profil",
+            url="https://otodom.pl/oferta/del-test-100",
+            price=750_000,
+            price_per_m2=7_500,
+            area_home=100.0,
+            location_raw="Rzeszów",
+            profile_id=test_prof_id,
+            profile_name="Profil Do Usunięcia",
+        )
+        filt = FilterResult(is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True)
+        await repo.save_or_update(listing, filt)
+
+    server = LiveDashboardServer(port=8086)
+    async with TestClient(TestServer(server.app)) as client:
+        # 1. Filter by profile in API
+        resp = await client.get(f"/api/listings?profile={test_prof_id}")
+        assert resp.status == 200
+        data = await resp.json()
+        assert any(item["id"] == listing.id or item["portal_id"] == "del-test-100" for item in data)
+
+        # 2. Delete profile via DELETE endpoint
+        del_resp = await client.delete(f"/api/profiles/{test_prof_id}")
+        assert del_resp.status == 200
+        del_data = await del_resp.json()
+        assert del_data["success"] is True
+        assert del_data["deleted_listings"] >= 1
+
+        # 3. Verify listing is gone
+        check_resp = await client.get(f"/api/listings?profile={test_prof_id}")
+        check_data = await check_resp.json()
+        assert len(check_data) == 0

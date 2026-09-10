@@ -37,6 +37,7 @@ class ListingModel(Base):
     floor: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     floors_in_building: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     is_private_owner: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
+    profile_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, index=True)
     profile_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
     building_type: Mapped[str] = mapped_column(String(50), default="inny")

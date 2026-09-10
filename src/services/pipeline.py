@@ -55,6 +55,12 @@ class ScraperPipeline:
             "notified": False,
         }
 
+        if profile:
+            if not listing.profile_id:
+                listing.profile_id = profile.id
+            if not listing.profile_name:
+                listing.profile_name = profile.name
+
         # 1. Check duplicate by fingerprint
         if listing.property_fingerprint:
             duplicate_model = await repo.find_duplicate_by_fingerprint(listing.property_fingerprint)

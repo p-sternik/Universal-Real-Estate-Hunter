@@ -487,7 +487,8 @@ class OtodomScraper(BaseScraper):
                 floor=floor,
                 floors_in_building=floors_in_building,
                 is_private_owner=is_private_owner,
-                profile_name=self.profile.name if self.profile else None,
+                profile_id=getattr(self.profile, "id", None) if self.profile else None,
+                profile_name=getattr(self.profile, "name", None) if self.profile else None,
                 building_type=building_type,
                 segment_subtype=SegmentSubtype.NIEOKRESLONY,  # Analyzed in Stage II
                 location_raw=location_raw,

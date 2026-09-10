@@ -4,7 +4,7 @@ import webbrowser
 from typing import Any, Dict, List
 from aiohttp import web
 from loguru import logger
-from sqlalchemy import desc, select
+from sqlalchemy import desc, or_, select
 
 from src.services.config_manager import config_manager
 from src.services.pipeline import ScraperPipeline
@@ -54,7 +54,23 @@ class LiveDashboardServer:
 
     async def handle_update_config(self, request: web.Request) -> web.Response:
         data = await request.json()
+        old_cfg = config_manager.get_config()
+        old_profiles = {p.id: p for p in old_cfg.profiles}
+
         updated = config_manager.update_config(data)
+
+        # If profiles array was provided, clean up listings for any deleted profiles
+        if "profiles" in data and isinstance(data["profiles"], list):
+            new_ids = {p.get("id") for p in data["profiles"] if p.get("id")}
+            removed_ids = set(old_profiles.keys()) - new_ids
+            if removed_ids:
+                async with get_session() as session:
+                    repo = ListingRepository(session)
+                    for rid in removed_ids:
+                        r_name = old_profiles[rid].name if rid in old_profiles else None
+                        del_cnt = await repo.delete_by_profile(profile_id=rid, profile_name=r_name)
+                        logger.info(f"[LiveDashboard] Usunięto profil '{rid}' oraz {del_cnt} powiązanych ofert.")
+
         logger.info(
             f"[LiveDashboard] Updated search config: city={updated.city}, "
             f"radius={updated.distance_radius}km, max_price={updated.max_price:,.0f} PLN"
@@ -77,8 +93,22 @@ class LiveDashboardServer:
 
     async def handle_delete_profile(self, request: web.Request) -> web.Response:
         profile_id = request.match_info.get("id", "")
+        cfg = config_manager.get_config()
+        target_name = None
+        for p in cfg.profiles:
+            if p.id == profile_id:
+                target_name = p.name
+                break
+
         ok = config_manager.delete_profile(profile_id)
-        return web.json_response({"success": ok})
+        deleted_count = 0
+        if ok:
+            async with get_session() as session:
+                repo = ListingRepository(session)
+                deleted_count = await repo.delete_by_profile(profile_id=profile_id, profile_name=target_name)
+                logger.info(f"[LiveDashboard] Usunięto profil '{profile_id}' oraz {deleted_count} powiązanych ofert z bazy.")
+
+        return web.json_response({"success": ok, "deleted_listings": deleted_count})
 
     async def handle_update_scrapers(self, request: web.Request) -> web.Response:
         data = await request.json()
@@ -110,8 +140,26 @@ class LiveDashboardServer:
         return web.Response(text=content, content_type="text/html", charset="utf-8")
 
     async def handle_get_listings(self, request: web.Request) -> web.Response:
+        prof_filter = request.query.get("profile")
         async with get_session() as session:
-            stmt = select(ListingModel).order_by(
+            stmt = select(ListingModel)
+            if prof_filter and prof_filter.upper() != "ALL":
+                cfg = config_manager.get_config()
+                matched_prof = None
+                for p in cfg.profiles:
+                    if p.id == prof_filter or p.name.lower() == prof_filter.lower():
+                        matched_prof = p
+                        break
+                conds = [ListingModel.profile_id == prof_filter, ListingModel.profile_name == prof_filter]
+                if matched_prof:
+                    conds.append(ListingModel.profile_id == matched_prof.id)
+                    conds.append(ListingModel.profile_name == matched_prof.name)
+                # If checking default profile, also match records where profile_id is None
+                if prof_filter == "default" or (matched_prof and matched_prof.id == "default"):
+                    conds.append(ListingModel.profile_id.is_(None))
+                stmt = stmt.where(or_(*conds))
+
+            stmt = stmt.order_by(
                 desc(ListingModel.is_qualified),
                 desc(ListingModel.qualification_score),
                 desc(ListingModel.created_at),
@@ -158,6 +206,7 @@ class LiveDashboardServer:
                     "floor": getattr(item, "floor", None),
                     "floors_in_building": getattr(item, "floors_in_building", None),
                     "is_private_owner": getattr(item, "is_private_owner", None),
+                    "profile_id": getattr(item, "profile_id", None) or "default",
                     "profile_name": getattr(item, "profile_name", None),
                     "main_image_url": item.main_image_url,
                     "gallery_images": getattr(item, "gallery_images", []) or [],
@@ -206,9 +255,19 @@ class LiveDashboardServer:
         return web.json_response({"success": True, "updated": count})
 
     async def handle_trigger_scrape(self, request: web.Request) -> web.Response:
-        logger.info("[LiveDashboard] Manual scrape triggered via Web UI.")
+        target_profile = request.query.get("profile")
+        if not target_profile and request.can_read_body:
+            try:
+                body = await request.json()
+                target_profile = body.get("profile")
+            except Exception:
+                pass
+        if target_profile and target_profile.upper() == "ALL":
+            target_profile = None
+
+        logger.info(f"[LiveDashboard] Manual scrape triggered via Web UI (target_profile: {target_profile}).")
         pipeline = ScraperPipeline()
-        summary = await pipeline.run_cycle()
+        summary = await pipeline.run_cycle(target_profile=target_profile)
         return web.json_response(summary)
 
     async def run(self, auto_open: bool = True):

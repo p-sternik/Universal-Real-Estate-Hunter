@@ -9,7 +9,7 @@ System wykorzystuje bezpośrednią ekstrakcję stanu hydracji JSON (`__NEXT_DATA
 ## 🏗️ Architektura Projektu
 
 ```text
-apartments-scrapper/
+Universal-Real-Estate-Hunter/
 ├── config/
 │   ├── __init__.py
 │   └── settings.py          # Konfiguracja Pydantic Settings (.env, progi, whitelist, blacklist)
@@ -124,7 +124,7 @@ W celu uniknięcia wysyłania 5 powiadomień o tej samej nieruchomości wystawio
 
 ```bash
 # Sklonuj repozytorium lub wejdź do katalogu
-cd apartments-scrapper
+cd Universal-Real-Estate-Hunter
 
 # Zainstaluj zależności produkcyjne i testowe
 pip install -r requirements.txt

@@ -248,6 +248,90 @@
         }
 
         /* ==========================================================================
+           1.5 DEDICATED PROFILE SWITCHER BAR
+           ========================================================================== */
+        .profile-nav-bar {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 8px 12px;
+            margin-bottom: 12px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.25);
+            flex-wrap: wrap;
+        }
+
+        .profile-nav-label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+
+        .profile-tabs-scroll {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            flex-wrap: wrap;
+            flex: 1;
+        }
+
+        .profile-tab-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: var(--surface-subtle);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 5px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+
+        .profile-tab-pill:hover {
+            background: var(--surface-card-hover);
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+
+        .profile-tab-pill.active {
+            background: rgba(59, 130, 246, 0.18);
+            border-color: #3b82f6;
+            color: #60a5fa;
+            font-weight: 600;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.25);
+        }
+
+        .profile-tab-count {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(255, 255, 255, 0.08);
+            color: var(--text-muted);
+            border-radius: 10px;
+            padding: 1px 6px;
+            font-size: 10px;
+            font-weight: 700;
+            margin-left: 2px;
+        }
+
+        .profile-tab-pill.active .profile-tab-count {
+            background: rgba(59, 130, 246, 0.35);
+            color: #ffffff;
+        }
+
+        /* ==========================================================================
            2. INTEGRATED SEGMENTED KPI CARDS (Eliminates Duplicate Filter Tabs)
            ========================================================================== */
         .kpi-strip {
@@ -1560,6 +1644,19 @@
             </div>
         </section>
 
+        <!-- Dedicated Profile Switcher Bar (Isolated Views per Profile) -->
+        <section class="profile-nav-bar" id="profileNavBar">
+            <div class="profile-nav-label">
+                <span>🎯 Profil:</span>
+            </div>
+            <div class="profile-tabs-scroll" id="profileTabsContainer">
+                <!-- Dynamically populated profile pills -->
+            </div>
+            <button class="btn btn-sm" onclick="openConfigModal(); switchConfigTab('profiles');" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px; font-size:11px;">
+                ⚙️ Zarządzaj profilami
+            </button>
+        </section>
+
         <!-- Integrated Segmented KPI Cards (Active Filter Selector) -->
         <section class="kpi-strip">
             <div class="kpi-card active" data-filter="ALL" onclick="setFilter('ALL', this)">
@@ -2200,7 +2297,133 @@
 
         let allProfiles = [];
         let currentProfileId = null;
+        let selectedProfileId = null;
         let scrapersConfig = null;
+
+        const CITY_CENTROIDS_JS = {
+            "rzeszow": [50.0375, 22.0047],
+            "krakow": [50.0647, 19.9450],
+            "warszawa": [52.2297, 21.0122],
+            "wroclaw": [51.1079, 17.0385],
+            "lublin": [51.2465, 22.5684],
+            "poznan": [52.4064, 16.9252],
+            "gdansk": [54.3520, 18.6466],
+            "katowice": [50.2649, 19.0238],
+            "lodz": [51.7592, 19.4560],
+            "szczecin": [53.4285, 14.5528],
+            "bialystok": [53.1325, 23.1688],
+            "kielce": [50.8661, 20.6286],
+            "bydgoszcz": [53.1235, 18.0084],
+            "torun": [53.0138, 18.5984]
+        };
+
+        function getCityCenter(cityName) {
+            if (!cityName) return [50.0375, 22.0047];
+            const clean = cityName.toLowerCase()
+                .replace(/ą/g,'a').replace(/ć/g,'c').replace(/ę/g,'e').replace(/ł/g,'l').replace(/ń/g,'n')
+                .replace(/ó/g,'o').replace(/ś/g,'s').replace(/ź/g,'z').replace(/ż/g,'z')
+                .replace(/[^a-z0-9]+/g, '');
+            return CITY_CENTROIDS_JS[clean] || [50.0375, 22.0047];
+        }
+
+        function switchActiveProfile(profileId) {
+            selectedProfileId = profileId;
+            try {
+                localStorage.setItem('hunter_selected_profile_id', profileId);
+            } catch(e) {}
+
+            const prof = allProfiles.find(p => p.id === profileId) || allProfiles[0];
+            if (prof) {
+                const locBadge = document.getElementById('headerLocationBadge');
+                if (locBadge) {
+                    locBadge.innerText = `📍 ${prof.name} (${prof.city} +${prof.distance_radius} km)`;
+                }
+
+                if (map) {
+                    const profItemsWithCoords = getListingsForActiveProfile().filter(i => i.latitude && i.longitude);
+                    if (profItemsWithCoords.length === 0 && prof.city) {
+                        map.setView(getCityCenter(prof.city), 12);
+                    }
+                }
+            }
+
+            const pSelect = document.getElementById('filterProfile');
+            if (pSelect) {
+                pSelect.value = profileId;
+            }
+
+            renderProfileTabs();
+            applyFilters();
+            if (prof) {
+                showToast(`Widok profilu: ${prof.name}`);
+            }
+        }
+
+        function renderProfileTabs() {
+            const container = document.getElementById('profileTabsContainer');
+            if (!container) return;
+
+            if (allProfiles.length === 0) {
+                container.innerHTML = '<span style="color:var(--text-muted);font-size:11px;">Brak profili</span>';
+                return;
+            }
+
+            if (!selectedProfileId || !allProfiles.some(p => p.id === selectedProfileId)) {
+                try {
+                    const saved = localStorage.getItem('hunter_selected_profile_id');
+                    if (saved && allProfiles.some(p => p.id === saved)) {
+                        selectedProfileId = saved;
+                    } else {
+                        selectedProfileId = allProfiles[0].id;
+                    }
+                } catch(e) {
+                    selectedProfileId = allProfiles[0].id;
+                }
+            }
+
+            container.innerHTML = allProfiles.map(p => {
+                const cat = p.category || 'dom';
+                const icon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏡');
+                const isActive = p.id === selectedProfileId;
+
+                const count = allListings.filter(item => {
+                    if (item.profile_id && item.profile_id === p.id) return true;
+                    if (item.profile_name && item.profile_name === p.name) return true;
+                    if ((!item.profile_id || item.profile_id === 'default') && (p.id === 'default' || p.id === allProfiles[0]?.id)) return true;
+                    return false;
+                }).length;
+
+                return `
+                    <button type="button" class="profile-tab-pill ${isActive ? 'active' : ''}" onclick="switchActiveProfile('${escapeHtml(p.id)}')" title="${escapeHtml(p.name)} (${escapeHtml(p.city)})">
+                        <span>${icon}</span>
+                        <span class="profile-tab-name">${escapeHtml(p.name)}</span>
+                        <span class="profile-tab-count">${count}</span>
+                    </button>
+                `;
+            }).join('');
+        }
+
+        function getListingsForActiveProfile() {
+            if (!selectedProfileId) {
+                if (allProfiles.length > 0) {
+                    selectedProfileId = allProfiles[0].id;
+                } else {
+                    return allListings;
+                }
+            }
+
+            const prof = allProfiles.find(p => p.id === selectedProfileId);
+            const profName = prof ? prof.name : null;
+
+            return allListings.filter(item => {
+                if (item.profile_id && item.profile_id === selectedProfileId) return true;
+                if (profName && item.profile_name === profName) return true;
+                if ((!item.profile_id || item.profile_id === 'default') && (selectedProfileId === 'default' || selectedProfileId === allProfiles[0]?.id)) {
+                    return true;
+                }
+                return false;
+            });
+        }
 
         function switchConfigTab(tab) {
             const btnP = document.getElementById('tabBtnProfiles');
@@ -2254,7 +2477,7 @@
                 if (allProfiles.length === 0) {
                     allProfiles = [{
                         id: "default",
-                        name: "Profil główny",
+                        name: "Domy Rzeszów",
                         category: "dom",
                         enabled: true,
                         city: activeConfig.city || "Rzeszów",
@@ -2270,28 +2493,34 @@
                     }];
                 }
 
-                // Update filterProfile dropdown in analytical bar
-                const pSelect = document.getElementById('filterProfile');
-                if (pSelect) {
-                    const curVal = pSelect.value;
-                    pSelect.innerHTML = '<option value="ALL">Wszystkie profile</option>' +
-                        allProfiles.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
-                    if (curVal && [...pSelect.options].some(o => o.value === curVal)) {
-                        pSelect.value = curVal;
+                if (!selectedProfileId || !allProfiles.some(p => p.id === selectedProfileId)) {
+                    try {
+                        const saved = localStorage.getItem('hunter_selected_profile_id');
+                        if (saved && allProfiles.some(p => p.id === saved)) {
+                            selectedProfileId = saved;
+                        } else {
+                            selectedProfileId = allProfiles[0].id;
+                        }
+                    } catch(e) {
+                        selectedProfileId = allProfiles[0].id;
                     }
                 }
 
+                // Update filterProfile dropdown in analytical bar
+                const pSelect = document.getElementById('filterProfile');
+                if (pSelect) {
+                    pSelect.innerHTML = allProfiles.map(p => `<option value="${escapeHtml(p.id)}">${escapeHtml(p.name)} (${escapeHtml(p.city)})</option>`).join('');
+                    pSelect.value = selectedProfileId;
+                    pSelect.onchange = function() { switchActiveProfile(this.value); };
+                }
+
+                renderProfileTabs();
+
                 // Header badge
+                const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
                 const badge = document.getElementById('headerLocationBadge');
-                if (badge) {
-                    const activeP = allProfiles.filter(p => p.enabled);
-                    if (activeP.length === 1) {
-                        badge.innerText = `📍 ${activeP[0].name} (${activeP[0].city} +${activeP[0].distance_radius} km)`;
-                    } else if (activeP.length > 1) {
-                        badge.innerText = `📍 ${activeP.length} profile (${activeP.map(p => p.city).slice(0, 2).join(', ')})`;
-                    } else {
-                        badge.innerText = `📍 ${activeConfig.city} (+${activeConfig.distance_radius} km)`;
-                    }
+                if (badge && curProf) {
+                    badge.innerText = `📍 ${curProf.name} (${curProf.city} +${curProf.distance_radius} km)`;
                 }
             } catch (err) {
                 console.error("Failed to load config:", err);
@@ -2398,22 +2627,46 @@
             showToast("Utworzono nowy profil");
         }
 
-        function deleteCurrentProfile() {
+        async function deleteCurrentProfile() {
             if (allProfiles.length <= 1) {
                 alert("Nie można usunąć jedynego profilu wyszukiwania.");
                 return;
             }
-            if (!confirm(`Czy na pewno chcesz usunąć profil "${document.getElementById('cfgProfileName').value}"?`)) {
+            const profName = document.getElementById('cfgProfileName').value || currentProfileId;
+            if (!confirm(`Czy na pewno chcesz usunąć profil "${profName}" oraz WSZYSTKIE powiązane z nim oferty z bazy danych?\n\nTej operacji nie można cofnąć.`)) {
                 return;
             }
-            const idx = allProfiles.findIndex(p => p.id === currentProfileId);
-            if (idx >= 0) {
-                allProfiles.splice(idx, 1);
+
+            const idToDelete = currentProfileId;
+            try {
+                const res = await fetch(`/api/profiles/${encodeURIComponent(idToDelete)}`, {
+                    method: 'DELETE'
+                });
+                const resData = await res.json();
+                const deletedListingsCount = resData.deleted_listings || 0;
+
+                const idx = allProfiles.findIndex(p => p.id === idToDelete);
+                if (idx >= 0) {
+                    allProfiles.splice(idx, 1);
+                }
+
+                if (selectedProfileId === idToDelete) {
+                    selectedProfileId = allProfiles[0].id;
+                }
+                currentProfileId = allProfiles[0].id;
+
+                refreshProfileSelect();
+                loadProfileIntoForm(currentProfileId);
+
+                showToast(`Usunięto profil "${profName}" oraz ${deletedListingsCount} ofert z bazy danych.`);
+
+                await fetchListings();
+                renderProfileTabs();
+                switchActiveProfile(currentProfileId);
+            } catch (err) {
+                console.error("Failed to delete profile:", err);
+                showToast("Błąd podczas usuwania profilu.");
             }
-            currentProfileId = allProfiles[0].id;
-            refreshProfileSelect();
-            loadProfileIntoForm(currentProfileId);
-            showToast("Profil został usunięty");
         }
 
         function saveCurrentFormIntoMemory() {
@@ -2589,9 +2842,10 @@
             try {
                 const res = await fetch('/api/listings');
                 allListings = await res.json();
-                updateStats(allListings);
+                renderProfileTabs();
+                const baseListings = getListingsForActiveProfile();
+                updateStats(baseListings);
                 applyFilters();
-                showToast(`Załadowano ${allListings.length} ofert`);
             } catch (err) {
                 console.error("Failed to load listings:", err);
                 showToast("Błąd ładowania ofert z bazy danych.");
@@ -2649,13 +2903,18 @@
         }
 
         function resetLiveFilters() {
-            document.getElementById('searchInput').value = '';
-            document.getElementById('filterMaxPrice').value = '';
-            document.getElementById('filterMinArea').value = '';
-            document.getElementById('filterMaxArea').value = '';
-            document.getElementById('filterMinPlot').value = '';
-            document.getElementById('filterMarket').value = 'ALL';
-            document.getElementById('filterBuildingType').value = 'ALL';
+            if (document.getElementById('searchInput')) document.getElementById('searchInput').value = '';
+            if (document.getElementById('filterCategory')) document.getElementById('filterCategory').value = 'ALL';
+            if (document.getElementById('filterMaxPrice')) document.getElementById('filterMaxPrice').value = '';
+            if (document.getElementById('filterMinArea')) document.getElementById('filterMinArea').value = '';
+            if (document.getElementById('filterMaxArea')) document.getElementById('filterMaxArea').value = '';
+            if (document.getElementById('filterMinPlot')) document.getElementById('filterMinPlot').value = '';
+            if (document.getElementById('filterMarket')) document.getElementById('filterMarket').value = 'ALL';
+            if (document.getElementById('filterBuildingType')) document.getElementById('filterBuildingType').value = 'ALL';
+            if (document.getElementById('filterFinish')) document.getElementById('filterFinish').value = 'ALL';
+            if (document.getElementById('filterVis')) document.getElementById('filterVis').value = 'ALL';
+            if (document.getElementById('filterSewerage')) document.getElementById('filterSewerage').value = 'ALL';
+            if (document.getElementById('filterHeating')) document.getElementById('filterHeating').value = 'ALL';
             setFilter('ALL');
         }
 
@@ -2664,7 +2923,6 @@
             const sortMode = document.getElementById('sortSelect')?.value || 'score_desc';
 
             const categoryVal = document.getElementById('filterCategory')?.value || 'ALL';
-            const profileVal = document.getElementById('filterProfile')?.value || 'ALL';
             const maxPriceVal = parseFloat(document.getElementById('filterMaxPrice')?.value) || null;
             const minAreaVal = parseFloat(document.getElementById('filterMinArea')?.value) || null;
             const maxAreaVal = parseFloat(document.getElementById('filterMaxArea')?.value) || null;
@@ -2676,7 +2934,10 @@
             const sewerageVal = document.getElementById('filterSewerage')?.value || 'ALL';
             const heatingVal = document.getElementById('filterHeating')?.value || 'ALL';
 
-            let filtered = allListings.filter(item => {
+            const baseListings = getListingsForActiveProfile();
+            updateStats(baseListings);
+
+            let filtered = baseListings.filter(item => {
                 // Preset Status Filter via Integrated KPI Strip
                 if (currentFilter === 'CRM_FAVORITE' && item.user_status !== 'FAVORITE') return false;
                 if (currentFilter === 'CRM_TO_VISIT' && item.user_status !== 'TO_VISIT') return false;
@@ -2685,9 +2946,8 @@
                 if (currentFilter === 'NEEDS_REVIEW' && item.qualification_status !== 'NEEDS_REVIEW') return false;
                 if (currentFilter === 'REJECTED' && item.user_status !== 'REJECTED' && !item.qualification_status.startsWith('REJECTED')) return false;
 
-                // Category and Profile filters
+                // Category filter
                 if (categoryVal !== 'ALL' && item.category !== categoryVal) return false;
-                if (profileVal !== 'ALL' && item.profile_name !== profileVal) return false;
 
                 // Live dynamic inputs
                 if (maxPriceVal && item.price > maxPriceVal) return false;
@@ -3224,7 +3484,9 @@
             btn.innerText = "Scrapowanie...";
             panel.style.display = 'block';
 
-            showToast("Rozpoczęto cykl scrapingu...");
+            const curProf = allProfiles.find(p => p.id === selectedProfileId);
+            const profName = curProf ? curProf.name : 'aktywny profil';
+            showToast(`Rozpoczęto cykl scrapingu (${profName})...`);
 
             let pollTimer = setInterval(async () => {
                 try {
@@ -3257,7 +3519,8 @@
             }, 600);
 
             try {
-                const res = await fetch('/api/scrape', { method: 'POST' });
+                const scrapeUrl = selectedProfileId ? `/api/scrape?profile=${encodeURIComponent(selectedProfileId)}` : '/api/scrape';
+                const res = await fetch(scrapeUrl, { method: 'POST' });
                 const summary = await res.json();
                 showToast(`Scraping zakończony! Nowe: ${summary.new_listings}, Zakwalifikowane: ${summary.qualified}`);
                 await fetchListings();
@@ -3304,9 +3567,10 @@
 
         window.addEventListener('DOMContentLoaded', async () => {
             await fetchConfig();
-            const center = activeConfig ? [50.0375, 22.0047] : [50.0375, 22.0047];
+            const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
+            const center = curProf ? getCityCenter(curProf.city) : [50.0375, 22.0047];
             initLeafletMap(center);
-            fetchListings();
+            await fetchListings();
         });
 
         setInterval(fetchListings, 45000);

@@ -71,6 +71,7 @@ class ListingSchema(BaseModel):
     floor: Optional[int] = None
     floors_in_building: Optional[int] = None
     is_private_owner: Optional[bool] = None
+    profile_id: Optional[str] = None
     profile_name: Optional[str] = None
     year_built: Optional[int] = None
     raw_description: str = ""

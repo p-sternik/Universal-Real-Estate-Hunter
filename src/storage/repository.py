@@ -1,7 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
 from loguru import logger
-from sqlalchemy import desc, select
+from sqlalchemy import delete, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.listing import FilterResult, ListingSchema
@@ -96,6 +96,8 @@ class ListingRepository:
                 existing.floors_in_building = listing.floors_in_building
             if listing.is_private_owner is not None:
                 existing.is_private_owner = listing.is_private_owner
+            if listing.profile_id:
+                existing.profile_id = listing.profile_id
             if listing.profile_name:
                 existing.profile_name = listing.profile_name
             existing.building_type = listing.building_type.value
@@ -188,6 +190,7 @@ class ListingRepository:
             floor=listing.floor,
             floors_in_building=listing.floors_in_building,
             is_private_owner=listing.is_private_owner,
+            profile_id=listing.profile_id,
             profile_name=listing.profile_name,
             building_type=listing.building_type.value,
             segment_subtype=listing.segment_subtype.value,
@@ -291,4 +294,30 @@ class ListingRepository:
             listing.updated_at = datetime.now(timezone.utc)
             await self.session.flush()
         return listing
+
+    async def delete_by_profile(self, profile_id: str, profile_name: Optional[str] = None) -> int:
+        """Delete all listings and their price histories associated with a given profile ID or profile name."""
+        conditions = [ListingModel.profile_id == profile_id]
+        if profile_name:
+            conditions.append(ListingModel.profile_name == profile_name)
+        conditions.append(ListingModel.profile_name == profile_id)
+
+        stmt = select(ListingModel.id).where(or_(*conditions))
+        res = await self.session.execute(stmt)
+        listing_ids = list(res.scalars().all())
+        if not listing_ids:
+            return 0
+
+        # Delete related price histories first
+        await self.session.execute(
+            delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids))
+        )
+        # Delete listings
+        await self.session.execute(
+            delete(ListingModel).where(ListingModel.id.in_(listing_ids))
+        )
+        await self.session.commit()
+        logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
+        return len(listing_ids)
+
 

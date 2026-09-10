@@ -53,7 +53,7 @@ An advanced, asynchronous real estate monitoring, analytical pipeline, and marke
 ## 🏗️ Architecture
 
 ```text
-apartments-scrapper/
+Universal-Real-Estate-Hunter/
 ├── config/                  # Pydantic BaseSettings & environment loader
 │   └── settings.py          # Thresholds, default whitelist/blacklist, database URLs
 ├── src/
@@ -85,8 +85,8 @@ apartments-scrapper/
 
 ### 1. Clone the repository
 ```bash
-git clone https://github.com/your-username/apartments-scrapper.git
-cd apartments-scrapper
+git clone https://github.com/p-sternik/Universal-Real-Estate-Hunter.git
+cd Universal-Real-Estate-Hunter
 ```
 
 ### 2. Configure environment variables
@@ -120,8 +120,8 @@ docker compose logs -f scraper
 ### 1. Setup Virtual Environment
 ```bash
 # Clone repository
-git clone https://github.com/your-username/apartments-scrapper.git
-cd apartments-scrapper
+git clone https://github.com/p-sternik/Universal-Real-Estate-Hunter.git
+cd Universal-Real-Estate-Hunter
 
 # Create and activate virtual environment
 python -m venv venv

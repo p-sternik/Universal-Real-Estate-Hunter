@@ -113,6 +113,11 @@ async def _migrate_sqlite_columns(conn) -> None:
                 if "is_private_owner" not in existing_cols:
                     logger.info("Migrating schema: adding 'is_private_owner' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN is_private_owner BOOLEAN"))
+                if "profile_id" not in existing_cols:
+                    logger.info("Migrating schema: adding 'profile_id' to listings table")
+                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN profile_id VARCHAR(100)"))
+                    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)"))
+                    sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
                 if "profile_name" not in existing_cols:
                     logger.info("Migrating schema: adding 'profile_name' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN profile_name VARCHAR(100)"))
