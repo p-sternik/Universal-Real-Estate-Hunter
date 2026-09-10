@@ -1608,7 +1608,7 @@
                         <span class="chip-badge" id="headerLocationBadge">📍 Rzeszów (+15 km)</span>
                         <span class="chip-badge chip-live"><span class="live-dot"></span> LIVE</span>
                     </div>
-                    <div class="brand-subtitle">System analityczny i monitoring ofert sprzedaży domów • Otodom, OLX, Nieruchomości-online</div>
+                    <div class="brand-subtitle">System analityczny i monitoring ofert nieruchomości (Domy, Mieszkania, Działki) • Otodom, OLX, Nieruchomości-online, Morizon</div>
                 </div>
             </div>
             <div class="header-actions">
@@ -1909,18 +1909,27 @@
 
                 <div class="config-field">
                     <label for="cfgCity">Lokalizacja / Miasto:</label>
-                    <input type="text" id="cfgCity" placeholder="np. Rzeszów, Kraków, Warszawa...">
+                    <input type="text" id="cfgCity" placeholder="np. Rzeszów, Kraków, Warszawa, Siedlce...">
                     <div class="city-chips">
                         <span class="chip" onclick="setCfgCity('Rzeszów')">Rzeszów</span>
                         <span class="chip" onclick="setCfgCity('Kraków')">Kraków</span>
                         <span class="chip" onclick="setCfgCity('Warszawa')">Warszawa</span>
                         <span class="chip" onclick="setCfgCity('Wrocław')">Wrocław</span>
+                        <span class="chip" onclick="setCfgCity('Siedlce')">Siedlce</span>
                         <span class="chip" onclick="setCfgCity('Lublin')">Lublin</span>
                         <span class="chip" onclick="setCfgCity('Katowice')">Katowice</span>
                         <span class="chip" onclick="setCfgCity('Poznań')">Poznań</span>
                         <span class="chip" onclick="setCfgCity('Gdańsk')">Gdańsk</span>
                         <span class="chip" onclick="setCfgCity('Łańcut')">Łańcut</span>
                     </div>
+                </div>
+
+                <div class="config-field">
+                    <label for="cfgOtodomPath" style="display:flex;justify-content:space-between;align-items:center;">
+                        <span>Ścieżka Otodom (opcjonalna):</span>
+                        <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">pozostaw puste dla auto</span>
+                    </label>
+                    <input type="text" id="cfgOtodomPath" placeholder="Domyślnie auto (lub np. mazowieckie/siedlce/siedlce/siedlce)">
                 </div>
 
                 <div class="config-row2">
@@ -2308,13 +2317,29 @@
             "lublin": [51.2465, 22.5684],
             "poznan": [52.4064, 16.9252],
             "gdansk": [54.3520, 18.6466],
+            "gdynia": [54.5189, 18.5305],
+            "sopot": [54.4418, 18.5600],
             "katowice": [50.2649, 19.0238],
             "lodz": [51.7592, 19.4560],
             "szczecin": [53.4285, 14.5528],
             "bialystok": [53.1325, 23.1688],
             "kielce": [50.8661, 20.6286],
             "bydgoszcz": [53.1235, 18.0084],
-            "torun": [53.0138, 18.5984]
+            "torun": [53.0138, 18.5984],
+            "radom": [51.4027, 21.1471],
+            "czestochowa": [50.8118, 19.1203],
+            "sosnowiec": [50.2863, 19.1041],
+            "gliwice": [50.2945, 18.6714],
+            "zabrze": [50.3249, 18.7857],
+            "olsztyn": [53.7784, 20.4801],
+            "bielskobiala": [49.8224, 19.0444],
+            "zielonagora": [51.9356, 15.5062],
+            "siedlce": [52.1677, 22.2901],
+            "tarnow": [50.0121, 20.9858],
+            "krosno": [49.6887, 21.7706],
+            "przemysl": [49.7839, 22.7678],
+            "mielec": [50.2872, 21.4239],
+            "lancut": [50.0690, 22.2310]
         };
 
         function getCityCenter(cityName) {
@@ -2558,6 +2583,7 @@
             document.getElementById('cfgMaxYearBuilt').value = p.max_year_built || '';
             document.getElementById('cfgBlacklist').value = (p.blacklist_keywords || []).join(', ');
             document.getElementById('cfgDiscordWebhook').value = p.discord_webhook_url || '';
+            document.getElementById('cfgOtodomPath').value = p.otodom_path || '';
 
             const finishAllowed = p.allowed_finish_conditions || [];
             const finishAll = finishAllowed.includes('all');
@@ -2689,6 +2715,7 @@
             const blRaw = document.getElementById('cfgBlacklist').value;
             p.blacklist_keywords = blRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
             p.discord_webhook_url = document.getElementById('cfgDiscordWebhook').value.trim() || null;
+            p.otodom_path = document.getElementById('cfgOtodomPath')?.value.trim() || null;
 
             const finishSel = Array.from(document.querySelectorAll('.cfg-finish:checked')).map(cb => cb.value);
             p.allowed_finish_conditions = finishSel.length > 0 ? finishSel : ["all"];

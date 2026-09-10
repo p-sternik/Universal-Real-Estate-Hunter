@@ -138,7 +138,8 @@
         "osuwisko"
       ],
       "enabled_portals": null,
-      "discord_webhook_url": null
+      "discord_webhook_url": null,
+      "otodom_path": null
     }
   ],
   "scrapers": {
