@@ -3,7 +3,8 @@ import os
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+from typing import Any
+
 from loguru import logger
 from pydantic import BaseModel, Field
 
@@ -12,10 +13,24 @@ from config import settings
 CONFIG_FILE_PATH = Path(os.getenv("SEARCH_CONFIG_PATH", "search_config.json"))
 
 POLISH_CHAR_MAP = {
-    "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
-    "ó": "o", "ś": "s", "ź": "z", "ż": "z",
-    "Ą": "a", "Ć": "c", "Ę": "e", "Ł": "l", "Ń": "n",
-    "Ó": "o", "Ś": "s", "Ź": "z", "Ż": "z",
+    "ą": "a",
+    "ć": "c",
+    "ę": "e",
+    "ł": "l",
+    "ń": "n",
+    "ó": "o",
+    "ś": "s",
+    "ź": "z",
+    "ż": "z",
+    "Ą": "a",
+    "Ć": "c",
+    "Ę": "e",
+    "Ł": "l",
+    "Ń": "n",
+    "Ó": "o",
+    "Ś": "s",
+    "Ź": "z",
+    "Ż": "z",
 }
 
 # Major Polish cities mapping for Otodom canonical paths
@@ -194,7 +209,9 @@ class ScraperConfig(BaseModel):
 class ScrapersSettings(BaseModel):
     otodom: ScraperConfig = Field(default_factory=lambda: ScraperConfig(enabled=True, max_pages=3, delay_seconds=1.0))
     olx: ScraperConfig = Field(default_factory=lambda: ScraperConfig(enabled=True, max_pages=2, delay_seconds=1.0))
-    nieruchomosci_online: ScraperConfig = Field(default_factory=lambda: ScraperConfig(enabled=True, max_pages=2, delay_seconds=1.5))
+    nieruchomosci_online: ScraperConfig = Field(
+        default_factory=lambda: ScraperConfig(enabled=True, max_pages=2, delay_seconds=1.5)
+    )
     morizon: ScraperConfig = Field(default_factory=lambda: ScraperConfig(enabled=True, max_pages=2, delay_seconds=1.0))
 
 
@@ -228,35 +245,33 @@ class SearchProfile(BaseModel):
     enabled: bool = True
     category: str = "dom"  # "dom", "mieszkanie", "dzialka"
     city: str = "Rzeszów"
-    distance_radius: Optional[int] = 15
-    min_price: Optional[float] = 0.0
-    max_price: Optional[float] = 1_300_000.0
-    min_price_per_m2: Optional[float] = None
-    max_price_per_m2: Optional[float] = None
-    min_area_home: Optional[float] = 90.0
-    max_area_home: Optional[float] = 145.0
-    min_area_plot: Optional[float] = 250.0
-    max_area_plot: Optional[float] = None
-    min_rooms: Optional[int] = None
-    max_rooms: Optional[int] = None
-    min_floor: Optional[int] = None
-    max_floor: Optional[int] = None
-    min_year_built: Optional[int] = None
-    max_year_built: Optional[int] = None
+    distance_radius: int | None = 15
+    min_price: float | None = 0.0
+    max_price: float | None = 1_300_000.0
+    min_price_per_m2: float | None = None
+    max_price_per_m2: float | None = None
+    min_area_home: float | None = 90.0
+    max_area_home: float | None = 145.0
+    min_area_plot: float | None = 250.0
+    max_area_plot: float | None = None
+    min_rooms: int | None = None
+    max_rooms: int | None = None
+    min_floor: int | None = None
+    max_floor: int | None = None
+    min_year_built: int | None = None
+    max_year_built: int | None = None
     owner_type: str = "all"  # "all", "private", "agency", "developer"
     market_type: str = "all"  # "all", "pierwotny", "wtórny"
-    allowed_finish_conditions: List[str] = Field(default_factory=lambda: ["all"])
+    allowed_finish_conditions: list[str] = Field(default_factory=lambda: ["all"])
     allow_visualisations: bool = True
     reject_septic_tank: bool = False
-    allowed_heating_types: List[str] = Field(default_factory=lambda: ["all"])
-    building_types: List[str] = Field(
-        default_factory=lambda: ["szeregowiec", "bliźniak", "wolnostojący", "inny"]
-    )
-    whitelist_areas: List[dict] = Field(default_factory=list)
-    blacklist_keywords: List[str] = Field(default_factory=list)
-    enabled_portals: Optional[List[str]] = None
-    discord_webhook_url: Optional[str] = None
-    otodom_path: Optional[str] = None
+    allowed_heating_types: list[str] = Field(default_factory=lambda: ["all"])
+    building_types: list[str] = Field(default_factory=lambda: ["szeregowiec", "bliźniak", "wolnostojący", "inny"])
+    whitelist_areas: list[dict] = Field(default_factory=list)
+    blacklist_keywords: list[str] = Field(default_factory=list)
+    enabled_portals: list[str] | None = None
+    discord_webhook_url: str | None = None
+    otodom_path: str | None = None
 
     @property
     def city_slug(self) -> str:
@@ -421,13 +436,19 @@ class SearchConfig(BaseModel):
     Root configuration managing search profiles and scrapers settings.
     Maintains full backward compatibility with legacy single-profile callers.
     """
-    profiles: List[SearchProfile] = Field(default_factory=list)
+
+    profiles: list[SearchProfile] = Field(default_factory=list)
     scrapers: ScrapersSettings = Field(default_factory=ScrapersSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
+    llm_analysis_enabled: bool = Field(default_factory=lambda: settings.USE_LLM_ANALYSIS)
 
     def __getattr__(self, item: str) -> Any:
         # Transparent proxy to active/first profile for backward compatibility
-        if item not in ("profiles", "scrapers", "scheduler") and hasattr(self, "profiles") and self.profiles:
+        if (
+            item not in ("profiles", "scrapers", "scheduler", "llm_analysis_enabled")
+            and hasattr(self, "profiles")
+            and self.profiles
+        ):
             active = self.get_active_profile()
             if hasattr(active, item):
                 return getattr(active, item)
@@ -439,7 +460,7 @@ class SearchConfig(BaseModel):
                 return p
         return self.profiles[0] if self.profiles else SearchProfile()
 
-    def get_active_profiles(self, target_name: Optional[str] = None) -> List[SearchProfile]:
+    def get_active_profiles(self, target_name: str | None = None) -> list[SearchProfile]:
         if target_name:
             target_clean = target_name.strip().lower()
             matched = [p for p in self.profiles if p.id.lower() == target_clean or p.name.lower() == target_clean]
@@ -451,9 +472,9 @@ class SearchConfig(BaseModel):
 class ConfigManager:
     """Manages active search criteria, location, and filtration rules."""
 
-    def __init__(self, config_path: Union[Path, str] = CONFIG_FILE_PATH):
+    def __init__(self, config_path: Path | str = CONFIG_FILE_PATH):
         self.config_path = Path(config_path) if isinstance(config_path, str) else config_path
-        self._config: Optional[SearchConfig] = None
+        self._config: SearchConfig | None = None
         self.load_config()
 
     def _get_default_profile(self) -> SearchProfile:
@@ -485,7 +506,7 @@ class ConfigManager:
         )
 
     @classmethod
-    def _migrate_legacy_dict(cls, data: Dict[str, Any]) -> SearchConfig:
+    def _migrate_legacy_dict(cls, data: dict[str, Any]) -> SearchConfig:
         """Migrate legacy flat dictionary into modern profiles structure."""
         if "profiles" in data and isinstance(data["profiles"], list) and len(data["profiles"]) > 0:
             return SearchConfig(**data)
@@ -516,7 +537,7 @@ class ConfigManager:
     def load_config(self) -> SearchConfig:
         if self.config_path.exists():
             try:
-                with open(self.config_path, "r", encoding="utf-8") as f:
+                with self.config_path.open(encoding="utf-8") as f:
                     data = json.load(f)
                     self._config = self._migrate_legacy_dict(data)
                     logger.info(f"[ConfigManager] Załadowano konfigurację ({len(self._config.profiles)} profili).")
@@ -530,10 +551,12 @@ class ConfigManager:
         fallback = Path("search_config.json")
         if fallback.exists() and fallback.resolve() != self.config_path.resolve():
             try:
-                with open(fallback, "r", encoding="utf-8") as f:
+                with fallback.open(encoding="utf-8") as f:
                     data = json.load(f)
                 self._config = self._migrate_legacy_dict(data)
-                logger.info(f"[ConfigManager] Zainicjalizowano konfigurację z szablonu {fallback} do {self.config_path}")
+                logger.info(
+                    f"[ConfigManager] Zainicjalizowano konfigurację z szablonu {fallback} do {self.config_path}"
+                )
                 self.save_config()
                 return self._config
             except Exception as e:
@@ -548,7 +571,7 @@ class ConfigManager:
             self._config = self._get_default_config()
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with open(self.config_path, "w", encoding="utf-8") as f:
+            with self.config_path.open("w", encoding="utf-8") as f:
                 json.dump(self._config.model_dump(), f, ensure_ascii=False, indent=2)
             logger.info(f"[ConfigManager] Zapisano konfigurację do {self.config_path}")
         except Exception as e:
@@ -559,7 +582,7 @@ class ConfigManager:
             self.load_config()
         return self._config
 
-    def update_config(self, updates: Dict[str, Any]) -> SearchConfig:
+    def update_config(self, updates: dict[str, Any]) -> SearchConfig:
         """Update top-level configuration (e.g. scrapers, scheduler or full dictionary)."""
         current_dict = self.get_config().model_dump()
         if "profiles" in updates:
@@ -568,9 +591,13 @@ class ConfigManager:
             current_dict["scrapers"] = updates["scrapers"]
         if "scheduler" in updates:
             current_dict["scheduler"] = updates["scheduler"]
+        if "llm_analysis_enabled" in updates:
+            current_dict["llm_analysis_enabled"] = bool(updates["llm_analysis_enabled"])
 
         # Support updating first/active profile directly if flat keys were provided
-        flat_keys = {k: v for k, v in updates.items() if k not in ("profiles", "scrapers", "scheduler")}
+        flat_keys = {
+            k: v for k, v in updates.items() if k not in ("profiles", "scrapers", "scheduler", "llm_analysis_enabled")
+        }
         if flat_keys and current_dict.get("profiles"):
             current_dict["profiles"][0].update(flat_keys)
 
@@ -578,7 +605,7 @@ class ConfigManager:
         self.save_config()
         return self._config
 
-    def update_scheduler(self, scheduler_data: Dict[str, Any]) -> SchedulerSettings:
+    def update_scheduler(self, scheduler_data: dict[str, Any]) -> SchedulerSettings:
         cfg = self.get_config()
         current_dict = cfg.scheduler.model_dump()
         current_dict.update(scheduler_data)
@@ -586,7 +613,7 @@ class ConfigManager:
         self.save_config()
         return cfg.scheduler
 
-    def get_profile(self, profile_id_or_name: Optional[str] = None) -> SearchProfile:
+    def get_profile(self, profile_id_or_name: str | None = None) -> SearchProfile:
         cfg = self.get_config()
         if profile_id_or_name:
             target = profile_id_or_name.strip().lower()
@@ -595,7 +622,7 @@ class ConfigManager:
                     return p
         return cfg.get_active_profile()
 
-    def add_or_update_profile(self, profile_data: Dict[str, Any]) -> SearchProfile:
+    def add_or_update_profile(self, profile_data: dict[str, Any]) -> SearchProfile:
         cfg = self.get_config()
         prof_id = profile_data.get("id") or profile_data.get("name", "profile").lower().replace(" ", "_")
         profile_data["id"] = prof_id

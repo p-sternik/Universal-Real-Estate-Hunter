@@ -1,8 +1,8 @@
 import asyncio
 import math
 import re
-import time
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
+
 import httpx
 from loguru import logger
 
@@ -26,16 +26,14 @@ class GeoportalService:
 
     def __init__(self, request_timeout: float = 6.0):
         self.timeout = request_timeout
-        self.headers = {
-            "User-Agent": "ApartmentHunter-Geoportal/1.0 (property-research-suite; contact@local)"
-        }
-        self._cache: Dict[str, Any] = {}
+        self.headers = {"User-Agent": "ApartmentHunter-Geoportal/1.0 (property-research-suite; contact@local)"}
+        self._cache: dict[str, Any] = {}
 
     def generate_geoportal_url(
         self,
-        parcel_id: Optional[str] = None,
-        lat: Optional[float] = None,
-        lon: Optional[float] = None,
+        parcel_id: str | None = None,
+        lat: float | None = None,
+        lon: float | None = None,
     ) -> str:
         """Generates a direct clickable link to the National Geoportal map."""
         if parcel_id:
@@ -53,7 +51,7 @@ class GeoportalService:
         client: httpx.AsyncClient,
         lat: float,
         lon: float,
-    ) -> Optional[Dict[str, str]]:
+    ) -> dict[str, str] | None:
         """Queries ULDK for a parcel containing given WGS84 coordinates."""
         cache_key = f"xy:{lat:.6f},{lon:.6f}"
         if cache_key in self._cache:
@@ -83,7 +81,7 @@ class GeoportalService:
         self,
         client: httpx.AsyncClient,
         parcel_id: str,
-    ) -> Tuple[Optional[float], Optional[Tuple[float, float]]]:
+    ) -> tuple[float | None, tuple[float, float] | None]:
         """
         Retrieves parcel geometry in EPSG:2180.
         Returns: (area_m2, (centroid_x, centroid_y)).
@@ -134,7 +132,7 @@ class GeoportalService:
 
         query_url = (
             f"{self.KIEG_WMS}?SERVICE=WMS&VERSION=1.3.0&REQUEST=GetFeatureInfo&"
-            f"BBOX={cy-5:.1f},{cx-5:.1f},{cy+5:.1f},{cx+5:.1f}&CRS=EPSG:2180&"
+            f"BBOX={cy - 5:.1f},{cx - 5:.1f},{cy + 5:.1f},{cx + 5:.1f}&CRS=EPSG:2180&"
             f"WIDTH=10&HEIGHT=10&LAYERS=dzialki&QUERY_LAYERS=dzialki&I=5&J=5&INFO_FORMAT=text/html"
         )
         try:
@@ -155,7 +153,7 @@ class GeoportalService:
         lat: float,
         lon: float,
         radius_meters: int = 120,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Comprehensive spatial audit:
         1. Identifies the main parcel and computes exact cadastral area.
@@ -191,14 +189,13 @@ class GeoportalService:
             d_lon = radius_meters / (111139.0 * math.cos(math.radians(lat)))
             angles = [0, 45, 90, 135, 180, 225, 270, 315]
             surround_coords = [
-                (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a)))
-                for a in angles
+                (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a))) for a in angles
             ]
 
             tasks = [self.get_parcel_by_xy(client, pt_lat, pt_lon) for pt_lon, pt_lat in surround_coords]
             surround_infos = await asyncio.gather(*tasks, return_exceptions=True)
 
-            surround_pids: Set[str] = set()
+            surround_pids: set[str] = set()
             for r in surround_infos:
                 if isinstance(r, dict) and r.get("parcel_id"):
                     pid = r["parcel_id"]
@@ -236,9 +233,7 @@ class GeoportalService:
                                 f"Działka {short_nr} ma użytek komercyjny/składowy (Bi): {contour}"
                             )
                         elif "TK" in contour_upper:
-                            result["surrounding_risks"].append(
-                                f"Działka {short_nr} to tereny kolejowe (Tk): {contour}"
-                            )
+                            result["surrounding_risks"].append(f"Działka {short_nr} to tereny kolejowe (Tk): {contour}")
 
         return result
 

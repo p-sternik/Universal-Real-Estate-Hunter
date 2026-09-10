@@ -1,8 +1,9 @@
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
 from bs4 import BeautifulSoup
 from loguru import logger
 
@@ -18,6 +19,7 @@ from src.models.enums import (
     SewerageType,
 )
 from src.models.listing import ListingSchema
+
 from .base import BaseScraper
 
 NIERUCHOMOSCI_ONLINE_BASE = "https://rzeszow.nieruchomosci-online.pl/domy,sprzedaz/"
@@ -33,9 +35,9 @@ class NieruchomosciOnlineScraper(BaseScraper):
     def __init__(
         self,
         max_pages: int = 2,
-        search_url: Optional[str] = None,
-        profile: Optional[Any] = None,
-        skip_detail_urls: Optional[set] = None,
+        search_url: str | None = None,
+        profile: Any | None = None,
+        skip_detail_urls: set | None = None,
     ):
         super().__init__(name="NieruchomosciOnlineScraper")
         self.max_pages = max_pages
@@ -53,7 +55,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
             return BuildingType.WOLNOSTOJACY
         return BuildingType.INNY
 
-    def _map_finish_condition(self, val: Optional[str]) -> FinishCondition:
+    def _map_finish_condition(self, val: str | None) -> FinishCondition:
         if not val:
             return FinishCondition.NIEOKRESLONY
         v = val.lower()
@@ -71,7 +73,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
             return FinishCondition.DO_REMONTU
         return FinishCondition.NIEOKRESLONY
 
-    def _map_heating(self, val: Optional[str]) -> HeatingType:
+    def _map_heating(self, val: str | None) -> HeatingType:
         if not val:
             return HeatingType.NIEZNANE
         v = val.lower()
@@ -87,7 +89,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
             return HeatingType.MIEJSKIE
         return HeatingType.NIEZNANE
 
-    def _map_sewerage(self, val: Optional[str]) -> SewerageType:
+    def _map_sewerage(self, val: str | None) -> SewerageType:
         if not val:
             return SewerageType.NIEZNANA
         v = val.lower()
@@ -99,7 +101,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
             return SewerageType.MIEJSKA
         return SewerageType.NIEZNANA
 
-    def _map_road_type(self, val: Optional[str]) -> RoadType:
+    def _map_road_type(self, val: str | None) -> RoadType:
         if not val:
             return RoadType.NIEZNANA
         v = val.lower()
@@ -113,13 +115,13 @@ class NieruchomosciOnlineScraper(BaseScraper):
             return RoadType.POLNA
         return RoadType.NIEZNANA
 
-    def _parse_detail(self, html: str) -> Dict[str, Any]:
+    def _parse_detail(self, html: str) -> dict[str, Any]:
         """Parse detail page: attributes table rows, JSON-LD and description."""
         soup = BeautifulSoup(html, "html.parser")
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
 
-        rows: Dict[str, str] = {}
-        unlabeled: List[str] = []
+        rows: dict[str, str] = {}
+        unlabeled: list[str] = []
         for li in soup.select("#detailsTable ul.list-h li"):
             label_el = li.find("strong")
             value_el = li.find("span")
@@ -231,7 +233,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
             result["description"] = "\n".join(desc_parts)
 
         # Photos from HTML & render checks
-        gallery: List[str] = result.get("gallery_images", [])
+        gallery: list[str] = result.get("gallery_images", [])
         render_indicators = ("render", "wizualizac", "visualis", "koncepcj", "rzut", "projekt-3d")
         has_render = False
 
@@ -251,11 +253,11 @@ class NieruchomosciOnlineScraper(BaseScraper):
 
         return result
 
-    async def fetch_detail_html(self, url: str) -> Optional[str]:
+    async def fetch_detail_html(self, url: str) -> str | None:
         """Fetch an offer detail page."""
         return await self.fetch_html(url, referer=NIERUCHOMOSCI_ONLINE_BASE)
 
-    def _parse_tile(self, tile: Any) -> Optional[ListingSchema]:
+    def _parse_tile(self, tile: Any) -> ListingSchema | None:
         try:
             # Title & Link
             title_a = tile.select_one("h2 a") or tile.select_one("a.title")
@@ -360,6 +362,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
 
             # Category
             from src.models.enums import PropertyCategory
+
             cat_str = self.profile.category if self.profile and hasattr(self.profile, "category") else "dom"
             try:
                 category_enum = PropertyCategory(cat_str)
@@ -400,14 +403,14 @@ class NieruchomosciOnlineScraper(BaseScraper):
                 main_image_url=main_image_url,
                 gallery_images=[main_image_url] if main_image_url else [],
                 property_fingerprint=fp,
-                created_at=datetime.now(timezone.utc),
-                scraped_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                scraped_at=datetime.now(UTC),
             )
         except Exception as e:
             logger.debug(f"[NieruchomosciOnline] Error parsing tile: {e}")
             return None
 
-    def _apply_detail(self, listing: ListingSchema, detail: Dict[str, Any]) -> None:
+    def _apply_detail(self, listing: ListingSchema, detail: dict[str, Any]) -> None:
         """Enrich listing with detail-page data (structured detail wins over tile teasers)."""
         if detail.get("finish_condition"):
             listing.finish_condition = detail["finish_condition"]
@@ -460,16 +463,17 @@ class NieruchomosciOnlineScraper(BaseScraper):
                 logger.debug(f"[{self.name}] Failed to enrich detail for {listing.url}: {err}")
         return listing
 
-    async def scrape(self) -> List[ListingSchema]:
+    async def scrape(self) -> list[ListingSchema]:
         """Scrape listings from Nieruchomosci-online.pl for configured location."""
         from src.services.config_manager import config_manager
+
         profile = self.profile or config_manager.get_profile()
         base_url = self.search_url or profile.get_nieruchomosci_online_url()
         city_name = profile.city
         category_name = getattr(profile, "category", "dom")
 
         logger.info(f"[{self.name}] Starting scrape for {city_name} ({category_name}) via: {base_url}")
-        listings: List[ListingSchema] = []
+        listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
             join_char = "&" if "?" in base_url else "?"

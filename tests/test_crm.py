@@ -1,4 +1,5 @@
 import os
+
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
@@ -8,7 +9,7 @@ from src.models.enums import BuildingType, QualificationStatus, SegmentSubtype, 
 from src.models.listing import FilterResult, ListingSchema
 from src.services.geocoder import NominatimGeocoder
 from src.services.live_dashboard import LiveDashboardServer
-from src.storage.models import Base, ListingModel
+from src.storage.models import Base
 from src.storage.repository import ListingRepository
 
 
@@ -97,6 +98,7 @@ async def test_geocoder_fallback(test_session: AsyncSession):
 @pytest.mark.asyncio
 async def test_live_dashboard_crm_endpoints():
     from src.storage.database import init_db
+
     await init_db()
     server = LiveDashboardServer(port=8089)
     async with TestClient(TestServer(server.app)) as client:
@@ -109,10 +111,7 @@ async def test_live_dashboard_crm_endpoints():
         if len(listings) > 0:
             target_id = listings[0]["id"]
             # Test PATCH /api/listings/{id}/status
-            patch_resp = await client.patch(
-                f"/api/listings/{target_id}/status",
-                json={"status": "FAVORITE"}
-            )
+            patch_resp = await client.patch(f"/api/listings/{target_id}/status", json={"status": "FAVORITE"})
             assert patch_resp.status == 200
             patch_data = await patch_resp.json()
             assert patch_data["success"] is True
@@ -120,8 +119,7 @@ async def test_live_dashboard_crm_endpoints():
 
             # Test PATCH /api/listings/{id}/notes
             notes_resp = await client.patch(
-                f"/api/listings/{target_id}/notes",
-                json={"notes": "Notatka testowa z poziomu API"}
+                f"/api/listings/{target_id}/notes", json={"notes": "Notatka testowa z poziomu API"}
             )
             assert notes_resp.status == 200
             notes_data = await notes_resp.json()
@@ -147,7 +145,7 @@ async def test_live_dashboard_config_endpoints():
                 "city": "Kraków",
                 "distance_radius": 25,
                 "max_price": 1_400_000.0,
-            }
+            },
         )
         assert update_resp.status == 200
         new_cfg = await update_resp.json()
@@ -162,13 +160,14 @@ async def test_live_dashboard_config_endpoints():
                 "city": "Rzeszów",
                 "distance_radius": 15,
                 "max_price": 1_300_000.0,
-            }
+            },
         )
 
 
 @pytest.mark.asyncio
 async def test_live_dashboard_listings_includes_gallery():
     from src.storage.database import init_db
+
     await init_db()
     server = LiveDashboardServer(port=8087)
     async with TestClient(TestServer(server.app)) as client:
@@ -185,6 +184,7 @@ async def test_live_dashboard_listings_includes_gallery():
 async def test_generate_html_dashboard_with_gallery(tmp_path):
     from src.services.report_generator import generate_html_dashboard
     from src.storage.database import get_session, init_db
+
     await init_db()
 
     async with get_session() as session:
@@ -215,9 +215,10 @@ async def test_generate_html_dashboard_with_gallery(tmp_path):
     out_file = str(tmp_path / "test_report.html")
     path = await generate_html_dashboard(output_path=out_file, auto_open=False)
     assert os.path.exists(path)
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, encoding="utf-8") as f:
         content = f.read()
     assert "<!DOCTYPE html>" in content
+
 
 @pytest.mark.asyncio
 async def test_delete_by_profile(test_session: AsyncSession):
@@ -270,18 +271,21 @@ async def test_delete_by_profile(test_session: AsyncSession):
 
 @pytest.mark.asyncio
 async def test_live_dashboard_profile_filter_and_deletion(tmp_path):
-    from src.storage.database import init_db, get_session
     from src.services.config_manager import config_manager
+    from src.storage.database import get_session, init_db
+
     await init_db()
 
     # Create dummy profile in config
     test_prof_id = "test_prof_del"
-    config_manager.add_or_update_profile({
-        "id": test_prof_id,
-        "name": "Profil Do Usunięcia",
-        "category": "dom",
-        "city": "Rzeszów",
-    })
+    config_manager.add_or_update_profile(
+        {
+            "id": test_prof_id,
+            "name": "Profil Do Usunięcia",
+            "category": "dom",
+            "city": "Rzeszów",
+        }
+    )
 
     async with get_session() as session:
         repo = ListingRepository(session)
@@ -297,7 +301,9 @@ async def test_live_dashboard_profile_filter_and_deletion(tmp_path):
             profile_id=test_prof_id,
             profile_name="Profil Do Usunięcia",
         )
-        filt = FilterResult(is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True)
+        filt = FilterResult(
+            is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True
+        )
         await repo.save_or_update(listing, filt)
 
     server = LiveDashboardServer(port=8086)

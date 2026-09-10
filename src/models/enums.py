@@ -67,7 +67,6 @@ class HeatingType(str, Enum):
     NIEZNANE = "nieznane"
 
 
-
 class QualificationStatus(str, Enum):
     QUALIFIED_WHITELIST = "QUALIFIED_WHITELIST"
     QUALIFIED = "QUALIFIED"
@@ -81,4 +80,3 @@ class UserCRMStatus(str, Enum):
     FAVORITE = "FAVORITE"
     TO_VISIT = "TO_VISIT"
     REJECTED = "REJECTED"
-

@@ -49,6 +49,7 @@ logs/
 # Caches & MCP tools
 .playwright-mcp/
 .pytest_cache/
+.pytest_tmp/
 .coverage
 htmlcov/
 .mypy_cache/

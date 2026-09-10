@@ -1,34 +1,48 @@
 # ==============================================================================
 # Production Dockerfile for Real Estate Hunter & Scraper Pipeline
+# Multi-stage build: uv (locked deps) in builder, slim runtime with venv copy.
 # ==============================================================================
-FROM python:3.12-slim
 
-# Prevent Python from writing .pyc files and enable unbuffered logging
-ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1 \
-    TZ=Europe/Warsaw
+# Stage 1: Builder
+FROM python:3.12-slim AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:0.8.22 /uv /uvx /bin/
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project
+
+# Stage 2: Runtime
+FROM python:3.12-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     tzdata \
     ca-certificates \
-    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone \
+    && ln -snf /usr/share/zoneinfo/Europe/Warsaw /etc/localtime && echo Europe/Warsaw > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Install Python dependencies first for optimal Docker layer caching
-COPY requirements.txt /app/requirements.txt
-RUN pip install --upgrade pip && \
-    pip install -r requirements.txt
+# Non-root user with writable app, data, and logs directories
+RUN groupadd -r appuser && useradd -r -m -d /home/appuser -g appuser appuser \
+    && mkdir -p /app/data /app/logs \
+    && chown -R appuser:appuser /app /home/appuser
 
-# Copy application source code
+# Copy virtualenv with locked dependencies from builder, then application source
+COPY --from=builder /app/.venv /app/.venv
 COPY . /app
 
-# Ensure directories for SQLite database, reports, and logs exist
-RUN mkdir -p /app/data /app/logs && chmod -R 777 /app/data /app/logs
+USER appuser
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Europe/Warsaw \
+    HOME=/home/appuser \
+    PATH="/app/.venv/bin:$PATH"
 
 # Expose web dashboard port
 EXPOSE 8080

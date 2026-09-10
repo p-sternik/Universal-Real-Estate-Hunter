@@ -1,9 +1,7 @@
 import re
-from typing import Any, List, Optional, Tuple
-from loguru import logger
+from typing import Any
 
 from config import settings
-from src.models.enums import PropertyCategory
 from src.models.listing import ListingSchema
 
 
@@ -20,33 +18,38 @@ class Stage1Filter:
 
     def __init__(
         self,
-        min_price: Optional[float] = None,
-        max_price: Optional[float] = None,
-        min_area_home: Optional[float] = None,
-        max_area_home: Optional[float] = None,
-        min_area_plot: Optional[float] = None,
-        max_area_plot: Optional[float] = None,
-        min_price_per_m2: Optional[float] = None,
-        max_price_per_m2: Optional[float] = None,
-        min_rooms: Optional[int] = None,
-        max_rooms: Optional[int] = None,
-        min_floor: Optional[int] = None,
-        max_floor: Optional[int] = None,
-        blacklist: Optional[List[str]] = None,
-        whitelist_areas: Optional[List[dict]] = None,
-        building_types: Optional[List[str]] = None,
-        min_year_built: Optional[int] = None,
-        max_year_built: Optional[int] = None,
-        profile: Optional[Any] = None,
+        min_price: float | None = None,
+        max_price: float | None = None,
+        min_area_home: float | None = None,
+        max_area_home: float | None = None,
+        min_area_plot: float | None = None,
+        max_area_plot: float | None = None,
+        min_price_per_m2: float | None = None,
+        max_price_per_m2: float | None = None,
+        min_rooms: int | None = None,
+        max_rooms: int | None = None,
+        min_floor: int | None = None,
+        max_floor: int | None = None,
+        blacklist: list[str] | None = None,
+        whitelist_areas: list[dict] | None = None,
+        building_types: list[str] | None = None,
+        min_year_built: int | None = None,
+        max_year_built: int | None = None,
+        profile: Any | None = None,
     ):
         from src.services.config_manager import config_manager
+
         self.profile = profile
         cfg = profile or config_manager.get_profile()
 
         self.min_price = min_price if min_price is not None else getattr(cfg, "min_price", 0.0)
         self.max_price = max_price if max_price is not None else getattr(cfg, "max_price", 1_300_000.0)
-        self.min_price_per_m2 = min_price_per_m2 if min_price_per_m2 is not None else getattr(cfg, "min_price_per_m2", None)
-        self.max_price_per_m2 = max_price_per_m2 if max_price_per_m2 is not None else getattr(cfg, "max_price_per_m2", None)
+        self.min_price_per_m2 = (
+            min_price_per_m2 if min_price_per_m2 is not None else getattr(cfg, "min_price_per_m2", None)
+        )
+        self.max_price_per_m2 = (
+            max_price_per_m2 if max_price_per_m2 is not None else getattr(cfg, "max_price_per_m2", None)
+        )
         self.min_area_home = min_area_home if min_area_home is not None else getattr(cfg, "min_area_home", None)
         self.max_area_home = max_area_home if max_area_home is not None else getattr(cfg, "max_area_home", None)
         self.min_area_plot = min_area_plot if min_area_plot is not None else getattr(cfg, "min_area_plot", None)
@@ -55,14 +58,26 @@ class Stage1Filter:
         self.max_rooms = max_rooms if max_rooms is not None else getattr(cfg, "max_rooms", None)
         self.min_floor = min_floor if min_floor is not None else getattr(cfg, "min_floor", None)
         self.max_floor = max_floor if max_floor is not None else getattr(cfg, "max_floor", None)
-        self.blacklist = blacklist if blacklist is not None else (getattr(cfg, "blacklist_keywords", None) or settings.BLACKLIST_KEYWORDS)
-        self.whitelist_areas = whitelist_areas if whitelist_areas is not None else (getattr(cfg, "whitelist_areas", None) or settings.WHITELIST_AREAS)
+        self.blacklist = (
+            blacklist
+            if blacklist is not None
+            else (getattr(cfg, "blacklist_keywords", None) or settings.BLACKLIST_KEYWORDS)
+        )
+        self.whitelist_areas = (
+            whitelist_areas
+            if whitelist_areas is not None
+            else (getattr(cfg, "whitelist_areas", None) or settings.WHITELIST_AREAS)
+        )
         self.category = getattr(cfg, "category", "dom")
         self.owner_type = getattr(cfg, "owner_type", "all")
         self.market_type = getattr(cfg, "market_type", "all")
-        self.min_year_built = min_year_built if min_year_built is not None else (getattr(cfg, "min_year_built", None) or 1980)
+        self.min_year_built = (
+            min_year_built if min_year_built is not None else (getattr(cfg, "min_year_built", None) or 1980)
+        )
         self.max_year_built = max_year_built if max_year_built is not None else getattr(cfg, "max_year_built", None)
-        self.building_types = building_types if building_types is not None else (getattr(cfg, "building_types", None) or [])
+        self.building_types = (
+            building_types if building_types is not None else (getattr(cfg, "building_types", None) or [])
+        )
 
     RE_NEGATION_PREFIX = re.compile(
         r"(?:bez|brak|woln[yae]\s+od|nie\s+ma|poza\s+terenem|nie\s+leży\s+na|nie\s+lezy\s+na|brak\s+ryzyka|nie\s+jest\s+to|nie\s+znajduje\s+się\s+na|działka\s+płaska\s*,?\s*bez)(?:\s+ryzyka)?(?:\s+\w+){0,3}\s*$",
@@ -83,7 +98,7 @@ class Stage1Filter:
             return True
         return False
 
-    def check_blacklist(self, listing: ListingSchema, blacklist_words: Optional[List[str]] = None) -> Optional[str]:
+    def check_blacklist(self, listing: ListingSchema, blacklist_words: list[str] | None = None) -> str | None:
         """Check if any blacklisted term is present in title, location, or description with negation awareness."""
         words = blacklist_words if blacklist_words is not None else self.blacklist
         if not words:
@@ -109,7 +124,7 @@ class Stage1Filter:
                     return term
 
             # 3. Description: check all matches and ensure they are not negated or transit references
-            spans: List[Tuple[int, int]] = []
+            spans: list[tuple[int, int]] = []
             for m in pattern.finditer(desc_text):
                 spans.append((m.start(), m.end()))
             if not spans and t in desc_text:
@@ -129,7 +144,7 @@ class Stage1Filter:
 
         return None
 
-    def check_whitelist(self, listing: ListingSchema, areas: Optional[List[dict]] = None) -> Optional[str]:
+    def check_whitelist(self, listing: ListingSchema, areas: list[dict] | None = None) -> str | None:
         """
         Check if listing matches prioritized whitelist areas.
         Returns the matching whitelist area name or None.
@@ -155,7 +170,7 @@ class Stage1Filter:
 
         return None
 
-    def evaluate(self, listing: ListingSchema, profile: Optional[Any] = None) -> Tuple[bool, List[str], Optional[str]]:
+    def evaluate(self, listing: ListingSchema, profile: Any | None = None) -> tuple[bool, list[str], str | None]:
         """
         Runs Stage I filtration according to property category and criteria.
         Returns: (passed: bool, rejection_reasons: list[str], matched_whitelist_area: Optional[str])
@@ -163,6 +178,7 @@ class Stage1Filter:
         p = profile or self.profile
         if not p and listing.profile_name:
             from src.services.config_manager import config_manager
+
             p = config_manager.get_profile(listing.profile_name)
 
         min_p = getattr(p, "min_price", self.min_price) if p else self.min_price
@@ -191,7 +207,7 @@ class Stage1Filter:
         max_year = getattr(p, "max_year_built", self.max_year_built) if p else self.max_year_built
         bt_allowed = getattr(p, "building_types", self.building_types) if p else self.building_types
 
-        reasons: List[str] = []
+        reasons: list[str] = []
 
         # 1. Blacklist check (Absolute rejection)
         matched_bl = self.check_blacklist(listing, bl_words)
@@ -232,7 +248,9 @@ class Stage1Filter:
 
         # 4c. Building type allow-list
         if category in ("dom", "mieszkanie") and bt_allowed:
-            b_val = listing.building_type.value if hasattr(listing.building_type, "value") else str(listing.building_type)
+            b_val = (
+                listing.building_type.value if hasattr(listing.building_type, "value") else str(listing.building_type)
+            )
             if b_val not in bt_allowed:
                 reasons.append(f"Typ budynku '{b_val}' poza dozwolonymi w konfiguracji")
 

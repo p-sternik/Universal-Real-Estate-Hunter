@@ -1,0 +1,116 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "assets/**"
+      - ".gitignore"
+  pull_request:
+    branches:
+      - main
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
+      - "assets/**"
+      - ".gitignore"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate (Lint, Security, Tests)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up uv & Python 3.12
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Install dependencies
+        run: uv sync --frozen
+
+      - name: Run Ruff (lint & format)
+        run: |
+          uv run ruff check src/ tests/ main.py
+          uv run ruff format --check src/ tests/ main.py
+
+      - name: Run Bandit
+        run: uv run bandit -c pyproject.toml -r src/ main.py -lll -iii
+
+      - name: Run unit tests
+        run: uv run pytest tests/ -q -x --tb=short -m "not integration"
+
+  release:
+    name: Semantic Release
+    outputs:
+      released: ${{ steps.semantic_release.outputs.released }}
+      version: ${{ steps.semantic_release.outputs.version }}
+      tag: ${{ steps.semantic_release.outputs.tag }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    needs: [validate]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Set up uv & Python 3.12
+        uses: astral-sh/setup-uv@v9.0.0
+        with:
+          enable-cache: true
+          python-version: "3.12"
+          cache-dependency-glob: |
+            pyproject.toml
+            uv.lock
+
+      - name: Sync release dependencies
+        run: uv sync --frozen --no-install-project
+
+      - name: Run semantic release
+        id: semantic_release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          uvx --with "GitPython<3.1.44" python-semantic-release -v version --changelog
+
+      - name: Verify changelog updated for released tag
+        if: steps.semantic_release.outputs.released == 'true'
+        shell: bash
+        run: |
+          TAG="${{ steps.semantic_release.outputs.tag }}"
+          if ! grep -q '<!-- version list -->' CHANGELOG.md; then
+            echo "CHANGELOG.md is missing the semantic-release insertion flag."
+            exit 1
+          fi
+          if ! grep -q "^## ${TAG}" CHANGELOG.md; then
+            echo "CHANGELOG.md was not updated with release ${TAG}."
+            exit 1
+          fi
+
+      - name: Release summary
+        if: always()
+        run: |
+          echo "released=${{ steps.semantic_release.outputs.released }}"
+          echo "version=${{ steps.semantic_release.outputs.version }}"
+          echo "tag=${{ steps.semantic_release.outputs.tag }}"

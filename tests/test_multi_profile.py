@@ -1,13 +1,8 @@
-import pytest
-from unittest.mock import AsyncMock, patch
-
+from src.filters.stage1_hard_rules import Stage1Filter
+from src.filters.stage2_semantic import Stage2SemanticFilter
 from src.models.enums import (
     BuildingType,
-    MarketType,
-    OwnerType,
     PropertyCategory,
-    QualificationStatus,
-    RoadType,
     SegmentSubtype,
 )
 from src.models.listing import ListingSchema
@@ -15,12 +10,7 @@ from src.services.config_manager import (
     ConfigManager,
     SearchConfig,
     SearchProfile,
-    ScrapersSettings,
-    ScraperConfig,
 )
-from src.filters import QualificationEngine
-from src.filters.stage1_hard_rules import Stage1Filter
-from src.filters.stage2_semantic import Stage2SemanticFilter
 
 
 def test_legacy_config_migration():
@@ -50,6 +40,37 @@ def test_legacy_config_migration():
     assert cfg.city == "Rzeszów"
     assert cfg.distance_radius == 15
     assert cfg.max_price == 1_250_000
+
+
+def test_search_config_llm_analysis_default_follows_env(monkeypatch):
+    """Verify llm_analysis_enabled defaults to USE_LLM_ANALYSIS and can be toggled."""
+    from config import settings
+
+    monkeypatch.setattr(settings, "USE_LLM_ANALYSIS", True)
+    cfg = SearchConfig()
+    assert cfg.llm_analysis_enabled is True
+
+    monkeypatch.setattr(settings, "USE_LLM_ANALYSIS", False)
+    cfg_off = SearchConfig()
+    assert cfg_off.llm_analysis_enabled is False
+
+
+def test_update_config_llm_analysis_toggle(tmp_path):
+    """Verify update_config persists llm_analysis_enabled without leaking into profiles."""
+    config_file = tmp_path / "search_config.json"
+    mgr = ConfigManager(config_path=str(config_file))
+
+    updated = mgr.update_config({"llm_analysis_enabled": True})
+    assert updated.llm_analysis_enabled is True
+    assert not hasattr(updated.profiles[0], "llm_analysis_enabled")
+
+    # Reload from disk to confirm persistence
+    mgr_reloaded = ConfigManager(config_path=str(config_file))
+    assert mgr_reloaded.get_config().llm_analysis_enabled is True
+
+    # Toggle back off
+    mgr_reloaded.update_config({"llm_analysis_enabled": False})
+    assert mgr_reloaded.get_config().llm_analysis_enabled is False
 
 
 def test_profile_url_generation():

@@ -1,5 +1,5 @@
-import asyncio
 import pytest
+
 from src.models.enums import BuildingType
 from src.scrapers.olx import OLXScraper
 
@@ -19,9 +19,7 @@ def test_olx_extract_prerendered_state_double_encoded():
 def test_olx_extract_prerendered_state_object_form():
     scraper = OLXScraper()
 
-    html = (
-        '<script>window.__PRERENDERED_STATE__= {"listing": {"listing": {"ads": [{"id": 77}]}}};</script>'
-    )
+    html = '<script>window.__PRERENDERED_STATE__= {"listing": {"listing": {"ads": [{"id": 77}]}}};</script>'
     state = scraper._extract_prerendered_state(html)
     assert state is not None
     assert state["listing"]["listing"]["ads"][0]["id"] == 77
@@ -31,9 +29,21 @@ def test_olx_params_dict_prefers_normalized_value():
     scraper = OLXScraper()
 
     params = [
-        {"key": "builttype", "name": "Rodzaj zabudowy", "type": "text", "value": "Wolnostojący", "normalizedValue": "wolnostojacy"},
+        {
+            "key": "builttype",
+            "name": "Rodzaj zabudowy",
+            "type": "text",
+            "value": "Wolnostojący",
+            "normalizedValue": "wolnostojacy",
+        },
         {"key": "market", "name": "Rynek", "type": "text", "value": "Wtórny", "normalizedValue": "secondary"},
-        {"key": "floor_select", "name": "Liczba pięter", "type": "text", "value": "Parterowy", "normalizedValue": "floor_0"},
+        {
+            "key": "floor_select",
+            "name": "Liczba pięter",
+            "type": "text",
+            "value": "Parterowy",
+            "normalizedValue": "floor_0",
+        },
         {"key": "area", "name": "Powierzchnia działki", "type": "text", "value": "600 m²"},
     ]
     params_map = scraper._parse_params_dict(params)

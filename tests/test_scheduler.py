@@ -1,4 +1,3 @@
-import pytest
 from src.services.config_manager import SchedulerSettings
 
 

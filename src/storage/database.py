@@ -1,7 +1,9 @@
 import os
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+
 from loguru import logger
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -10,13 +12,12 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from config import settings
+
 from .models import Base
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
-
-from sqlalchemy import event, text
 
 def get_engine() -> AsyncEngine:
     global _engine
@@ -42,6 +43,7 @@ def get_engine() -> AsyncEngine:
         )
 
         if "sqlite" in db_url:
+
             @event.listens_for(_engine.sync_engine, "connect")
             def set_sqlite_pragma(dbapi_connection, connection_record):
                 cursor = dbapi_connection.cursor()
@@ -79,11 +81,9 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             raise
 
 
-from sqlalchemy import text
-
-
 async def _migrate_sqlite_columns(conn) -> None:
     """Safely adds missing columns to existing SQLite tables."""
+
     def _do_migrate(sync_conn):
         try:
             res = sync_conn.execute(text("PRAGMA table_info(listings)")).fetchall()
@@ -100,7 +100,9 @@ async def _migrate_sqlite_columns(conn) -> None:
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN user_notes TEXT"))
                 if "finish_condition" not in existing_cols:
                     logger.info("Migrating schema: adding 'finish_condition' to listings table")
-                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN finish_condition VARCHAR(50) DEFAULT 'nieokreślony'"))
+                    sync_conn.execute(
+                        text("ALTER TABLE listings ADD COLUMN finish_condition VARCHAR(50) DEFAULT 'nieokreślony'")
+                    )
                 if "has_visualisations" not in existing_cols:
                     logger.info("Migrating schema: adding 'has_visualisations' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN has_visualisations BOOLEAN DEFAULT 0"))
@@ -134,7 +136,9 @@ async def _migrate_sqlite_columns(conn) -> None:
                 if "profile_id" not in existing_cols:
                     logger.info("Migrating schema: adding 'profile_id' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN profile_id VARCHAR(100)"))
-                    sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)"))
+                    sync_conn.execute(
+                        text("CREATE INDEX IF NOT EXISTS ix_listings_profile_id ON listings (profile_id)")
+                    )
                     sync_conn.execute(text("UPDATE listings SET profile_id = 'default' WHERE profile_id IS NULL"))
                 if "profile_name" not in existing_cols:
                     logger.info("Migrating schema: adding 'profile_name' to listings table")
@@ -151,6 +155,18 @@ async def _migrate_sqlite_columns(conn) -> None:
                 if "geoportal_url" not in existing_cols:
                     logger.info("Migrating schema: adding 'geoportal_url' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN geoportal_url VARCHAR(500)"))
+                if "ai_summary" not in existing_cols:
+                    logger.info("Migrating schema: adding 'ai_summary' to listings table")
+                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN ai_summary TEXT"))
+                if "ai_questions" not in existing_cols:
+                    logger.info("Migrating schema: adding 'ai_questions' to listings table")
+                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN ai_questions TEXT DEFAULT '[]'"))
+                if "contact_phone" not in existing_cols:
+                    logger.info("Migrating schema: adding 'contact_phone' to listings table")
+                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN contact_phone VARCHAR(50)"))
+                if "contact_person" not in existing_cols:
+                    logger.info("Migrating schema: adding 'contact_person' to listings table")
+                    sync_conn.execute(text("ALTER TABLE listings ADD COLUMN contact_person VARCHAR(150)"))
         except Exception as e:
             logger.warning(f"Schema migration note: {e}")
 
@@ -169,4 +185,3 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         await _migrate_sqlite_columns(conn)
     logger.info("Database tables initialized and up-to-date.")
-

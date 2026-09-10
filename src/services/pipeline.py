@@ -1,10 +1,11 @@
 import asyncio
-from typing import Any, List, Optional
+from typing import Any
+
 from loguru import logger
 
 from config import settings
 from src.filters import QualificationEngine
-from src.models.enums import FinishCondition, HeatingType, QualificationStatus, SewerageType
+from src.models.enums import FinishCondition, HeatingType, SewerageType
 from src.models.listing import ListingSchema
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.discord_notifier import DiscordNotifier
@@ -26,9 +27,9 @@ class ScraperPipeline:
 
     def __init__(
         self,
-        scrapers: Optional[List[BaseScraper]] = None,
-        discord_notifier: Optional[DiscordNotifier] = None,
-        telegram_notifier: Optional[TelegramNotifier] = None,
+        scrapers: list[BaseScraper] | None = None,
+        discord_notifier: DiscordNotifier | None = None,
+        telegram_notifier: TelegramNotifier | None = None,
     ):
         self._custom_scrapers = scrapers is not None
         self.scrapers = scrapers or [
@@ -39,13 +40,14 @@ class ScraperPipeline:
         ]
         self.discord = discord_notifier or DiscordNotifier()
         self.telegram = telegram_notifier or TelegramNotifier()
-        self.engine = QualificationEngine()
+        self.llm_analysis_enabled = settings.USE_LLM_ANALYSIS
+        self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
 
     async def process_listing(
         self,
         listing: ListingSchema,
         repo: ListingRepository,
-        profile: Optional[Any] = None,
+        profile: Any | None = None,
     ) -> dict:
         result = {
             "is_new": False,
@@ -62,9 +64,7 @@ class ScraperPipeline:
                 listing.profile_name = profile.name
 
         # 1. Look up existing record in database
-        existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(
-            listing.portal, listing.id
-        )
+        existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(listing.portal, listing.id)
 
         # 1.1 Check duplicate by fingerprint
         if listing.property_fingerprint:
@@ -123,20 +123,22 @@ class ScraperPipeline:
                 listing.cadastral_area = existing_model.cadastral_area
                 listing.geoportal_url = existing_model.geoportal_url
 
-        # Check if LLM can be skipped because this listing was already analyzed
-        skip_llm = False
-        if existing_model and existing_model.qualification_status:
-            desc_unchanged = (
-                not listing.raw_description
-                or (existing_model.raw_description and listing.raw_description.strip() == existing_model.raw_description.strip())
+        # Check if LLM can be skipped because this listing was already analyzed.
+        # If LLM analysis is enabled and the listing has no AI summary yet (e.g. rows
+        # scraped before the AI Due Diligence feature), run the LLM once to backfill.
+        skip_llm = not self.llm_analysis_enabled
+        if self.llm_analysis_enabled and existing_model and existing_model.qualification_status:
+            desc_unchanged = not listing.raw_description or (
+                existing_model.raw_description
+                and listing.raw_description.strip() == existing_model.raw_description.strip()
             )
-            if desc_unchanged:
+            if desc_unchanged and (existing_model.ai_summary or existing_model.ai_questions):
                 skip_llm = True
 
         # 2. Run two-stage qualification engine
         filter_result = await self.engine.evaluate_listing(listing, profile=profile, skip_llm=skip_llm)
 
-        # If LLM was skipped, preserve previously saved LLM pros/cons
+        # If LLM was skipped, preserve previously saved LLM pros/cons and AI fields
         if skip_llm and existing_model:
             if existing_model.pros:
                 for p in existing_model.pros:
@@ -144,8 +146,19 @@ class ScraperPipeline:
                         filter_result.pros.append(p)
             if existing_model.cons:
                 for c in existing_model.cons:
-                    if (c.startswith("[LLM]") or c.startswith("⚠️ [Ukryty koszt]") or c.startswith("⚖️ [Ryzyko prawne]")) and c not in filter_result.cons:
+                    if (
+                        c.startswith("[LLM]") or c.startswith("⚠️ [Ukryty koszt]") or c.startswith("⚖️ [Ryzyko prawne]")
+                    ) and c not in filter_result.cons:
                         filter_result.cons.append(c)
+            # Preserve AI Due Diligence fields
+            if not filter_result.ai_summary and getattr(existing_model, "ai_summary", None):
+                filter_result.ai_summary = existing_model.ai_summary
+            if not filter_result.ai_questions and getattr(existing_model, "ai_questions", None):
+                filter_result.ai_questions = existing_model.ai_questions
+            if not filter_result.contact_phone and getattr(existing_model, "contact_phone", None):
+                filter_result.contact_phone = existing_model.contact_phone
+            if not filter_result.contact_person and getattr(existing_model, "contact_person", None):
+                filter_result.contact_person = existing_model.contact_person
 
         result["qualified"] = filter_result.is_qualified
 
@@ -153,6 +166,7 @@ class ScraperPipeline:
         is_exact_coords = True
         if not listing.coordinates:
             from src.services.geocoder import geocoder
+
             lat, lon, is_exact = await geocoder.geocode(
                 session=repo.session,
                 street=listing.street,
@@ -170,6 +184,7 @@ class ScraperPipeline:
         if listing.coordinates and is_exact_coords and filter_result.is_qualified and not listing.parcel_id:
             try:
                 from src.services.geoportal import geoportal_service
+
                 geo_audit = await geoportal_service.audit_location(
                     listing.coordinates[0], listing.coordinates[1], radius_meters=120
                 )
@@ -199,12 +214,9 @@ class ScraperPipeline:
         result["price_changed"] = price_changed
 
         # 5. Dispatch notification if qualified and unnotified
-        should_notify = False
-        if filter_result.is_qualified:
-            if is_new and not result["is_duplicate_fingerprint"]:
-                should_notify = True
-            elif price_changed and filter_result.is_qualified:
-                should_notify = True
+        should_notify = filter_result.is_qualified and (
+            (is_new and not result["is_duplicate_fingerprint"]) or price_changed
+        )
 
         if should_notify and db_model.notified_at is None:
             logger.info(
@@ -221,12 +233,16 @@ class ScraperPipeline:
 
         return result
 
-    async def run_cycle(self, target_profile: Optional[str] = None) -> dict:
+    async def run_cycle(self, target_profile: str | None = None) -> dict:
         """Run a complete scraping and processing cycle across active profiles."""
         logger.info("=== Starting Scraper Pipeline Cycle ===")
         from src.services.config_manager import config_manager
+
         cfg = config_manager.get_config()
-        self.engine = QualificationEngine()
+        self.llm_analysis_enabled = bool(getattr(cfg, "llm_analysis_enabled", settings.USE_LLM_ANALYSIS))
+        self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
+        if self.llm_analysis_enabled:
+            logger.info("[Pipeline] AI LLM analysis enabled.")
         await init_db()
 
         total_scraped = 0
@@ -266,11 +282,21 @@ class ScraperPipeline:
                 scs = []
                 p_portals = prof.enabled_portals
                 if cfg.scrapers.otodom.enabled and (not p_portals or "otodom" in p_portals):
-                    scs.append(OtodomScraper(max_pages=cfg.scrapers.otodom.max_pages, profile=prof, skip_detail_urls=fresh_urls))
+                    scs.append(
+                        OtodomScraper(
+                            max_pages=cfg.scrapers.otodom.max_pages, profile=prof, skip_detail_urls=fresh_urls
+                        )
+                    )
                 if cfg.scrapers.olx.enabled and (not p_portals or "olx" in p_portals):
                     scs.append(OLXScraper(max_pages=cfg.scrapers.olx.max_pages, profile=prof))
                 if cfg.scrapers.nieruchomosci_online.enabled and (not p_portals or "nieruchomosci_online" in p_portals):
-                    scs.append(NieruchomosciOnlineScraper(max_pages=cfg.scrapers.nieruchomosci_online.max_pages, profile=prof, skip_detail_urls=fresh_urls))
+                    scs.append(
+                        NieruchomosciOnlineScraper(
+                            max_pages=cfg.scrapers.nieruchomosci_online.max_pages,
+                            profile=prof,
+                            skip_detail_urls=fresh_urls,
+                        )
+                    )
                 if cfg.scrapers.morizon.enabled and (not p_portals or "morizon" in p_portals):
                     scs.append(MorizonScraper(max_pages=cfg.scrapers.morizon.max_pages, profile=prof))
                 execution_plan.append((prof, scs))
@@ -311,7 +337,7 @@ class ScraperPipeline:
         sem = asyncio.Semaphore(concurrency)
 
         step_idx = 0
-        for prof, prof_name, sc_name, listings, err in scrape_results:
+        for prof, prof_name, _sc_name, listings, _err in scrape_results:
             step_idx += 1
             total_scraped += len(listings)
             base_pct = int(((step_idx - 1) / total_steps) * 85)
@@ -320,15 +346,16 @@ class ScraperPipeline:
                 continue
 
             processed = 0
-            async def safe_process(item):
+
+            async def safe_process(item, prof=prof, total_listings=len(listings)):
                 nonlocal processed
                 async with sem:
                     async with get_session() as session:
                         repo = ListingRepository(session)
                         res = await self.process_listing(item, repo, profile=prof)
                     processed += 1
-                    if processed % 5 == 0 or processed == len(listings):
-                        global_tracker.update_processing(processed, len(listings))
+                    if processed % 5 == 0 or processed == total_listings:
+                        global_tracker.update_processing(processed, total_listings)
                     return item, res
 
             results = await asyncio.gather(*[safe_process(item) for item in listings])

@@ -1,4 +1,3 @@
-from typing import List, Optional
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -14,9 +13,9 @@ class Settings(BaseSettings):
     DATABASE_URL: str = "sqlite+aiosqlite:///listings.db"
 
     # Notifiers
-    DISCORD_WEBHOOK_URL: Optional[str] = None
-    TELEGRAM_BOT_TOKEN: Optional[str] = None
-    TELEGRAM_CHAT_ID: Optional[str] = None
+    DISCORD_WEBHOOK_URL: str | None = None
+    TELEGRAM_BOT_TOKEN: str | None = None
+    TELEGRAM_CHAT_ID: str | None = None
 
     # Scheduler
     CHECK_INTERVAL_MINUTES: int = 20
@@ -28,7 +27,7 @@ class Settings(BaseSettings):
     MIN_AREA_PLOT: float = 250.0  # If < 250 and middle segment -> reject; if None -> analyze desc
 
     # Stage I: Blacklist keywords (case-insensitive substring check)
-    BLACKLIST_KEYWORDS: List[str] = Field(
+    BLACKLIST_KEYWORDS: list[str] = Field(
         default_factory=lambda: [
             "matysówka",
             "matysowka",
@@ -56,7 +55,7 @@ class Settings(BaseSettings):
 
     # Stage I: Whitelist configurations
     # Whitelist is prioritized. Offers matching whitelist receive high priority / bonus tag.
-    WHITELIST_AREAS: List[dict] = Field(
+    WHITELIST_AREAS: list[dict] = Field(
         default_factory=lambda: [
             {
                 "name": "Słocina Dolna",
@@ -107,7 +106,7 @@ class Settings(BaseSettings):
     FETCH_DETAILS: bool = True
     CONCURRENT_REQUESTS: int = 3
     DETAIL_REFRESH_HOURS: int = 24
-    PROXY_URL: Optional[str] = None
+    PROXY_URL: str | None = None
     USER_AGENT: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
         "(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
@@ -115,11 +114,11 @@ class Settings(BaseSettings):
 
     # LLM Settings (Optional)
     USE_LLM_ANALYSIS: bool = False
-    OPENROUTER_API_KEY: Optional[str] = None
+    OPENROUTER_API_KEY: str | None = None
     OPENROUTER_MODEL: str = "google/gemma-4-31b-it:free"
-    OPENAI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
-    OPENAI_BASE_URL: Optional[str] = None
+    OPENAI_BASE_URL: str | None = None
     OLLAMA_BASE_URL: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.1:8b"
 

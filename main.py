@@ -1,6 +1,7 @@
 import argparse
 import asyncio
 import sys
+
 from loguru import logger
 
 # Ensure UTF-8 output on Windows consoles
@@ -11,7 +12,6 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-from config import settings
 from src.scheduler.runner import SchedulerRunner
 from src.services.discord_notifier import DiscordNotifier
 from src.services.pipeline import ScraperPipeline
@@ -106,8 +106,7 @@ async def test_filter_demo():
             city="Rzeszów",
             access_road_type=RoadType.KOSTKA,
             raw_description=(
-                "Segment środkowy, działka 140 m2. Miejsce postojowe przed budynkiem. "
-                "Dojazd drogą z kostki brukowej."
+                "Segment środkowy, działka 140 m2. Miejsce postojowe przed budynkiem. Dojazd drogą z kostki brukowej."
             ),
         ),
         ListingSchema(
@@ -145,7 +144,9 @@ async def test_filter_demo():
 async def reindex_all_listings():
     """Re-evaluate all existing listings in DB with the latest Stage 2 filters, finish conditions, visualisations, and utilities."""
     from collections import Counter
+
     from sqlalchemy import select
+
     from src.filters.stage2_semantic import Stage2SemanticFilter
     from src.models.enums import FinishCondition, HeatingType, SewerageType
     from src.storage.database import get_session
@@ -197,9 +198,7 @@ async def reindex_all_listings():
 
             # 4. Detect heating
             existing_heat = (
-                HeatingType(item.heating)
-                if item.heating in HeatingType._value2member_map_
-                else HeatingType.NIEZNANE
+                HeatingType(item.heating) if item.heating in HeatingType._value2member_map_ else HeatingType.NIEZNANE
             )
             detected_heat = s2.detect_heating(desc, existing_heat)
             item.heating = detected_heat.value
@@ -216,13 +215,30 @@ async def reindex_all_listings():
             cons = list(item.cons or [])
 
             # Clean previous dynamic tags
-            pros = [p for p in pros if not any(k in p.lower() for k in [
-                "pod klucz", "stan deweloperski", "kanalizacja", "oczyszczalnia",
-                "pompa ciepła", "gazowe", "miejskie", "światłowód"
-            ])]
-            cons = [c for c in cons if not any(k in c.lower() for k in [
-                "surowy", "remont", "wizualizacj", "szambo", "paliwo stałe", "elektryczne"
-            ])]
+            pros = [
+                p
+                for p in pros
+                if not any(
+                    k in p.lower()
+                    for k in [
+                        "pod klucz",
+                        "stan deweloperski",
+                        "kanalizacja",
+                        "oczyszczalnia",
+                        "pompa ciepła",
+                        "gazowe",
+                        "miejskie",
+                        "światłowód",
+                    ]
+                )
+            ]
+            cons = [
+                c
+                for c in cons
+                if not any(
+                    k in c.lower() for k in ["surowy", "remont", "wizualizacj", "szambo", "paliwo stałe", "elektryczne"]
+                )
+            ]
 
             if detected_fc == FinishCondition.DO_ZAMIESZKANIA:
                 pros.append("Standard wykończenia: do zamieszkania / pod klucz")
@@ -290,6 +306,7 @@ async def audit_geoportal_all(limit: int = 50, only_qualified: bool = True):
     Resolves cadastral parcel ID, exact area, and checks for surrounding industrial risks (Ba).
     """
     from sqlalchemy import select
+
     from src.services.geoportal import geoportal_service
     from src.storage.database import get_session, init_db
     from src.storage.models import ListingModel
@@ -346,7 +363,9 @@ async def audit_geoportal_all(limit: int = 50, only_qualified: bool = True):
                 )
 
         await session.commit()
-        logger.success(f"Zakończono audyt Geoportalu. Przeanalizowano {audited} ofert, wykryto ryzyka sąsiedztwa w {risks_count} ofertach.")
+        logger.success(
+            f"Zakończono audyt Geoportalu. Przeanalizowano {audited} ofert, wykryto ryzyka sąsiedztwa w {risks_count} ofertach."
+        )
 
 
 def main():
@@ -357,7 +376,9 @@ def main():
     run_parser.add_argument("--city", default=None, help="Target city (e.g. Kraków, Warszawa, Rzeszów)")
     run_parser.add_argument("--radius", type=int, default=None, help="Search distance radius (+km)")
     run_parser.add_argument("--profile", default=None, help="Specific search profile to run (name or ID)")
-    run_parser.add_argument("--interval", type=int, default=None, help="Scraping interval in minutes (overrides config)")
+    run_parser.add_argument(
+        "--interval", type=int, default=None, help="Scraping interval in minutes (overrides config)"
+    )
 
     once_parser = subparsers.add_parser("once", help="Run a single scraping and qualification pass")
     once_parser.add_argument("--city", default=None, help="Target city (e.g. Kraków, Warszawa, Rzeszów)")
@@ -396,7 +417,9 @@ def main():
     subparsers.add_parser("reindex", help="Re-evaluate all existing listings in database with latest filters")
 
     # Geoportal audit
-    geo_parser = subparsers.add_parser("geoportal", help="Audit listings using Geoportal ULDK & KIEG for cadastral parcel and industrial risks")
+    geo_parser = subparsers.add_parser(
+        "geoportal", help="Audit listings using Geoportal ULDK & KIEG for cadastral parcel and industrial risks"
+    )
     geo_parser.add_argument("--limit", type=int, default=50, help="Number of listings to audit (default: 50)")
     geo_parser.add_argument("--all", action="store_true", help="Audit all listings including non-qualified")
 
@@ -406,6 +429,7 @@ def main():
     # Apply CLI city and radius overrides if specified
     if hasattr(args, "city") and args.city:
         from src.services.config_manager import config_manager
+
         upd = {"city": args.city}
         if hasattr(args, "radius") and args.radius is not None:
             upd["distance_radius"] = args.radius
@@ -419,11 +443,13 @@ def main():
         asyncio.run(reindex_all_listings())
     elif cmd == "geocode":
         from src.services.geocoder import backfill_missing_coordinates
+
         asyncio.run(backfill_missing_coordinates())
     elif cmd == "once":
         asyncio.run(run_once(profile=getattr(args, "profile", None)))
     elif cmd in ("dashboard", "server"):
         from src.services.live_dashboard import LiveDashboardServer
+
         host = getattr(args, "host", "0.0.0.0")
         srv = LiveDashboardServer(host=host, port=args.port)
         try:
@@ -432,9 +458,11 @@ def main():
             pass
     elif cmd == "view":
         from src.services.report_generator import print_terminal_view
+
         asyncio.run(print_terminal_view(status_filter=args.status, limit=args.limit))
     elif cmd == "report":
         from src.services.report_generator import generate_html_dashboard
+
         asyncio.run(generate_html_dashboard(output_path=args.output, auto_open=not args.no_open))
     elif cmd == "test-webhook":
         asyncio.run(test_webhook())

@@ -170,5 +170,6 @@
     "night_interval_minutes": 60,
     "quiet_hours_start": "22:00",
     "quiet_hours_end": "07:00"
-  }
+  },
+  "llm_analysis_enabled": true
 }

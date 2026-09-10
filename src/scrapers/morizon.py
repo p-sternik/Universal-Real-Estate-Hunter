@@ -1,7 +1,8 @@
 import asyncio
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
 from bs4 import BeautifulSoup
 from loguru import logger
 
@@ -18,6 +19,7 @@ from src.models.enums import (
     SewerageType,
 )
 from src.models.listing import ListingSchema
+
 from .base import BaseScraper
 
 MORIZON_BASE = "https://www.morizon.pl/domy/rzeszow/"
@@ -33,10 +35,10 @@ class MorizonScraper(BaseScraper):
     def __init__(
         self,
         max_pages: int = 2,
-        search_url: Optional[str] = None,
-        profile: Optional[Any] = None,
+        search_url: str | None = None,
+        profile: Any | None = None,
         delay_seconds: float = 1.0,
-        skip_detail_urls: Optional[set] = None,
+        skip_detail_urls: set | None = None,
     ):
         super().__init__(name="MorizonScraper")
         self.max_pages = max_pages
@@ -55,7 +57,7 @@ class MorizonScraper(BaseScraper):
             return BuildingType.WOLNOSTOJACY
         return BuildingType.INNY
 
-    def _map_finish_condition(self, val: Optional[str]) -> FinishCondition:
+    def _map_finish_condition(self, val: str | None) -> FinishCondition:
         if not val:
             return FinishCondition.NIEOKRESLONY
         v = str(val).lower()
@@ -73,7 +75,7 @@ class MorizonScraper(BaseScraper):
             return FinishCondition.DO_REMONTU
         return FinishCondition.NIEOKRESLONY
 
-    def _map_heating(self, val: Optional[str]) -> HeatingType:
+    def _map_heating(self, val: str | None) -> HeatingType:
         if not val:
             return HeatingType.NIEZNANE
         v = str(val).lower()
@@ -89,7 +91,7 @@ class MorizonScraper(BaseScraper):
             return HeatingType.MIEJSKIE
         return HeatingType.NIEZNANE
 
-    def _map_sewerage(self, val: Optional[str]) -> SewerageType:
+    def _map_sewerage(self, val: str | None) -> SewerageType:
         if not val:
             return SewerageType.NIEZNANA
         v = str(val).lower()
@@ -101,7 +103,7 @@ class MorizonScraper(BaseScraper):
             return SewerageType.MIEJSKA
         return SewerageType.NIEZNANA
 
-    def _map_road_type(self, val: Optional[str]) -> RoadType:
+    def _map_road_type(self, val: str | None) -> RoadType:
         if not val:
             return RoadType.NIEZNANA
         v = str(val).lower()
@@ -115,13 +117,13 @@ class MorizonScraper(BaseScraper):
             return RoadType.POLNA
         return RoadType.NIEZNANA
 
-    async def fetch_listing_detail(self, url: str) -> Dict[str, Any]:
+    async def fetch_listing_detail(self, url: str) -> dict[str, Any]:
         """Fetch Morizon listing detail page for full description, table parameters and photos."""
         html = await self.fetch_html(url)
         if not html:
             return {}
         soup = BeautifulSoup(html, "html.parser")
-        res: Dict[str, Any] = {}
+        res: dict[str, Any] = {}
 
         # Description
         desc_el = (
@@ -134,7 +136,7 @@ class MorizonScraper(BaseScraper):
             res["description"] = desc_el.get_text(separator="\n").strip()
 
         # Parameters table/list
-        params: Dict[str, str] = {}
+        params: dict[str, str] = {}
         for row in soup.select("tr, div.parameters__row, li.parameters__item, div.property-details__item"):
             txt = row.get_text(" ", strip=True).lower()
             if ":" in txt:
@@ -160,7 +162,7 @@ class MorizonScraper(BaseScraper):
                 res["access_road_type"] = self._map_road_type(v)
 
         # Photos
-        imgs: List[str] = []
+        imgs: list[str] = []
         for img in soup.select("img"):
             src = img.get("src") or img.get("data-src")
             if src and any(domain in src for domain in ["morizon", "gratka"]) and src not in imgs:
@@ -172,7 +174,7 @@ class MorizonScraper(BaseScraper):
 
         return res
 
-    def _parse_card(self, card: Any) -> Optional[ListingSchema]:
+    def _parse_card(self, card: Any) -> ListingSchema | None:
         try:
             # URL & Portal ID
             link = (
@@ -199,7 +201,9 @@ class MorizonScraper(BaseScraper):
 
             # Price
             price_val = 0.0
-            price_el = card.select_one('[data-cy="propertyCardPrice"]') or card.select_one(".property-card__price--main")
+            price_el = card.select_one('[data-cy="propertyCardPrice"]') or card.select_one(
+                ".property-card__price--main"
+            )
             if price_el:
                 clean_p = re.sub(r"[^\d]", "", price_el.get_text(strip=True))
                 if clean_p:
@@ -207,7 +211,9 @@ class MorizonScraper(BaseScraper):
 
             # Price per m2
             price_m2_val = 0.0
-            price_m2_el = card.select_one('[data-cy="offerPricePerM2"]') or card.select_one(".property-card__price--perM2")
+            price_m2_el = card.select_one('[data-cy="offerPricePerM2"]') or card.select_one(
+                ".property-card__price--perM2"
+            )
             if price_m2_el:
                 clean_m2 = re.sub(r"[^\d]", "", price_m2_el.get_text(strip=True))
                 if clean_m2:
@@ -291,7 +297,7 @@ class MorizonScraper(BaseScraper):
                 area_home = area_val if area_val > 0 else 50.0
 
             # Images
-            gallery_images: List[str] = []
+            gallery_images: list[str] = []
             has_visualisations_from_meta = False
             render_indicators = ("render", "wizualizac", "visualis", "koncepcj", "rzut", "projekt-3d")
 
@@ -364,23 +370,24 @@ class MorizonScraper(BaseScraper):
                 main_image_url=main_image_url,
                 gallery_images=gallery_images,
                 property_fingerprint=fp,
-                created_at=datetime.now(timezone.utc),
-                scraped_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                scraped_at=datetime.now(UTC),
             )
         except Exception as e:
             logger.debug(f"[Morizon] Error parsing card: {e}")
             return None
 
-    async def scrape(self) -> List[ListingSchema]:
+    async def scrape(self) -> list[ListingSchema]:
         """Scrape listings from Morizon.pl for configured location and category."""
         from src.services.config_manager import config_manager
+
         profile = self.profile or config_manager.get_profile()
         base_url = self.search_url or profile.get_morizon_url()
         city_name = profile.city
         category_name = getattr(profile, "category", "dom")
 
         logger.info(f"[{self.name}] Starting scrape for {city_name} ({category_name}) via: {base_url}")
-        listings: List[ListingSchema] = []
+        listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
             join_char = "&" if "?" in base_url else "?"

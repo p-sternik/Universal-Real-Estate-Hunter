@@ -1,6 +1,7 @@
 import asyncio
-import json
+
 import pytest
+
 from src.models.enums import FinishCondition, HeatingType, SewerageType
 from src.scrapers.otodom import OtodomScraper
 

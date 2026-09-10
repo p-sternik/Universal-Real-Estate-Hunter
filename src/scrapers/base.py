@@ -2,10 +2,11 @@ import asyncio
 import inspect
 import random
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, List, Optional
-from loguru import logger
+from collections.abc import Callable
+
 import httpx
 from curl_cffi.requests import AsyncSession
+from loguru import logger
 
 from config import settings
 from src.models.listing import ListingSchema
@@ -34,8 +35,8 @@ class BaseScraper(ABC):
         self.timeout = settings.REQUEST_TIMEOUT_SECONDS
         self.max_retries = settings.MAX_RETRIES
         self.proxy = settings.PROXY_URL
-        self.progress_cb: Optional[Callable] = None
-        self._session: Optional[AsyncSession] = None
+        self.progress_cb: Callable | None = None
+        self._session: AsyncSession | None = None
         self._throttle_multiplier = 1.0
 
     def _get_session(self) -> AsyncSession:
@@ -68,7 +69,7 @@ class BaseScraper(ABC):
         except Exception as err:
             logger.debug(f"[{self.name}] Progress callback failed: {err}")
 
-    def get_random_headers(self, referer: Optional[str] = None) -> Dict[str, str]:
+    def get_random_headers(self, referer: str | None = None) -> dict[str, str]:
         headers = {
             "User-Agent": random.choice(USER_AGENTS),
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
@@ -86,7 +87,7 @@ class BaseScraper(ABC):
             headers["Sec-Fetch-Site"] = "same-origin"
         return headers
 
-    async def fetch_html(self, url: str, referer: Optional[str] = None) -> Optional[str]:
+    async def fetch_html(self, url: str, referer: str | None = None) -> str | None:
         """Fetch URL with curl_cffi (Chrome impersonation), falling back to httpx."""
         headers = self.get_random_headers(referer)
 
@@ -105,10 +106,10 @@ class BaseScraper(ABC):
                     if self._throttle_multiplier > 1.0:
                         self._throttle_multiplier = max(1.0, self._throttle_multiplier / 1.2)
                     return resp.text
-                elif resp.status_code in (404, 410):
+                if resp.status_code in (404, 410):
                     logger.warning(f"[{self.name}] Listing expired or not found ({resp.status_code}): {url}")
                     return None
-                elif resp.status_code == 403:
+                if resp.status_code == 403:
                     self._throttle_multiplier = min(8.0, self._throttle_multiplier * 2.0)
                     logger.warning(
                         f"[{self.name}] 403 Forbidden (attempt {attempt}/{self.max_retries}) for: {url} "
@@ -142,6 +143,6 @@ class BaseScraper(ABC):
         return None
 
     @abstractmethod
-    async def scrape(self) -> List[ListingSchema]:
+    async def scrape(self) -> list[ListingSchema]:
         """Scrape and return normalized listings."""
         pass

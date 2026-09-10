@@ -5,4 +5,3 @@ from .olx import OLXScraper
 from .otodom import OtodomScraper
 
 __all__ = ["BaseScraper", "OtodomScraper", "OLXScraper", "NieruchomosciOnlineScraper", "MorizonScraper"]
-

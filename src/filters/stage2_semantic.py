@@ -1,9 +1,7 @@
 import re
-from typing import Any, List, Optional, Tuple
-from loguru import logger
+from typing import Any
 
 from src.models.enums import (
-    BuildingType,
     FinishCondition,
     HeatingType,
     MarketType,
@@ -152,9 +150,7 @@ class Stage2SemanticFilter:
         re.IGNORECASE,
     )
 
-    def detect_sewerage(
-        self, text: str, existing: SewerageType = SewerageType.NIEZNANA
-    ) -> SewerageType:
+    def detect_sewerage(self, text: str, existing: SewerageType = SewerageType.NIEZNANA) -> SewerageType:
         """Detect sewerage type from text, prioritizing explicit szambo/oczyszczalnia markers."""
         if self.RE_SEWERAGE_SZAMBO.search(text):
             return SewerageType.SZAMBO
@@ -164,9 +160,7 @@ class Stage2SemanticFilter:
             return SewerageType.MIEJSKA
         return existing
 
-    def detect_heating(
-        self, text: str, existing: HeatingType = HeatingType.NIEZNANE
-    ) -> HeatingType:
+    def detect_heating(self, text: str, existing: HeatingType = HeatingType.NIEZNANE) -> HeatingType:
         """Detect heating system from text, prioritizing heat pump and gas."""
         if self.RE_HEATING_HEAT_PUMP.search(text):
             return HeatingType.POMPA_CIEPLA
@@ -217,7 +211,7 @@ class Stage2SemanticFilter:
         """Detect if description or title indicates 3D renders or conceptual visualizations."""
         return bool(self.RE_VISUALISATIONS.search(text))
 
-    def extract_plot_from_description(self, text: str) -> Optional[float]:
+    def extract_plot_from_description(self, text: str) -> float | None:
         """Try to extract plot area from text if missing from header."""
         match = self.RE_PLOT_EXTRACTION.search(text)
         if match:
@@ -233,12 +227,12 @@ class Stage2SemanticFilter:
         return None
 
     def analyze(
-        self, listing: ListingSchema, profile: Optional[Any] = None
-    ) -> Tuple[
+        self, listing: ListingSchema, profile: Any | None = None
+    ) -> tuple[
         bool,
-        List[str],
-        List[str],
-        List[str],
+        list[str],
+        list[str],
+        list[str],
         SegmentSubtype,
         bool,
         bool,
@@ -253,9 +247,9 @@ class Stage2SemanticFilter:
         Returns:
             (passed, rejection_reasons, pros, cons, detected_subtype, is_corner, has_parking, detected_finish, has_visualisations, detected_sewerage, detected_heating, has_fiber)
         """
-        rejection_reasons: List[str] = []
-        pros: List[str] = []
-        cons: List[str] = []
+        rejection_reasons: list[str] = []
+        pros: list[str] = []
+        cons: list[str] = []
 
         desc = f"{listing.title}\n{listing.raw_description}"
         desc_lower = desc.lower()
@@ -329,9 +323,7 @@ class Stage2SemanticFilter:
             # Segment Middle Rule: If segment is middle and plot < 200 m² -> REJECT
             if detected_subtype == SegmentSubtype.SRODKOWY:
                 if effective_plot is not None and effective_plot < 200.0:
-                    rejection_reasons.append(
-                        f"Segment środkowy z małą działką ({effective_plot:.0f} m² < 200 m²)"
-                    )
+                    rejection_reasons.append(f"Segment środkowy z małą działką ({effective_plot:.0f} m² < 200 m²)")
                 else:
                     cons.append("Segment środkowy (szeregówka)")
             elif effective_plot is not None and effective_plot < 200.0 and not is_corner:
@@ -400,10 +392,7 @@ class Stage2SemanticFilter:
 
         # Correlation check: Primary market + under construction / future delivery -> visualisations
         is_primary = getattr(listing, "market", None) == MarketType.PIERWOTNY
-        is_future_or_current = (
-            getattr(listing, "year_built", None) is not None
-            and listing.year_built >= 2025
-        )
+        is_future_or_current = getattr(listing, "year_built", None) is not None and listing.year_built >= 2025
         has_construction_marker = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(desc))
         if is_primary and (is_future_or_current or has_construction_marker) and not has_visualisations:
             if self.RE_FINISH_DO_ZAMIESZKANIA.search(desc) or existing_finish == FinishCondition.DO_ZAMIESZKANIA:
@@ -489,7 +478,12 @@ class Stage2SemanticFilter:
         # Check configuration rules
         try:
             from src.services.config_manager import config_manager
-            cfg = profile or (config_manager.get_profile(listing.profile_name) if getattr(listing, "profile_name", None) else config_manager.get_config())
+
+            cfg = profile or (
+                config_manager.get_profile(listing.profile_name)
+                if getattr(listing, "profile_name", None)
+                else config_manager.get_config()
+            )
             if not getattr(cfg, "allow_visualisations", True) and has_visualisations:
                 rejection_reasons.append("Oferta oparta na wizualizacjach (wyłączone w konfiguracji)")
             allowed_fin = getattr(cfg, "allowed_finish_conditions", ["all"])

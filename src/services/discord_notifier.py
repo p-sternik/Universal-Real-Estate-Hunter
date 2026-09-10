@@ -1,8 +1,9 @@
 import asyncio
 from datetime import datetime
-from typing import Any, Dict, List, Optional
-from loguru import logger
+from typing import Any
+
 import httpx
+from loguru import logger
 
 from config import settings
 from src.models.enums import QualificationStatus
@@ -18,22 +19,22 @@ class DiscordNotifier:
 
     COLOR_WHITELIST = 0x2ECC71  # Vibrant Green
     COLOR_QUALIFIED = 0x3498DB  # Nice Blue
-    COLOR_REVIEW = 0xF39C12     # Gold/Orange
-    COLOR_DEFAULT = 0x95A5A6    # Gray
+    COLOR_REVIEW = 0xF39C12  # Gold/Orange
+    COLOR_DEFAULT = 0x95A5A6  # Gray
 
-    def __init__(self, webhook_url: Optional[str] = None):
+    def __init__(self, webhook_url: str | None = None):
         self.webhook_url = webhook_url or settings.DISCORD_WEBHOOK_URL
 
     def _get_color_for_status(self, status: QualificationStatus) -> int:
         if status == QualificationStatus.QUALIFIED_WHITELIST:
             return self.COLOR_WHITELIST
-        elif status == QualificationStatus.QUALIFIED:
+        if status == QualificationStatus.QUALIFIED:
             return self.COLOR_QUALIFIED
-        elif status == QualificationStatus.NEEDS_REVIEW:
+        if status == QualificationStatus.NEEDS_REVIEW:
             return self.COLOR_REVIEW
         return self.COLOR_DEFAULT
 
-    def format_embed(self, listing: ListingSchema, filter_result: FilterResult) -> Dict[str, Any]:
+    def format_embed(self, listing: ListingSchema, filter_result: FilterResult) -> dict[str, Any]:
         """Format listing and filtration details into Discord Embed JSON."""
         color = self._get_color_for_status(filter_result.status)
 
@@ -77,7 +78,11 @@ class DiscordNotifier:
         # Market, Finish Condition and Visualisations
         market_val = listing.market.value if hasattr(listing.market, "value") else str(listing.market)
         market_str = market_val.capitalize()
-        finish_val = listing.finish_condition.value if hasattr(listing.finish_condition, "value") else str(listing.finish_condition)
+        finish_val = (
+            listing.finish_condition.value
+            if hasattr(listing.finish_condition, "value")
+            else str(listing.finish_condition)
+        )
         finish_str = finish_val.capitalize()
         vis_badge = " | ⚠️ **Wizualizacje 3D / brak zdjęć**" if listing.has_visualisations else ""
         standard_info = f"Stan: **{finish_str}** | Rynek: **{market_str}**{vis_badge}"
@@ -89,7 +94,9 @@ class DiscordNotifier:
         media_info = f"Ścieki: **{sew_val}** | Ogrzewanie: **{heat_val}** | Światłowód: **{fiber_str}**"
 
         # Category-aware metrics line
-        cat_val = listing.category.value if hasattr(listing.category, "value") else str(getattr(listing, "category", "dom"))
+        cat_val = (
+            listing.category.value if hasattr(listing.category, "value") else str(getattr(listing, "category", "dom"))
+        )
         if cat_val == "mieszkanie":
             area_line = f"Mieszkanie: **{listing.area_home:.1f} m²**"
             if listing.rooms:
@@ -135,26 +142,32 @@ class DiscordNotifier:
         if getattr(listing, "geoportal_url", None) and getattr(listing, "parcel_id", None):
             area_str = f" ({listing.cadastral_area:.0f} m²)" if getattr(listing, "cadastral_area", None) else ""
             p_nr = listing.parcel_id.split(".")[-1]
-            fields.append({
-                "name": "🗺️ Geoportal / Ewidencja Gruntów",
-                "value": f"[Działka nr {p_nr}{area_str}]({listing.geoportal_url})",
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "🗺️ Geoportal / Ewidencja Gruntów",
+                    "value": f"[Działka nr {p_nr}{area_str}]({listing.geoportal_url})",
+                    "inline": False,
+                }
+            )
 
         # Key Pros & Cons
         if filter_result.pros:
-            fields.append({
-                "name": "✨ Kluczowe zalety",
-                "value": "\n".join([f"• {pro}" for pro in filter_result.pros[:6]]),
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "✨ Kluczowe zalety",
+                    "value": "\n".join([f"• {pro}" for pro in filter_result.pros[:6]]),
+                    "inline": False,
+                }
+            )
 
         if filter_result.cons:
-            fields.append({
-                "name": "⚠️ Wykryte minusy / do weryfikacji",
-                "value": "\n".join([f"• {con}" for con in filter_result.cons[:5]]),
-                "inline": False,
-            })
+            fields.append(
+                {
+                    "name": "⚠️ Wykryte minusy / do weryfikacji",
+                    "value": "\n".join([f"• {con}" for con in filter_result.cons[:5]]),
+                    "inline": False,
+                }
+            )
 
         embed = {
             "title": title_display[:256],
@@ -173,7 +186,7 @@ class DiscordNotifier:
         return embed
 
     async def send_notification(
-        self, listing: ListingSchema, filter_result: FilterResult, webhook_url: Optional[str] = None
+        self, listing: ListingSchema, filter_result: FilterResult, webhook_url: str | None = None
     ) -> bool:
         """Send rich Discord notification."""
         target_webhook = webhook_url or self.webhook_url
@@ -195,7 +208,7 @@ class DiscordNotifier:
                     if resp.status_code in (200, 204):
                         logger.info(f"[DiscordNotifier] Alert sent successfully for: {listing.title[:50]}")
                         return True
-                    elif resp.status_code == 429:
+                    if resp.status_code == 429:
                         retry_after = resp.json().get("retry_after", 2.0)
                         logger.warning(f"[DiscordNotifier] Rate limited. Retrying after {retry_after}s...")
                         await asyncio.sleep(retry_after)

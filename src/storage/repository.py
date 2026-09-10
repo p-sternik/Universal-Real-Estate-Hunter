@@ -1,10 +1,11 @@
-from datetime import datetime, timedelta, timezone
-from typing import List, Optional, Tuple
+from datetime import UTC, datetime, timedelta
+
 from loguru import logger
 from sqlalchemy import delete, desc, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from src.models.listing import FilterResult, ListingSchema
+
 from .models import ListingModel, PriceHistoryModel
 
 
@@ -12,7 +13,7 @@ class ListingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
-    async def get_by_portal_id(self, portal: str, portal_id: str) -> Optional[ListingModel]:
+    async def get_by_portal_id(self, portal: str, portal_id: str) -> ListingModel | None:
         stmt = select(ListingModel).where(
             ListingModel.portal == portal,
             ListingModel.portal_id == portal_id,
@@ -20,14 +21,14 @@ class ListingRepository:
         res = await self.session.execute(stmt)
         return res.scalars().first()
 
-    async def get_by_url(self, url: str) -> Optional[ListingModel]:
+    async def get_by_url(self, url: str) -> ListingModel | None:
         stmt = select(ListingModel).where(ListingModel.url == url)
         res = await self.session.execute(stmt)
         return res.scalars().first()
 
-    async def get_fresh_urls(self, portals: List[str], within_hours: int = 24) -> List[str]:
+    async def get_fresh_urls(self, portals: list[str], within_hours: int = 24) -> list[str]:
         """URLs of listings with complete, recently scraped detail data."""
-        cutoff = datetime.now(timezone.utc) - timedelta(hours=within_hours)
+        cutoff = datetime.now(UTC) - timedelta(hours=within_hours)
         stmt = select(ListingModel.url).where(
             ListingModel.portal.in_(portals),
             ListingModel.last_scraped_at.isnot(None),
@@ -41,9 +42,9 @@ class ListingRepository:
         self,
         fingerprint: str,
         within_days: int = 45,
-    ) -> Optional[ListingModel]:
+    ) -> ListingModel | None:
         """Check if an identical house was already listed (cross-portal/multi-agency deduplication)."""
-        cutoff = datetime.now(timezone.utc) - timedelta(days=within_days)
+        cutoff = datetime.now(UTC) - timedelta(days=within_days)
         stmt = (
             select(ListingModel)
             .where(
@@ -60,7 +61,7 @@ class ListingRepository:
         listing: ListingSchema,
         filter_result: FilterResult,
         is_exact_coords: bool = True,
-    ) -> Tuple[ListingModel, bool, bool]:
+    ) -> tuple[ListingModel, bool, bool]:
         """
         Saves new listing or updates existing.
         Returns (listing_model, is_new, price_changed).
@@ -83,11 +84,7 @@ class ListingRepository:
             existing.price_per_m2 = listing.price_per_m2
             existing.area_home = listing.area_home
             existing.area_plot = listing.area_plot
-            existing.category = (
-                listing.category.value
-                if hasattr(listing.category, "value")
-                else str(listing.category)
-            )
+            existing.category = listing.category.value if hasattr(listing.category, "value") else str(listing.category)
             if listing.rooms is not None:
                 existing.rooms = listing.rooms
             if listing.floor is not None:
@@ -118,16 +115,8 @@ class ListingRepository:
             )
             if listing.has_visualisations:
                 existing.has_visualisations = True
-            existing.sewerage = (
-                listing.sewerage.value
-                if hasattr(listing.sewerage, "value")
-                else str(listing.sewerage)
-            )
-            existing.heating = (
-                listing.heating.value
-                if hasattr(listing.heating, "value")
-                else str(listing.heating)
-            )
+            existing.sewerage = listing.sewerage.value if hasattr(listing.sewerage, "value") else str(listing.sewerage)
+            existing.heating = listing.heating.value if hasattr(listing.heating, "value") else str(listing.heating)
             if listing.has_fiber:
                 existing.has_fiber = True
             if listing.year_built:
@@ -152,8 +141,17 @@ class ListingRepository:
             existing.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
             existing.pros = filter_result.pros
             existing.cons = filter_result.cons
-            existing.updated_at = datetime.now(timezone.utc)
-            existing.last_scraped_at = datetime.now(timezone.utc)
+            # AI Due Diligence
+            if filter_result.ai_summary:
+                existing.ai_summary = filter_result.ai_summary
+            if filter_result.ai_questions:
+                existing.ai_questions = filter_result.ai_questions
+            if filter_result.contact_phone:
+                existing.contact_phone = filter_result.contact_phone
+            if filter_result.contact_person:
+                existing.contact_person = filter_result.contact_person
+            existing.updated_at = datetime.now(UTC)
+            existing.last_scraped_at = datetime.now(UTC)
 
             if price_changed:
                 logger.info(
@@ -163,7 +161,7 @@ class ListingRepository:
                     listing_id=existing.id,
                     price=listing.price,
                     price_per_m2=listing.price_per_m2,
-                    recorded_at=datetime.now(timezone.utc),
+                    recorded_at=datetime.now(UTC),
                 )
                 self.session.add(history_entry)
 
@@ -181,11 +179,7 @@ class ListingRepository:
             price_per_m2=listing.price_per_m2,
             area_home=listing.area_home,
             area_plot=listing.area_plot,
-            category=(
-                listing.category.value
-                if hasattr(listing.category, "value")
-                else str(listing.category)
-            ),
+            category=(listing.category.value if hasattr(listing.category, "value") else str(listing.category)),
             rooms=listing.rooms,
             floor=listing.floor,
             floors_in_building=listing.floors_in_building,
@@ -212,16 +206,8 @@ class ListingRepository:
                 else str(listing.finish_condition)
             ),
             has_visualisations=bool(listing.has_visualisations),
-            sewerage=(
-                listing.sewerage.value
-                if hasattr(listing.sewerage, "value")
-                else str(listing.sewerage)
-            ),
-            heating=(
-                listing.heating.value
-                if hasattr(listing.heating, "value")
-                else str(listing.heating)
-            ),
+            sewerage=(listing.sewerage.value if hasattr(listing.sewerage, "value") else str(listing.sewerage)),
+            heating=(listing.heating.value if hasattr(listing.heating, "value") else str(listing.heating)),
             has_fiber=bool(listing.has_fiber),
             year_built=listing.year_built,
             raw_description=listing.raw_description,
@@ -230,12 +216,20 @@ class ListingRepository:
             qualification_status=filter_result.status.value,
             qualification_score=filter_result.score,
             created_at=listing.created_at,
-            updated_at=datetime.now(timezone.utc),
-            last_scraped_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(UTC),
+            last_scraped_at=datetime.now(UTC),
         )
         new_model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
         new_model.pros = filter_result.pros
         new_model.cons = filter_result.cons
+        if filter_result.ai_summary:
+            new_model.ai_summary = filter_result.ai_summary
+        if filter_result.ai_questions:
+            new_model.ai_questions = filter_result.ai_questions
+        if filter_result.contact_phone:
+            new_model.contact_phone = filter_result.contact_phone
+        if filter_result.contact_person:
+            new_model.contact_person = filter_result.contact_person
         if listing.gallery_images:
             new_model.gallery_images = listing.gallery_images
 
@@ -259,14 +253,14 @@ class ListingRepository:
         res = await self.session.execute(stmt)
         item = res.scalars().first()
         if item:
-            item.notified_at = datetime.now(timezone.utc)
+            item.notified_at = datetime.now(UTC)
             await self.session.flush()
 
-    async def get_unnotified_qualified(self, limit: int = 50) -> List[ListingModel]:
+    async def get_unnotified_qualified(self, limit: int = 50) -> list[ListingModel]:
         stmt = (
             select(ListingModel)
             .where(
-                ListingModel.is_qualified == True,
+                ListingModel.is_qualified.is_(True),
                 ListingModel.notified_at.is_(None),
             )
             .order_by(desc(ListingModel.qualification_score), desc(ListingModel.created_at))
@@ -275,27 +269,27 @@ class ListingRepository:
         res = await self.session.execute(stmt)
         return list(res.scalars().all())
 
-    async def update_user_status(self, listing_id: int, status: str) -> Optional[ListingModel]:
+    async def update_user_status(self, listing_id: int, status: str) -> ListingModel | None:
         stmt = select(ListingModel).where(ListingModel.id == listing_id)
         res = await self.session.execute(stmt)
         listing = res.scalars().first()
         if listing:
             listing.user_status = status
-            listing.updated_at = datetime.now(timezone.utc)
+            listing.updated_at = datetime.now(UTC)
             await self.session.flush()
         return listing
 
-    async def update_user_notes(self, listing_id: int, notes: Optional[str]) -> Optional[ListingModel]:
+    async def update_user_notes(self, listing_id: int, notes: str | None) -> ListingModel | None:
         stmt = select(ListingModel).where(ListingModel.id == listing_id)
         res = await self.session.execute(stmt)
         listing = res.scalars().first()
         if listing:
             listing.user_notes = notes
-            listing.updated_at = datetime.now(timezone.utc)
+            listing.updated_at = datetime.now(UTC)
             await self.session.flush()
         return listing
 
-    async def delete_by_profile(self, profile_id: str, profile_name: Optional[str] = None) -> int:
+    async def delete_by_profile(self, profile_id: str, profile_name: str | None = None) -> int:
         """Delete all listings and their price histories associated with a given profile ID or profile name."""
         conditions = [ListingModel.profile_id == profile_id]
         if profile_name:
@@ -309,15 +303,9 @@ class ListingRepository:
             return 0
 
         # Delete related price histories first
-        await self.session.execute(
-            delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids))
-        )
+        await self.session.execute(delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids)))
         # Delete listings
-        await self.session.execute(
-            delete(ListingModel).where(ListingModel.id.in_(listing_ids))
-        )
+        await self.session.execute(delete(ListingModel).where(ListingModel.id.in_(listing_ids)))
         await self.session.commit()
         logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
         return len(listing_ids)
-
-

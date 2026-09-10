@@ -1,7 +1,8 @@
 import json
-from typing import Any, Dict, Optional
-from loguru import logger
+from typing import Any
+
 import httpx
+from loguru import logger
 
 from config import settings
 from src.models.listing import ListingSchema
@@ -14,8 +15,8 @@ class LLMAnalyzer:
     Returns structured JSON with segment type, road conditions, parking, and terrain notes.
     """
 
-    def __init__(self):
-        self.enabled = settings.USE_LLM_ANALYSIS
+    def __init__(self, enabled: bool | None = None):
+        self.enabled = settings.USE_LLM_ANALYSIS if enabled is None else enabled
         self.openrouter_key = settings.OPENROUTER_API_KEY
         self.openrouter_model = settings.OPENROUTER_MODEL
         self.openai_key = settings.OPENAI_API_KEY
@@ -25,7 +26,7 @@ class LLMAnalyzer:
         self.ollama_model = settings.OLLAMA_MODEL
 
     @staticmethod
-    def _parse_json(content: str) -> Optional[Dict[str, Any]]:
+    def _parse_json(content: str) -> dict[str, Any] | None:
         cleaned = content.strip()
         if cleaned.startswith("```"):
             lines = cleaned.split("\n")
@@ -40,7 +41,7 @@ class LLMAnalyzer:
             logger.warning(f"[LLMAnalyzer] Failed to parse JSON: {e}. Raw content: {cleaned[:200]}")
             return None
 
-    async def analyze_description(self, listing: ListingSchema) -> Optional[Dict[str, Any]]:
+    async def analyze_description(self, listing: ListingSchema) -> dict[str, Any] | None:
         if not self.enabled:
             return None
 
@@ -51,16 +52,24 @@ Reguły rozstrzygania stanu faktycznego:
 2. Ostatni odcinek dojazdu: O jakości dojazdu decyduje bezpośredni wjazd na posesję. Jeśli ostatni odcinek jest polny/nieutwardzony, dojazd jest zły.
 3. Media i instalacje: Klasyfikuj jako obecne tylko przy bezpośrednim przyłączu na działce/w budynku. Media "w drodze", "w planach" lub "w trakcie projektowania" traktuj jako brak przyłącza.
 4. Koszty i status prawny: Wyodrębnij każdą dopłatę niewliczoną w cenę główną oraz wszelkie ograniczenia prawne (służebności, brak odbioru, cena netto).
+5. Podsumowanie: Napisz zwięzłe 2-zdaniowe TL;DR dla kupującego — co dokładnie dostaje za tę cenę i jakie jest główne ryzyko lub atut.
+6. Pytania do agenta: Wygeneruj 3–5 ostrych, merytorycznych pytań, które kupujący powinien zadać sprzedającemu/agentowi PRZED wizytą. Pytania muszą dotyczyć luk informacyjnych w KONKRETNYM ogłoszeniu (np. brak info o kanalizacji, niejasny stan prawny, brak daty odbioru).
+7. Kontakt: Wyodrębnij numer telefonu i imię/nazwisko osoby kontaktowej z treści ogłoszenia, jeśli podane.
 
 Dane nieruchomości:
 Tytuł: {listing.title}
 Lokalizacja: {listing.location_raw}
 Metraż domu: {listing.area_home} m², Działka: {listing.area_plot} m²
+Cena: {listing.price:,.0f} PLN ({listing.price_per_m2:,.0f} PLN/m²)
 Treść ogłoszenia:
 {listing.raw_description[:2500]}
 
 Zwróć poprawny JSON o schemacie:
 {{
+  "summary": string,                   // 2-zdaniowe TL;DR dla kupującego: co dostaje za cenę + główne ryzyko/atut
+  "questions_for_agent": [string],     // 3–5 ostrych pytań do agenta/sprzedającego, specyficznych dla TEGO ogłoszenia
+  "contact_phone": string | null,      // numer telefonu z ogłoszenia (format: +48XXXXXXXXX lub 9-cyfrowy), null jeśli brak
+  "contact_person": string | null,     // imię/nazwisko osoby kontaktowej z ogłoszenia, null jeśli brak
   "finish_condition": "deweloperski" | "pod_klucz" | "surowy_zamkniety" | "surowy_otwarty" | "do_remontu" | "do_wykonczenia" | null,
   "is_corner": boolean | null,         // true wyłącznie dla segmentu skrajnego/narożnego w szeregówce; null jeśli to dom wolnostojący/bliźniak
   "is_middle": boolean | null,         // true dla segmentu środkowego w szeregówce; null jeśli to nie szeregówka
@@ -79,6 +88,7 @@ Zwróć poprawny JSON o schemacie:
         if self.openrouter_key:
             try:
                 from openai import AsyncOpenAI
+
                 client = AsyncOpenAI(
                     api_key=self.openrouter_key,
                     base_url="https://openrouter.ai/api/v1",
@@ -91,7 +101,10 @@ Zwróć poprawny JSON o schemacie:
                 response = await client.chat.completions.create(
                     model=self.openrouter_model,
                     messages=[
-                        {"role": "system", "content": "Jesteś analitykiem rynku nieruchomości. Zwracaj wyłącznie poprawny obiekt JSON bez żadnego innego tekstu."},
+                        {
+                            "role": "system",
+                            "content": "Jesteś analitykiem rynku nieruchomości. Zwracaj wyłącznie poprawny obiekt JSON bez żadnego innego tekstu.",
+                        },
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,
@@ -107,6 +120,7 @@ Zwróć poprawny JSON o schemacie:
         if self.openai_key:
             try:
                 from openai import AsyncOpenAI
+
                 kwargs = {"api_key": self.openai_key, "timeout": 15.0}
                 if self.openai_base_url:
                     kwargs["base_url"] = self.openai_base_url
@@ -115,7 +129,10 @@ Zwróć poprawny JSON o schemacie:
                     model=self.openai_model,
                     response_format={"type": "json_object"},
                     messages=[
-                        {"role": "system", "content": "Jesteś analitykiem rynku nieruchomości. Odpowiadasz w formacie JSON."},
+                        {
+                            "role": "system",
+                            "content": "Jesteś analitykiem rynku nieruchomości. Odpowiadasz w formacie JSON.",
+                        },
                         {"role": "user", "content": prompt},
                     ],
                     temperature=0.1,

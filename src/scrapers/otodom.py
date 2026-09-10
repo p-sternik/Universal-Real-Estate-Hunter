@@ -1,8 +1,9 @@
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
 from bs4 import BeautifulSoup
 from loguru import logger
 
@@ -18,6 +19,7 @@ from src.models.enums import (
     SewerageType,
 )
 from src.models.listing import ListingSchema
+
 from .base import BaseScraper
 
 OTODOM_BASE_SEARCH_URL = (
@@ -37,9 +39,9 @@ class OtodomScraper(BaseScraper):
     def __init__(
         self,
         max_pages: int = 3,
-        search_url: Optional[str] = None,
-        profile: Optional[Any] = None,
-        skip_detail_urls: Optional[set] = None,
+        search_url: str | None = None,
+        profile: Any | None = None,
+        skip_detail_urls: set | None = None,
     ):
         super().__init__(name="OtodomScraper")
         self.max_pages = max_pages
@@ -47,7 +49,7 @@ class OtodomScraper(BaseScraper):
         self.profile = profile
         self.skip_detail_urls = skip_detail_urls or set()
 
-    def _extract_next_data(self, html: str) -> Optional[Dict[str, Any]]:
+    def _extract_next_data(self, html: str) -> dict[str, Any] | None:
         """Find and parse __NEXT_DATA__ JSON from HTML."""
         match = re.search(r'<script id="__NEXT_DATA__"[^>]*>(.*?)</script>', html, re.DOTALL)
         if not match:
@@ -85,7 +87,7 @@ class OtodomScraper(BaseScraper):
                 lines.append(line)
         return "\n".join(lines)
 
-    def _map_building_type(self, raw_type: Optional[str]) -> BuildingType:
+    def _map_building_type(self, raw_type: str | None) -> BuildingType:
         if not raw_type:
             return BuildingType.INNY
         val = raw_type.lower()
@@ -97,7 +99,7 @@ class OtodomScraper(BaseScraper):
             return BuildingType.WOLNOSTOJACY
         return BuildingType.INNY
 
-    def _map_road_type(self, access_val: Optional[str]) -> RoadType:
+    def _map_road_type(self, access_val: str | None) -> RoadType:
         if not access_val:
             return RoadType.NIEZNANA
         val = access_val.lower()
@@ -111,7 +113,7 @@ class OtodomScraper(BaseScraper):
             return RoadType.POLNA
         return RoadType.NIEZNANA
 
-    def _map_market(self, market_val: Optional[str]) -> MarketType:
+    def _map_market(self, market_val: str | None) -> MarketType:
         if not market_val:
             return MarketType.NIEOKRESLONY
         val = market_val.lower()
@@ -121,7 +123,7 @@ class OtodomScraper(BaseScraper):
             return MarketType.WTORNY
         return MarketType.NIEOKRESLONY
 
-    def _map_finish_condition(self, val: Optional[str]) -> FinishCondition:
+    def _map_finish_condition(self, val: str | None) -> FinishCondition:
         if not val:
             return FinishCondition.NIEOKRESLONY
         v = val.lower()
@@ -167,16 +169,16 @@ class OtodomScraper(BaseScraper):
             return HeatingType.MIEJSKIE
         return HeatingType.NIEZNANE
 
-    def _get_characteristic(self, detail_data: Dict[str, Any], key: str) -> Optional[Any]:
+    def _get_characteristic(self, detail_data: dict[str, Any], key: str) -> Any | None:
         """Get a value from detail characteristics list (e.g. 'construction_status')."""
         for entry in detail_data.get("characteristics") or []:
             if isinstance(entry, dict) and entry.get("key") == key and entry.get("value"):
                 return entry["value"]
         return None
 
-    def _collect_ai_params(self, detail_data: Dict[str, Any]) -> Dict[str, List[str]]:
+    def _collect_ai_params(self, detail_data: dict[str, Any]) -> dict[str, list[str]]:
         """Flatten enrichment.aiParamsList into {key: [values]}, skipping rejected params."""
-        params: Dict[str, List[str]] = {}
+        params: dict[str, list[str]] = {}
         enrichment = detail_data.get("enrichment") or {}
         for entry in enrichment.get("aiParamsList") or []:
             if not isinstance(entry, dict) or entry.get("rejected"):
@@ -186,7 +188,7 @@ class OtodomScraper(BaseScraper):
                 params.setdefault(str(key), []).append(str(value))
         return params
 
-    def _get_additional_info(self, detail_data: Dict[str, Any], key_fragment: str) -> Optional[Any]:
+    def _get_additional_info(self, detail_data: dict[str, Any], key_fragment: str) -> Any | None:
         """Get values from the 'Informacje dodatkowe' table items by label fragment."""
         for item in detail_data.get("additionalInformation") or []:
             if not isinstance(item, dict):
@@ -195,7 +197,7 @@ class OtodomScraper(BaseScraper):
                 return item["values"]
         return None
 
-    async def fetch_listing_detail(self, slug_or_url: str) -> Dict[str, Any]:
+    async def fetch_listing_detail(self, slug_or_url: str) -> dict[str, Any]:
         """Fetch detail page to acquire full description and characteristics."""
         if slug_or_url.startswith("http"):
             url = slug_or_url
@@ -215,9 +217,9 @@ class OtodomScraper(BaseScraper):
 
     async def parse_search_item(
         self,
-        item: Dict[str, Any],
+        item: dict[str, Any],
         semaphore: asyncio.Semaphore,
-    ) -> Optional[ListingSchema]:
+    ) -> ListingSchema | None:
         """Parse search item and enrich with detail data if configured."""
         try:
             item_id = str(item.get("id"))
@@ -264,7 +266,7 @@ class OtodomScraper(BaseScraper):
             # Images
             images = item.get("images", [])
             main_image_url = images[0].get("large") or images[0].get("medium") if images else None
-            gallery_images: List[str] = []
+            gallery_images: list[str] = []
             has_visualisations_from_meta = False
 
             short_desc = item.get("shortDescription") or ""
@@ -287,7 +289,7 @@ class OtodomScraper(BaseScraper):
 
             # Fetch detail if enabled (skip when we have fresh data from a recent cycle)
             detail_skipped = False
-            detail_data: Dict[str, Any] = {}
+            detail_data: dict[str, Any] = {}
             if settings.FETCH_DETAILS and slug:
                 if url in self.skip_detail_urls:
                     detail_skipped = True
@@ -400,7 +402,7 @@ class OtodomScraper(BaseScraper):
 
             # Date created
             date_created_str = item.get("dateCreated")
-            created_at = datetime.now(timezone.utc)
+            created_at = datetime.now(UTC)
             if date_created_str:
                 try:
                     created_at = datetime.fromisoformat(date_created_str.replace("Z", "+00:00"))
@@ -409,7 +411,9 @@ class OtodomScraper(BaseScraper):
 
             # Rooms extraction
             rooms = None
-            raw_rooms = item.get("roomsNumber") or (target.get("Rooms_num") if "target" in locals() and target else None)
+            raw_rooms = item.get("roomsNumber") or (
+                target.get("Rooms_num") if "target" in locals() and target else None
+            )
             if raw_rooms:
                 r_str = str(raw_rooms[0] if isinstance(raw_rooms, list) else raw_rooms).strip()
                 r_match = re.search(r"\d+", r_str)
@@ -446,7 +450,9 @@ class OtodomScraper(BaseScraper):
 
             # Private owner extraction
             is_private_owner = None
-            raw_owner = item.get("ownerType") or (target.get("Advertiser_type") if "target" in locals() and target else None)
+            raw_owner = item.get("ownerType") or (
+                target.get("Advertiser_type") if "target" in locals() and target else None
+            )
             if raw_owner:
                 o_str = str(raw_owner[0] if isinstance(raw_owner, list) else raw_owner).upper()
                 if "PRIVATE" in o_str or "PRYWATN" in o_str:
@@ -456,6 +462,7 @@ class OtodomScraper(BaseScraper):
 
             # Category
             from src.models.enums import PropertyCategory
+
             cat_str = self.profile.category if self.profile and hasattr(self.profile, "category") else "dom"
             try:
                 category_enum = PropertyCategory(cat_str)
@@ -509,16 +516,17 @@ class OtodomScraper(BaseScraper):
                 gallery_images=gallery_images,
                 property_fingerprint=fingerprint,
                 created_at=created_at,
-                scraped_at=datetime.now(timezone.utc),
+                scraped_at=datetime.now(UTC),
                 skip_detail=detail_skipped,
             )
         except Exception as err:
             logger.error(f"[OtodomScraper] Failed to parse item: {err}")
             return None
 
-    async def scrape(self) -> List[ListingSchema]:
+    async def scrape(self) -> list[ListingSchema]:
         """Execute full scrape of Otodom houses for configured location."""
         from src.services.config_manager import config_manager
+
         profile = self.profile or config_manager.get_profile()
         base_url = self.search_url or profile.get_otodom_url()
         city_name = profile.city
@@ -526,7 +534,7 @@ class OtodomScraper(BaseScraper):
 
         logger.info(f"[{self.name}] Starting scrape for {city_name} ({category_name}) via: {base_url}")
         semaphore = asyncio.Semaphore(settings.CONCURRENT_REQUESTS)
-        all_listings: List[ListingSchema] = []
+        all_listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
             join_char = "&" if "?" in base_url else "?"

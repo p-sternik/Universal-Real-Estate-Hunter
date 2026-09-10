@@ -1,6 +1,7 @@
-import asyncio
-from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime
+from typing import Any
+
 from loguru import logger
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
@@ -23,11 +24,11 @@ class ProgressTracker:
         self.items_qualified = 0
         self.duplicates_found = 0
         self.percentage = 0
-        self.logs: List[Dict[str, str]] = []
-        self._listeners: List[Callable[[Dict[str, Any]], None]] = []
-        self._rich_progress: Optional[Progress] = None
-        self._task_id: Optional[Any] = None
-        self._session_started_at: Optional[datetime] = None
+        self.logs: list[dict[str, str]] = []
+        self._listeners: list[Callable[[dict[str, Any]], None]] = []
+        self._rich_progress: Progress | None = None
+        self._task_id: Any | None = None
+        self._session_started_at: datetime | None = None
         self._total_steps = 1
         self._portal_base_pct = 0
         self._portal_share = 85
@@ -41,7 +42,7 @@ class ProgressTracker:
         self.duplicates_found = 0
         self.percentage = 5
         self.logs = []
-        self._session_started_at = datetime.now(timezone.utc)
+        self._session_started_at = datetime.now(UTC)
         self._total_steps = max(total_portals, 1)
         self._portal_share = 85 / self._total_steps
         self._portal_base_pct = 0
@@ -103,8 +104,7 @@ class ProgressTracker:
             )
         else:
             self.current_step = (
-                f"Pobieranie {self.current_portal} · strona {page}/{self.total_pages} · "
-                f"{items_done} ogłoszeń"
+                f"Pobieranie {self.current_portal} · strona {page}/{self.total_pages} · {items_done} ogłoszeń"
             )
         self._refresh_rich()
 
@@ -120,13 +120,13 @@ class ProgressTracker:
         self.duplicates_found += duplicates
 
     def add_log(self, message: str, level: str = "info"):
-        now_str = datetime.now(timezone.utc).strftime("%H:%M:%S")
+        now_str = datetime.now(UTC).strftime("%H:%M:%S")
         entry = {"time": now_str, "message": message, "level": level}
         self.logs.append(entry)
         if len(self.logs) > 60:
             self.logs.pop(0)
 
-    def complete_session(self, summary: Dict[str, Any]):
+    def complete_session(self, summary: dict[str, Any]):
         self.is_running = False
         self.percentage = 100
         self.current_step = "Zakończono pomyślnie!"
@@ -144,10 +144,10 @@ class ProgressTracker:
             self._rich_progress.stop()
             self._rich_progress = None
 
-    def get_status_payload(self) -> Dict[str, Any]:
+    def get_status_payload(self) -> dict[str, Any]:
         elapsed = 0
         if self.is_running and self._session_started_at:
-            elapsed = int((datetime.now(timezone.utc) - self._session_started_at).total_seconds())
+            elapsed = int((datetime.now(UTC) - self._session_started_at).total_seconds())
         return {
             "is_running": self.is_running,
             "current_portal": self.current_portal,

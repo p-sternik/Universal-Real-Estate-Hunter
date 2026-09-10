@@ -1,10 +1,9 @@
 import hashlib
 import re
 import unicodedata
-from typing import Optional
 
 
-def normalize_text(text: Optional[str]) -> str:
+def normalize_text(text: str | None) -> str:
     """Normalize Polish characters and clean up whitespace."""
     if not text:
         return ""
@@ -21,17 +20,34 @@ def normalize_text(text: Optional[str]) -> str:
 
 
 HONORIFIC_PREFIXES = {
-    "sw", "swietego", "ksiecia", "biskupa", "generala", "marszalka", "majora",
-    "ignacego", "jana", "tadeusza", "jozefa", "stanislawa", "adama", "juliana",
-    "ksawerego", "wladyslawa", "stefana", "henryka", "mikolaja", "krolowej",
+    "sw",
+    "swietego",
+    "ksiecia",
+    "biskupa",
+    "generala",
+    "marszalka",
+    "majora",
+    "ignacego",
+    "jana",
+    "tadeusza",
+    "jozefa",
+    "stanislawa",
+    "adama",
+    "juliana",
+    "ksawerego",
+    "wladyslawa",
+    "stefana",
+    "henryka",
+    "mikolaja",
+    "krolowej",
 }
 
 
 def extract_street_token(
-    street: Optional[str],
-    district: Optional[str] = None,
-    location_raw: Optional[str] = None,
-    title: Optional[str] = None,
+    street: str | None,
+    district: str | None = None,
+    location_raw: str | None = None,
+    title: str | None = None,
 ) -> str:
     """Extract standard street or micro-location token for deduplication."""
     if street:
@@ -50,7 +66,11 @@ def extract_street_token(
     # Try extracting street from raw location or title
     for source in (location_raw, title):
         if source:
-            match = re.search(r"\bul(?:ica|\.)?\s+([A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]+)?)", source, re.IGNORECASE)
+            match = re.search(
+                r"\bul(?:ica|\.)?\s+([A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]+(?:\s+[A-ZĄĆĘŁŃÓŚŹŻa-ząćęłńóśźż]+)?)",
+                source,
+                re.IGNORECASE,
+            )
             if match:
                 raw_extracted = normalize_text(match.group(1))
                 words = [w for w in raw_extracted.split() if w not in HONORIFIC_PREFIXES and len(w) > 2]
@@ -63,11 +83,11 @@ def extract_street_token(
 def generate_property_fingerprint(
     price: float,
     area_home: float,
-    area_plot: Optional[float],
-    street: Optional[str] = None,
-    district: Optional[str] = None,
-    location_raw: Optional[str] = None,
-    title: Optional[str] = None,
+    area_plot: float | None,
+    street: str | None = None,
+    district: str | None = None,
+    location_raw: str | None = None,
+    title: str | None = None,
     category: str = "dom",
 ) -> str:
     """

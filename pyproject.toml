@@ -1,6 +1,6 @@
 [project]
 name = "rzeszow-houses-scrapper"
-version = "1.0.0"
+dynamic = ["version"]
 description = "Advanced real estate monitoring and analytical pipeline for houses in Rzeszów"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -23,12 +23,119 @@ dependencies = [
     "openai>=1.30.0",
 ]
 
+[dependency-groups]
+dev = [
+    "ruff>=0.14.0",
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.23.0",
+    "pre-commit>=4.5.0",
+    "bandit[toml]>=1.9.0",
+    "python-semantic-release>=10.2.0",
+]
+
 [build-system]
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.setuptools.dynamic]
+version = {attr = "src.version.__version__"}
+
+# Ruff configuration
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+indent-width = 4
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "W",     # pycodestyle warnings
+    "F",     # pyflakes
+    "I",     # isort
+    "N",     # pep8-naming
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "C4",    # flake8-comprehensions
+    "SIM",   # flake8-simplify
+    "RET",   # flake8-return
+    "ARG",   # flake8-unused-arguments
+    "PTH",   # flake8-use-pathlib
+]
+ignore = [
+    "E501",  # Line too long (handled by ruff format)
+    "B008",  # Do not perform function calls in argument defaults
+    "ARG001", # Unused function argument (common in event handlers)
+    "ARG002", # Unused method argument
+    "B904",  # raise-without-from-inside-except (existing pattern)
+    "E741",  # Ambiguous variable name (l, O, I)
+    "SIM105", # try/except/pass instead of contextlib.suppress (existing pattern)
+    "SIM108", # if/else block instead of ternary (existing pattern)
+    "PTH103", # os.makedirs instead of Path.mkdir (existing pattern)
+    "PTH110", # os.path.exists instead of Path.exists (existing pattern)
+    "PTH120", # os.path.dirname instead of Path.parent (existing pattern)
+    "SIM113", # enumerate-for-loop (complex counter logic)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "PTH"]
+"src/main.py" = ["ARG001"]  # CLI entrypoint has unused args
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "lf"
+
+# Pytest configuration
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
+pythonpath = ["."]  # Allow `from src.xxx import ...` in tests
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--strict-markers",
+    "--tb=short",
+]
 filterwarnings = [
     "ignore::DeprecationWarning",
 ]
+markers = [
+    "integration: marks tests as integration tests (excluded from pre-push)",
+]
+
+# Bandit security linter configuration
+[tool.bandit]
+exclude_dirs = ["tests", ".venv", "venv"]
+skips = ["B101"]  # Skip assert_used (common in tests)
+
+# Semantic Release configuration
+[tool.semantic_release]
+commit_parser = "conventional"
+tag_format = "v{version}"
+allow_zero_version = false
+major_on_zero = false
+version_variables = ["src/version.py:__version__"]
+upload_to_vcs_release = true
+
+[tool.semantic_release.branches.main]
+match = "main"
+prerelease = false
+
+[tool.semantic_release.commit_parser_options]
+minor_tags = ["feat"]
+patch_tags = ["fix", "perf", "refactor"]
+
+[tool.semantic_release.changelog]
+mode = "update"
+insertion_flag = "<!-- version list -->"
+
+[tool.semantic_release.changelog.default_templates]
+changelog_file = "CHANGELOG.md"
+output_format = "md"

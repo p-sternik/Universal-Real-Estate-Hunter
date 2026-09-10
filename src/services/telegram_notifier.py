@@ -1,6 +1,5 @@
-from typing import Optional
-from loguru import logger
 import httpx
+from loguru import logger
 
 from config import settings
 from src.models.enums import QualificationStatus
@@ -15,8 +14,8 @@ class TelegramNotifier:
 
     def __init__(
         self,
-        bot_token: Optional[str] = None,
-        chat_id: Optional[str] = None,
+        bot_token: str | None = None,
+        chat_id: str | None = None,
     ):
         self.bot_token = bot_token or settings.TELEGRAM_BOT_TOKEN
         self.chat_id = chat_id or settings.TELEGRAM_CHAT_ID
@@ -25,7 +24,11 @@ class TelegramNotifier:
         return bool(self.bot_token and self.chat_id)
 
     def format_message(self, listing: ListingSchema, filter_result: FilterResult) -> str:
-        status_tag = "⭐ <b>WHITELIST</b>" if filter_result.status == QualificationStatus.QUALIFIED_WHITELIST else "✅ <b>KWALIFIKACJA</b>"
+        status_tag = (
+            "⭐ <b>WHITELIST</b>"
+            if filter_result.status == QualificationStatus.QUALIFIED_WHITELIST
+            else "✅ <b>KWALIFIKACJA</b>"
+        )
 
         price_fmt = f"{listing.price:,.0f} zł".replace(",", " ")
         price_m2_fmt = f"{listing.price_per_m2:,.0f} zł/m²".replace(",", " ")
@@ -84,8 +87,7 @@ class TelegramNotifier:
                 if res.status_code == 200:
                     logger.info(f"[TelegramNotifier] Alert sent for: {listing.title[:40]}")
                     return True
-                else:
-                    logger.error(f"[TelegramNotifier] Error {res.status_code}: {res.text}")
+                logger.error(f"[TelegramNotifier] Error {res.status_code}: {res.text}")
         except Exception as e:
             logger.error(f"[TelegramNotifier] Exception sending alert: {e}")
 

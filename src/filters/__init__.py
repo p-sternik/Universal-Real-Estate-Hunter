@@ -1,5 +1,5 @@
-from typing import Any, Optional
-from loguru import logger
+import re
+from typing import Any
 
 from src.models.enums import (
     BuildingType,
@@ -11,6 +11,7 @@ from src.models.enums import (
     SewerageType,
 )
 from src.models.listing import FilterResult, ListingSchema
+
 from .fingerprint import extract_street_token, generate_property_fingerprint
 from .llm_analyzer import LLMAnalyzer
 from .stage1_hard_rules import Stage1Filter
@@ -25,15 +26,15 @@ class QualificationEngine:
     3. Score computation and status assignment.
     """
 
-    def __init__(self):
+    def __init__(self, llm_enabled: bool | None = None):
         self.stage1 = Stage1Filter()
         self.stage2 = Stage2SemanticFilter()
-        self.llm = LLMAnalyzer()
+        self.llm = LLMAnalyzer(enabled=llm_enabled)
 
     async def evaluate_listing(
         self,
         listing: ListingSchema,
-        profile: Optional[Any] = None,
+        profile: Any | None = None,
         skip_llm: bool = False,
     ) -> FilterResult:
         """
@@ -42,6 +43,7 @@ class QualificationEngine:
         p = profile
         if not p and getattr(listing, "profile_name", None):
             from src.services.config_manager import config_manager
+
             p = config_manager.get_profile(listing.profile_name)
 
         # Step 1: Stage I (Hard rules & Geo)
@@ -97,6 +99,11 @@ class QualificationEngine:
         listing.has_fiber = has_fiber
 
         # Step 3: Optional LLM Enrichment
+        ai_summary = None
+        ai_questions = []
+        contact_phone = None
+        contact_person = None
+
         if not skip_llm:
             llm_insights = await self.llm.analyze_description(listing)
             if llm_insights:
@@ -151,6 +158,22 @@ class QualificationEngine:
                     if c not in cons:
                         cons.append(f"[LLM] {c}")
 
+                # AI Due Diligence fields
+                ai_summary = llm_insights.get("summary") or None
+                ai_questions = llm_insights.get("questions_for_agent") or []
+                contact_phone = llm_insights.get("contact_phone") or None
+                contact_person = llm_insights.get("contact_person") or None
+
+        # Fallback: regex extraction for Polish phone numbers if LLM didn't find one
+        if not contact_phone and listing.raw_description:
+            phone_match = re.search(
+                r"(?:\+?48[\s-]?)?([5-8]\d{2})[\s-]?(\d{3})[\s-]?(\d{3})",
+                listing.raw_description,
+            )
+            if phone_match:
+                digits = phone_match.group(1) + phone_match.group(2) + phone_match.group(3)
+                contact_phone = f"+48{digits}"
+
         if not passed_stage2:
             return FilterResult(
                 is_qualified=False,
@@ -170,6 +193,10 @@ class QualificationEngine:
                 sewerage=listing.sewerage,
                 heating=listing.heating,
                 has_fiber=listing.has_fiber,
+                ai_summary=ai_summary,
+                ai_questions=ai_questions,
+                contact_phone=contact_phone,
+                contact_person=contact_person,
             )
 
         # Step 4: Scoring & Status resolution
@@ -255,12 +282,14 @@ class QualificationEngine:
 
         if matched_wl:
             status = QualificationStatus.QUALIFIED_WHITELIST
-        elif listing.area_plot is None or listing.area_plot == 0:
-            status = QualificationStatus.NEEDS_REVIEW
         elif (
-            listing.finish_condition == FinishCondition.NIEOKRESLONY
-            and listing.sewerage == SewerageType.NIEZNANA
-            and listing.heating == HeatingType.NIEZNANE
+            listing.area_plot is None
+            or listing.area_plot == 0
+            or (
+                listing.finish_condition == FinishCondition.NIEOKRESLONY
+                and listing.sewerage == SewerageType.NIEZNANA
+                and listing.heating == HeatingType.NIEZNANE
+            )
         ):
             status = QualificationStatus.NEEDS_REVIEW
         else:
@@ -284,6 +313,10 @@ class QualificationEngine:
             sewerage=listing.sewerage,
             heating=listing.heating,
             has_fiber=listing.has_fiber,
+            ai_summary=ai_summary,
+            ai_questions=ai_questions,
+            contact_phone=contact_phone,
+            contact_person=contact_person,
         )
 
 

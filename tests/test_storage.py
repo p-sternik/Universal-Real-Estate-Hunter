@@ -1,10 +1,11 @@
+from datetime import UTC, datetime, timedelta
+
 import pytest
 import pytest_asyncio
-from datetime import datetime, timedelta, timezone
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.filters.fingerprint import generate_property_fingerprint
-from src.models.enums import BuildingType, QualificationStatus, RoadType, SegmentSubtype
+from src.models.enums import BuildingType, QualificationStatus, SegmentSubtype
 from src.models.listing import FilterResult, ListingSchema
 from src.storage.models import Base, ListingModel
 from src.storage.repository import ListingRepository
@@ -93,29 +94,59 @@ async def test_repository_save_and_price_history(async_session: AsyncSession):
 async def test_get_fresh_urls(async_session: AsyncSession):
     repo = ListingRepository(async_session)
 
-    now = datetime.now(timezone.utc)
-    async_session.add_all([
-        ListingModel(
-            portal="Otodom", portal_id="a", url="https://otodom.pl/x/fresh",
-            property_fingerprint="f1", title="t", price=1, price_per_m2=1, area_home=100,
-            raw_description="pełny opis", last_scraped_at=now,
-        ),
-        ListingModel(
-            portal="Otodom", portal_id="b", url="https://otodom.pl/x/stale",
-            property_fingerprint="f2", title="t", price=1, price_per_m2=1, area_home=100,
-            raw_description="pełny opis", last_scraped_at=now - timedelta(hours=48),
-        ),
-        ListingModel(
-            portal="OLX", portal_id="c", url="https://olx.pl/x/other-portal",
-            property_fingerprint="f3", title="t", price=1, price_per_m2=1, area_home=100,
-            raw_description="pełny opis", last_scraped_at=now,
-        ),
-        ListingModel(
-            portal="Otodom", portal_id="d", url="https://otodom.pl/x/empty-desc",
-            property_fingerprint="f4", title="t", price=1, price_per_m2=1, area_home=100,
-            raw_description="", last_scraped_at=now,
-        ),
-    ])
+    now = datetime.now(UTC)
+    async_session.add_all(
+        [
+            ListingModel(
+                portal="Otodom",
+                portal_id="a",
+                url="https://otodom.pl/x/fresh",
+                property_fingerprint="f1",
+                title="t",
+                price=1,
+                price_per_m2=1,
+                area_home=100,
+                raw_description="pełny opis",
+                last_scraped_at=now,
+            ),
+            ListingModel(
+                portal="Otodom",
+                portal_id="b",
+                url="https://otodom.pl/x/stale",
+                property_fingerprint="f2",
+                title="t",
+                price=1,
+                price_per_m2=1,
+                area_home=100,
+                raw_description="pełny opis",
+                last_scraped_at=now - timedelta(hours=48),
+            ),
+            ListingModel(
+                portal="OLX",
+                portal_id="c",
+                url="https://olx.pl/x/other-portal",
+                property_fingerprint="f3",
+                title="t",
+                price=1,
+                price_per_m2=1,
+                area_home=100,
+                raw_description="pełny opis",
+                last_scraped_at=now,
+            ),
+            ListingModel(
+                portal="Otodom",
+                portal_id="d",
+                url="https://otodom.pl/x/empty-desc",
+                property_fingerprint="f4",
+                title="t",
+                price=1,
+                price_per_m2=1,
+                area_home=100,
+                raw_description="",
+                last_scraped_at=now,
+            ),
+        ]
+    )
     await async_session.flush()
 
     urls = await repo.get_fresh_urls(["Otodom", "NieruchomosciOnline"], within_hours=24)
@@ -217,3 +248,61 @@ async def test_repository_gallery_images(async_session: AsyncSession):
     assert is_new_up is False
     assert len(model_up.gallery_images) == 4
 
+
+@pytest.mark.asyncio
+async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
+    repo = ListingRepository(async_session)
+    fp = generate_property_fingerprint(price=950_000, area_home=115.0, area_plot=300.0)
+    listing = ListingSchema(
+        id="otodom-ai-1",
+        portal="Otodom",
+        title="Dom z analizą AI",
+        url="https://otodom.pl/oferta/ai-1",
+        price=950_000,
+        price_per_m2=8_260,
+        area_home=115.0,
+        area_plot=300.0,
+        location_raw="Rzeszów",
+        property_fingerprint=fp,
+    )
+    filt_res = FilterResult(
+        is_qualified=True,
+        status=QualificationStatus.QUALIFIED,
+        score=70.0,
+        passed_stage1=True,
+        passed_stage2=True,
+        ai_summary="TL;DR oferty.",
+        ai_questions=["Pytanie 1?", "Pytanie 2?"],
+        contact_phone="+48600123456",
+        contact_person="Anna Nowak",
+    )
+
+    model, is_new, _ = await repo.save_or_update(listing, filt_res)
+    assert is_new is True
+    assert model.ai_summary == "TL;DR oferty."
+    assert model.ai_questions == ["Pytanie 1?", "Pytanie 2?"]
+    assert model.contact_phone == "+48600123456"
+    assert model.contact_person == "Anna Nowak"
+
+    # Round-trip from DB
+    loaded = await repo.get_by_url(listing.url)
+    assert loaded is not None
+    assert loaded.ai_summary == "TL;DR oferty."
+    assert loaded.ai_questions == ["Pytanie 1?", "Pytanie 2?"]
+    assert loaded.contact_phone == "+48600123456"
+    assert loaded.contact_person == "Anna Nowak"
+
+    # Update path preserves AI fields when the new result has none
+    filt_res_empty = FilterResult(
+        is_qualified=True,
+        status=QualificationStatus.QUALIFIED,
+        score=70.0,
+        passed_stage1=True,
+        passed_stage2=True,
+    )
+    model_up, is_new_up, _ = await repo.save_or_update(listing, filt_res_empty)
+    assert is_new_up is False
+    assert model_up.ai_summary == "TL;DR oferty."
+    assert model_up.ai_questions == ["Pytanie 1?", "Pytanie 2?"]
+    assert model_up.contact_phone == "+48600123456"
+    assert model_up.contact_person == "Anna Nowak"

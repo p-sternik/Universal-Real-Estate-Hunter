@@ -1,8 +1,9 @@
 import asyncio
 import json
 import re
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
+
 from bs4 import BeautifulSoup
 from loguru import logger
 
@@ -17,6 +18,7 @@ from src.models.enums import (
     SewerageType,
 )
 from src.models.listing import ListingSchema
+
 from .base import BaseScraper
 
 OLX_BASE_SEARCH_URL = "https://www.olx.pl/nieruchomosci/domy/sprzedaz/rzeszow/?search%5Bdist%5D=15"
@@ -33,9 +35,9 @@ class OLXScraper(BaseScraper):
     def __init__(
         self,
         max_pages: int = 2,
-        search_url: Optional[str] = None,
-        profile: Optional[Any] = None,
-        skip_detail_urls: Optional[set] = None,
+        search_url: str | None = None,
+        profile: Any | None = None,
+        skip_detail_urls: set | None = None,
     ):
         super().__init__(name="OLXScraper")
         self.max_pages = max_pages
@@ -43,7 +45,7 @@ class OLXScraper(BaseScraper):
         self.profile = profile
         self.skip_detail_urls = skip_detail_urls or set()
 
-    def _extract_prerendered_state(self, html: str) -> Optional[Dict[str, Any]]:
+    def _extract_prerendered_state(self, html: str) -> dict[str, Any] | None:
         """Extract window.__PRERENDERED_STATE__ from OLX pages."""
         match = re.search(
             r'window\.__PRERENDERED_STATE__\s*=\s*("(?:[^"\\]|\\.)*"|\{.*?\});',
@@ -72,7 +74,7 @@ class OLXScraper(BaseScraper):
 
         return None
 
-    async def fetch_ad_detail(self, url: str) -> Optional[Dict[str, Any]]:
+    async def fetch_ad_detail(self, url: str) -> dict[str, Any] | None:
         """Fetch full OLX listing detail page for comprehensive description and attributes."""
         html = await self.fetch_html(url)
         if not html:
@@ -87,7 +89,7 @@ class OLXScraper(BaseScraper):
         desc_el = (
             soup.select_one('div[data-cy="ad_description"]')
             or soup.select_one('[data-testid="ad-description"]')
-            or soup.select_one('.css-bgzo2k')
+            or soup.select_one(".css-bgzo2k")
         )
         desc_text = desc_el.get_text(separator="\n").strip() if desc_el else ""
         imgs = []
@@ -97,7 +99,7 @@ class OLXScraper(BaseScraper):
                 imgs.append(src)
         return {"description": desc_text, "photos": [{"link": src} for src in imgs]}
 
-    def _parse_params_dict(self, params: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def _parse_params_dict(self, params: list[dict[str, Any]]) -> dict[str, Any]:
         """Convert OLX parameter list into key-value map, preferring normalizedValue (EN keys)."""
         res = {}
         for p in params:
@@ -112,7 +114,7 @@ class OLXScraper(BaseScraper):
                 res[key] = val
         return res
 
-    def _map_building_type(self, val: Optional[str]) -> BuildingType:
+    def _map_building_type(self, val: str | None) -> BuildingType:
         if not val:
             return BuildingType.INNY
         v = str(val).lower()
@@ -124,7 +126,7 @@ class OLXScraper(BaseScraper):
             return BuildingType.WOLNOSTOJACY
         return BuildingType.INNY
 
-    def _map_market(self, val: Optional[str]) -> MarketType:
+    def _map_market(self, val: str | None) -> MarketType:
         if not val:
             return MarketType.NIEOKRESLONY
         v = str(val).lower()
@@ -134,7 +136,7 @@ class OLXScraper(BaseScraper):
             return MarketType.WTORNY
         return MarketType.NIEOKRESLONY
 
-    def _map_finish_condition(self, val: Optional[str]) -> FinishCondition:
+    def _map_finish_condition(self, val: str | None) -> FinishCondition:
         if not val:
             return FinishCondition.NIEOKRESLONY
         v = str(val).lower()
@@ -150,7 +152,7 @@ class OLXScraper(BaseScraper):
             return FinishCondition.DO_REMONTU
         return FinishCondition.NIEOKRESLONY
 
-    def _map_heating(self, val: Optional[str]) -> HeatingType:
+    def _map_heating(self, val: str | None) -> HeatingType:
         if not val:
             return HeatingType.NIEZNANE
         v = str(val).lower()
@@ -178,7 +180,7 @@ class OLXScraper(BaseScraper):
             return SewerageType.MIEJSKA
         return SewerageType.NIEZNANA
 
-    async def parse_ad(self, ad: Dict[str, Any]) -> Optional[ListingSchema]:
+    async def parse_ad(self, ad: dict[str, Any]) -> ListingSchema | None:
         try:
             ad_id = str(ad.get("id"))
             title = ad.get("title", "").strip()
@@ -214,7 +216,9 @@ class OLXScraper(BaseScraper):
             area_plot = None
             if plot_raw:
                 try:
-                    area_plot = float(str(plot_raw).replace(",", ".").replace("m²", "").replace("m2", "").replace("ar", "").strip())
+                    area_plot = float(
+                        str(plot_raw).replace(",", ".").replace("m²", "").replace("m2", "").replace("ar", "").strip()
+                    )
                 except ValueError:
                     pass
 
@@ -238,7 +242,7 @@ class OLXScraper(BaseScraper):
             # Photos
             photos = ad.get("photos", [])
             main_image_url = None
-            gallery_images: List[str] = []
+            gallery_images: list[str] = []
             has_visualisations_from_meta = False
             render_indicators = ("render", "wizualizac", "visualis", "koncepcj", "rzut", "projekt-3d")
 
@@ -268,10 +272,14 @@ class OLXScraper(BaseScraper):
             )
             market = self._map_market(params_map.get("market"))
             finish_condition = self._map_finish_condition(
-                params_map.get("stan_wykonczenia") or params_map.get("furnishing") or params_map.get("construction_status")
+                params_map.get("stan_wykonczenia")
+                or params_map.get("furnishing")
+                or params_map.get("construction_status")
             )
             heating = self._map_heating(params_map.get("heating") or params_map.get("ogrzewanie"))
-            sewerage = self._map_sewerage(params_map.get("sewerage") or params_map.get("kanalizacja") or params_map.get("media"))
+            sewerage = self._map_sewerage(
+                params_map.get("sewerage") or params_map.get("kanalizacja") or params_map.get("media")
+            )
 
             # Rooms extraction
             rooms = None
@@ -332,6 +340,7 @@ class OLXScraper(BaseScraper):
 
             # Category
             from src.models.enums import PropertyCategory
+
             try:
                 category_enum = PropertyCategory(cat_str)
             except Exception:
@@ -379,23 +388,24 @@ class OLXScraper(BaseScraper):
                 main_image_url=main_image_url,
                 gallery_images=gallery_images,
                 property_fingerprint=fingerprint,
-                created_at=datetime.now(timezone.utc),
-                scraped_at=datetime.now(timezone.utc),
+                created_at=datetime.now(UTC),
+                scraped_at=datetime.now(UTC),
             )
         except Exception as e:
             logger.error(f"[OLXScraper] Error parsing ad: {e}")
             return None
 
-    async def scrape(self) -> List[ListingSchema]:
+    async def scrape(self) -> list[ListingSchema]:
         """Scrape OLX listings for configured location."""
         from src.services.config_manager import config_manager
+
         profile = self.profile or config_manager.get_profile()
         base_url = self.search_url or profile.get_olx_url()
         city_name = profile.city
         category_name = getattr(profile, "category", "dom")
 
         logger.info(f"[{self.name}] Scraping OLX listings for {city_name} ({category_name}) via: {base_url}")
-        listings: List[ListingSchema] = []
+        listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
             join_char = "&" if "?" in base_url else "?"
@@ -407,9 +417,8 @@ class OLXScraper(BaseScraper):
 
             state = self._extract_prerendered_state(html)
             if state:
-                ads = (
-                    state.get("listing", {}).get("listing", {}).get("ads", [])
-                    or state.get("adList", {}).get("ads", [])
+                ads = state.get("listing", {}).get("listing", {}).get("ads", []) or state.get("adList", {}).get(
+                    "ads", []
                 )
                 logger.info(f"[{self.name}] Extracted {len(ads)} ads from state.")
                 await self._emit_progress(
@@ -471,8 +480,8 @@ class OLXScraper(BaseScraper):
                             area_home=0.0,
                             location_raw=loc_txt,
                             property_fingerprint=fp,
-                            created_at=datetime.now(timezone.utc),
-                            scraped_at=datetime.now(timezone.utc),
+                            created_at=datetime.now(UTC),
+                            scraped_at=datetime.now(UTC),
                         )
 
                         if settings.FETCH_DETAILS and abs_url not in self.skip_detail_urls:
@@ -483,17 +492,33 @@ class OLXScraper(BaseScraper):
                                     det_params = self._parse_params_dict(det_ad.get("params", []))
                                     if det_params.get("m"):
                                         try:
-                                            item.area_home = float(str(det_params["m"]).replace(",", ".").replace("m²", "").replace("m2", "").strip())
+                                            item.area_home = float(
+                                                str(det_params["m"])
+                                                .replace(",", ".")
+                                                .replace("m²", "")
+                                                .replace("m2", "")
+                                                .strip()
+                                            )
                                             if item.price > 0 and item.area_home > 0:
                                                 item.price_per_m2 = round(item.price / item.area_home, 2)
                                         except ValueError:
                                             pass
                                     if det_params.get("stan_wykonczenia") or det_params.get("construction_status"):
-                                        item.finish_condition = self._map_finish_condition(det_params.get("stan_wykonczenia") or det_params.get("construction_status"))
+                                        item.finish_condition = self._map_finish_condition(
+                                            det_params.get("stan_wykonczenia") or det_params.get("construction_status")
+                                        )
                                 if det_ad.get("description"):
-                                    item.raw_description = BeautifulSoup(det_ad["description"], "html.parser").get_text(separator="\n").strip()
+                                    item.raw_description = (
+                                        BeautifulSoup(det_ad["description"], "html.parser")
+                                        .get_text(separator="\n")
+                                        .strip()
+                                    )
                                 if det_ad.get("photos"):
-                                    det_gallery = [p.get("link") or p.get("url") for p in det_ad["photos"] if isinstance(p, dict) and (p.get("link") or p.get("url"))]
+                                    det_gallery = [
+                                        p.get("link") or p.get("url")
+                                        for p in det_ad["photos"]
+                                        if isinstance(p, dict) and (p.get("link") or p.get("url"))
+                                    ]
                                     item.gallery_images = det_gallery[:15]
                                     if det_gallery and not item.main_image_url:
                                         item.main_image_url = det_gallery[0]

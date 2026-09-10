@@ -1,4 +1,7 @@
+from unittest.mock import AsyncMock
+
 import pytest
+
 from src.filters import QualificationEngine, Stage1Filter, Stage2SemanticFilter
 from src.models.enums import (
     BuildingType,
@@ -104,9 +107,17 @@ def test_stage1_blacklist():
     f = Stage1Filter()
 
     blacklist_terms = [
-        "Matysówka", "Matysowska", "Tyczyn", "Chmielnik", "Biała",
-        "Zwięczyca", "Kielanówka", "Górna Słocina", "św. Rocha",
-        "na skarpie", "teren osuwiskowy"
+        "Matysówka",
+        "Matysowska",
+        "Tyczyn",
+        "Chmielnik",
+        "Biała",
+        "Zwięczyca",
+        "Kielanówka",
+        "Górna Słocina",
+        "św. Rocha",
+        "na skarpie",
+        "teren osuwiskowy",
     ]
 
     for term in blacklist_terms:
@@ -178,7 +189,9 @@ def test_stage2_corner_and_middle_segment():
         area_plot=250.0,
         raw_description="Sprzedam segment skrajny w zabudowie szeregowej. Garaż w bryle.",
     )
-    passed, reasons, pros, cons, subtype, is_corner, has_parking, detected_finish, has_vis, sew, heat, fiber = s2.analyze(listing_corner, profile=prof)
+    passed, reasons, pros, cons, subtype, is_corner, has_parking, detected_finish, has_vis, sew, heat, fiber = (
+        s2.analyze(listing_corner, profile=prof)
+    )
     assert passed is True
     assert is_corner is True
     assert subtype == SegmentSubtype.SKRAJNY
@@ -188,7 +201,9 @@ def test_stage2_corner_and_middle_segment():
         area_plot=160.0,
         raw_description="Środkowy segment szeregówki, działka 160 m2.",
     )
-    passed, reasons, pros, cons, subtype, is_corner, has_parking, detected_finish, has_vis, sew, heat, fiber = s2.analyze(listing_middle_small, profile=prof)
+    passed, reasons, pros, cons, subtype, is_corner, has_parking, detected_finish, has_vis, sew, heat, fiber = (
+        s2.analyze(listing_middle_small, profile=prof)
+    )
     assert passed is False
     assert any("Segment środkowy z małą działką" in r for r in reasons)
 
@@ -212,7 +227,9 @@ def test_stage2_plot_extraction_from_description():
         area_plot=None,
         raw_description="Świetny dom, segment skrajny, działka o powierzchni 4 ary. Dojazd asfaltowy. Garaż.",
     )
-    passed, reasons, pros, cons, subtype, is_corner, has_parking, detected_finish, has_vis, *_ = s2.analyze(listing_no_plot, profile=PermissiveProfile())
+    passed, reasons, pros, cons, subtype, is_corner, has_parking, detected_finish, has_vis, *_ = s2.analyze(
+        listing_no_plot, profile=PermissiveProfile()
+    )
     assert passed is True
     assert any("Wykryto metraż działki z opisu: ok. 400 m²" in p for p in pros)
 
@@ -316,7 +333,9 @@ def test_stage2_utilities_detection():
     l_sew_szambo = create_sample_listing(raw_description="Dojazd asfaltowy, szambo 10m3, woda ze studni.")
     assert s2.detect_sewerage(l_sew_szambo.raw_description) == SewerageType.SZAMBO
 
-    l_sew_oczyszcz = create_sample_listing(raw_description="Ekologiczne rozwiązania, przydomowa biologiczna oczyszczalnia ścieków.")
+    l_sew_oczyszcz = create_sample_listing(
+        raw_description="Ekologiczne rozwiązania, przydomowa biologiczna oczyszczalnia ścieków."
+    )
     assert s2.detect_sewerage(l_sew_oczyszcz.raw_description) == SewerageType.OCZYSZCZALNIA
 
     # Heating: Heat pump vs Gas vs Solid fuel
@@ -417,14 +436,10 @@ async def test_qualification_engine_building_type_and_year_scoring():
         "raw_description": "Dom wykończony pod klucz, garaż. Pompa ciepła, kanalizacja miejska.",
     }
 
-    l_detached_new = create_sample_listing(
-        **base_args, building_type=BuildingType.WOLNOSTOJACY, year_built=2018
-    )
+    l_detached_new = create_sample_listing(**base_args, building_type=BuildingType.WOLNOSTOJACY, year_built=2018)
     res_detached = await engine.evaluate_listing(l_detached_new)
 
-    l_ribbon_old = create_sample_listing(
-        **base_args, building_type=BuildingType.SZEREGOWIEC, year_built=1965
-    )
+    l_ribbon_old = create_sample_listing(**base_args, building_type=BuildingType.SZEREGOWIEC, year_built=1965)
     res_ribbon = await engine.evaluate_listing(l_ribbon_old)
 
     # wolnostojący +10 vs szeregowiec -10; 1965 -> -(2000-1965)//10*2 = -6
@@ -468,8 +483,12 @@ async def test_qualification_engine_budget_bonus():
         "building_type": BuildingType.WOLNOSTOJACY,
         "raw_description": "Dom do sprzedania.",
     }
-    res_budget = await engine.evaluate_listing(create_sample_listing(**base, price=800_000), profile=PermissiveProfile())
-    res_full = await engine.evaluate_listing(create_sample_listing(**base, price=1_200_000), profile=PermissiveProfile())
+    res_budget = await engine.evaluate_listing(
+        create_sample_listing(**base, price=800_000), profile=PermissiveProfile()
+    )
+    res_full = await engine.evaluate_listing(
+        create_sample_listing(**base, price=1_200_000), profile=PermissiveProfile()
+    )
 
     assert res_budget.score == res_full.score + 5.0
 
@@ -619,3 +638,75 @@ def test_stage2_area_plot_writeback_to_model():
     assert listing.area_plot is None
     s2.analyze(listing)
     assert listing.area_plot == 450.0
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_ai_due_diligence_fields_from_llm():
+    engine = QualificationEngine()
+    engine.llm = AsyncMock()
+    engine.llm.analyze_description.return_value = {
+        "summary": "Segment skrajny w stanie deweloperskim. Główne ryzyko: brak info o odbiorze budynku.",
+        "questions_for_agent": [
+            "Czy w cenie jest kocioł gazowy i grzejniki?",
+            "Jaki jest stan prawny drogi dojazdowej?",
+        ],
+        "contact_phone": "+48 600 123 456",
+        "contact_person": "Jan Kowalski",
+    }
+
+    listing = create_sample_listing(
+        raw_description="Segment skrajny z garażem. Dojazd asfaltowy. Opiekun oferty: Jan Kowalski.",
+    )
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+
+    engine.llm.analyze_description.assert_awaited_once()
+    assert res.ai_summary == "Segment skrajny w stanie deweloperskim. Główne ryzyko: brak info o odbiorze budynku."
+    assert res.ai_questions == [
+        "Czy w cenie jest kocioł gazowy i grzejniki?",
+        "Jaki jest stan prawny drogi dojazdowej?",
+    ]
+    assert res.contact_phone == "+48 600 123 456"
+    assert res.contact_person == "Jan Kowalski"
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_contact_phone_regex_fallback():
+    engine = QualificationEngine()
+
+    listing = create_sample_listing(
+        raw_description="Piękny segment skrajny z garażem. Dojazd asfaltowy. Opiekun oferty: tel. 600-123-456.",
+    )
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile(), skip_llm=True)
+
+    assert res.contact_phone == "+48600123456"
+    assert res.contact_person is None
+    assert res.ai_summary is None
+    assert res.ai_questions == []
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_ai_fields_empty_without_phone_or_llm():
+    engine = QualificationEngine()
+
+    listing = create_sample_listing(raw_description="Piękny segment skrajny z garażem. Dojazd asfaltowy.")
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile(), skip_llm=True)
+
+    assert res.contact_phone is None
+    assert res.contact_person is None
+    assert res.ai_summary is None
+    assert res.ai_questions == []
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_llm_disabled_flag():
+    engine = QualificationEngine(llm_enabled=False)
+    assert engine.llm.enabled is False
+
+    listing = create_sample_listing(
+        raw_description="Segment skrajny z garażem. Dojazd asfaltowy. Opiekun oferty: tel. 600-123-456.",
+    )
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+
+    assert res.ai_summary is None
+    assert res.ai_questions == []
+    assert res.contact_phone == "+48600123456"  # regex fallback still active

@@ -1,6 +1,5 @@
 import asyncio
-from datetime import datetime
-from typing import Optional
+
 from loguru import logger
 
 from config import settings
@@ -15,7 +14,7 @@ class SchedulerRunner:
     and runtime configuration changes from the web dashboard.
     """
 
-    def __init__(self, interval_minutes: int | None = None, profile: Optional[str] = None):
+    def __init__(self, interval_minutes: int | None = None, profile: str | None = None):
         self._cli_interval = interval_minutes
         self.target_profile = profile
         self.pipeline = ScraperPipeline()
@@ -50,9 +49,7 @@ class SchedulerRunner:
     async def start(self):
         self.running = True
         init_interval = self.get_effective_interval()
-        logger.info(
-            f"[Scheduler] Uruchomiono harmonogram zadań. Aktualny interwał: {init_interval} minut."
-        )
+        logger.info(f"[Scheduler] Uruchomiono harmonogram zadań. Aktualny interwał: {init_interval} minut.")
 
         # Natychmiastowy pierwszy cykl
         await self._job_wrapper()
@@ -66,7 +63,7 @@ class SchedulerRunner:
                     timeout=interval * 60,
                 )
                 break
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if self.running:
                     await self._job_wrapper()
 

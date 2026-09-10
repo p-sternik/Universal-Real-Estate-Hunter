@@ -1,7 +1,7 @@
 import html
 import os
 import webbrowser
-from typing import List, Optional
+
 from loguru import logger
 from rich.console import Console
 from rich.markup import escape
@@ -11,7 +11,7 @@ from sqlalchemy import desc, select
 from src.storage import ListingModel, get_session
 
 
-async def get_listings_from_db(status_filter: Optional[str] = None, limit: Optional[int] = None) -> List[ListingModel]:
+async def get_listings_from_db(status_filter: str | None = None, limit: int | None = None) -> list[ListingModel]:
     async with get_session() as session:
         stmt = select(ListingModel).order_by(
             desc(ListingModel.is_qualified),
@@ -33,7 +33,7 @@ async def get_listings_from_db(status_filter: Optional[str] = None, limit: Optio
         return list(res.scalars().all())
 
 
-async def print_terminal_view(status_filter: Optional[str] = "QUALIFIED", limit: int = 20):
+async def print_terminal_view(status_filter: str | None = "QUALIFIED", limit: int = 20):
     """Print an aesthetic Rich table of listings to the terminal."""
     listings = await get_listings_from_db(status_filter=status_filter, limit=limit)
     console = Console()
@@ -51,14 +51,20 @@ async def print_terminal_view(status_filter: Optional[str] = "QUALIFIED", limit:
     table.add_column("Lokalizacja & Tytuł (Link)", justify="left")
 
     for item in listings:
-        status_color = "green" if "WHITELIST" in item.qualification_status else ("blue" if item.is_qualified else "yellow")
-        status_display = f"[{status_color}]{item.qualification_status}\n({item.qualification_score:.0f} pkt)[/{status_color}]"
+        status_color = (
+            "green" if "WHITELIST" in item.qualification_status else ("blue" if item.is_qualified else "yellow")
+        )
+        status_display = (
+            f"[{status_color}]{item.qualification_status}\n({item.qualification_score:.0f} pkt)[/{status_color}]"
+        )
 
         price_display = f"{item.price:,.0f} zł\n{item.price_per_m2:,.0f} zł/m²".replace(",", " ")
         plot_str = f"{item.area_plot:.0f} m²" if item.area_plot else "b/d"
         area_display = f"{item.area_home:.1f} m²\ndz: {plot_str}"
 
-        type_road = f"{escape(item.building_type)}\n({escape(item.segment_subtype)})\ndroga: {escape(item.access_road_type)}"
+        type_road = (
+            f"{escape(item.building_type)}\n({escape(item.segment_subtype)})\ndroga: {escape(item.access_road_type)}"
+        )
         clean_loc = escape(f"{item.street or ''} {item.district or ''} {item.city or ''}".strip() or item.location_raw)
         clean_title = escape(item.title[:65])
         clean_url = escape(item.url)
@@ -75,7 +81,9 @@ async def print_terminal_view(status_filter: Optional[str] = "QUALIFIED", limit:
         )
 
     console.print(table)
-    console.print(f"\n💡 [dim]Aby otworzyć interaktywny raport wizualny w przeglądarce, uruchom: [bold]python main.py report[/bold][/dim]\n")
+    console.print(
+        "\n💡 [dim]Aby otworzyć interaktywny raport wizualny w przeglądarce, uruchom: [bold]python main.py report[/bold][/dim]\n"
+    )
 
 
 async def generate_html_dashboard(
@@ -88,45 +96,61 @@ async def generate_html_dashboard(
     total_count = len(listings)
     qualified_count = sum(1 for l in listings if l.is_qualified)
     whitelist_count = sum(1 for l in listings if l.qualification_status == "QUALIFIED_WHITELIST")
-    avg_price_m2 = (
-        sum(l.price_per_m2 for l in listings if l.price_per_m2 > 0) / len(listings)
-        if listings
-        else 0
-    )
+    avg_price_m2 = sum(l.price_per_m2 for l in listings if l.price_per_m2 > 0) / len(listings) if listings else 0
 
     cards_html = []
     for item in listings:
-        status_class = "status-whitelist" if item.qualification_status == "QUALIFIED_WHITELIST" else (
-            "status-qualified" if item.is_qualified else (
-                "status-review" if item.qualification_status == "NEEDS_REVIEW" else "status-rejected"
+        status_class = (
+            "status-whitelist"
+            if item.qualification_status == "QUALIFIED_WHITELIST"
+            else (
+                "status-qualified"
+                if item.is_qualified
+                else ("status-review" if item.qualification_status == "NEEDS_REVIEW" else "status-rejected")
             )
         )
 
-        badge_text = "Whitelist" if item.qualification_status == "QUALIFIED_WHITELIST" else (
-            "Zakwalifikowana" if item.is_qualified else (
-                "Do weryfikacji" if item.qualification_status == "NEEDS_REVIEW" else "Odrzucona"
+        badge_text = (
+            "Whitelist"
+            if item.qualification_status == "QUALIFIED_WHITELIST"
+            else (
+                "Zakwalifikowana"
+                if item.is_qualified
+                else ("Do weryfikacji" if item.qualification_status == "NEEDS_REVIEW" else "Odrzucona")
             )
         )
 
         plot_text = f"{item.area_plot:.0f} m²" if item.area_plot else "b/d"
         gallery = item.gallery_images or []
-        img_src = item.main_image_url or (gallery[0] if gallery else "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80")
-        gallery_badge = f"<span class='badge' style='background:rgba(0,0,0,0.65);color:#e2e8f0;top:auto;bottom:8px;left:auto;right:8px;'>📷 {len(gallery)}</span>" if len(gallery) > 1 else ""
+        img_src = item.main_image_url or (
+            gallery[0]
+            if gallery
+            else "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80"
+        )
+        gallery_badge = (
+            f"<span class='badge' style='background:rgba(0,0,0,0.65);color:#e2e8f0;top:auto;bottom:8px;left:auto;right:8px;'>📷 {len(gallery)}</span>"
+            if len(gallery) > 1
+            else ""
+        )
 
         thumbs_html = ""
         if len(gallery) > 1:
             thumb_elems = []
             for g_url in gallery[:5]:
                 esc_url = html.escape(g_url)
-                thumb_elems.append(f'<img src="{esc_url}" class="card-thumb" alt="Miniaturka" loading="lazy" onmouseenter="this.closest(\'.card\').querySelector(\'.main-card-img\').src=\'{esc_url}\'" onclick="window.open(\'{esc_url}\', \'_blank\')" onerror="this.style.display=\'none\'">')
+                thumb_elems.append(
+                    f'<img src="{esc_url}" class="card-thumb" alt="Miniaturka" loading="lazy" onmouseenter="this.closest(\'.card\').querySelector(\'.main-card-img\').src=\'{esc_url}\'" onclick="window.open(\'{esc_url}\', \'_blank\')" onerror="this.style.display=\'none\'">'
+                )
             more_count = len(gallery) - 5
-            more_html = f'<span class="thumb-more">+{more_count}</span>' if more_count > 0 else ''
+            more_html = f'<span class="thumb-more">+{more_count}</span>' if more_count > 0 else ""
             thumbs_html = f'<div class="gallery-strip">{"".join(thumb_elems)}{more_html}</div>'
 
         pros_lis = "".join([f"<li>✓ {html.escape(p)}</li>" for p in (item.pros or [])[:2]])
         cons_lis = "".join([f"<li class='con'>⚠ {html.escape(c)}</li>" for c in (item.cons or [])[:1]])
 
-        market_text = html.escape(item.market) if getattr(item, "market", None) and item.market != "nieokreślony" else ""
+        market_text = (
+            html.escape(item.market) if getattr(item, "market", None) and item.market != "nieokreślony" else ""
+        )
         finish_val = getattr(item, "finish_condition", None)
         finish_text = html.escape(finish_val) if finish_val and finish_val != "nieokreślony" else ""
         sew_val = getattr(item, "sewerage", None)
@@ -136,8 +160,16 @@ async def generate_html_dashboard(
         has_fiber = bool(getattr(item, "has_fiber", False))
         fiber_badge = "<span class='sep'>·</span><span>🌐 Światłowód</span>" if has_fiber else ""
         has_vis = bool(getattr(item, "has_visualisations", False))
-        vis_badge = "<span class='badge' style='background:#d97706;color:#fff;left:auto;right:12px;'>⚠️ Wizualizacje</span>" if has_vis else ""
-        road_text = html.escape(item.access_road_type) if getattr(item, "access_road_type", None) and item.access_road_type != "nieznana" else ""
+        vis_badge = (
+            "<span class='badge' style='background:#d97706;color:#fff;left:auto;right:12px;'>⚠️ Wizualizacje</span>"
+            if has_vis
+            else ""
+        )
+        road_text = (
+            html.escape(item.access_road_type)
+            if getattr(item, "access_road_type", None) and item.access_road_type != "nieznana"
+            else ""
+        )
 
         card = f"""
         <div class="card {status_class}" data-status="{item.qualification_status}">
@@ -161,7 +193,7 @@ async def generate_html_dashboard(
                     <span class="price-m2">· {item.price_per_m2:,.0f} zł/m²</span>
                 </div>
                 <div class="location-row">
-                    {html.escape(item.street or item.district or item.city or item.location_raw or '')}
+                    {html.escape(item.street or item.district or item.city or item.location_raw or "")}
                 </div>
                 <div class="specs-row">
                     <span><strong>{item.area_home:.1f}</strong> m²</span>
@@ -286,7 +318,7 @@ async def generate_html_dashboard(
             background: #1e2430;
             color: var(--text-primary);
         }}
-        
+
         .grid {{
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));

@@ -1,7 +1,7 @@
 import asyncio
 import time
-from datetime import datetime, timezone
-from typing import Optional, Tuple
+from datetime import UTC, datetime
+
 import httpx
 from loguru import logger
 from sqlalchemy import select
@@ -64,13 +64,11 @@ RZESZOW_DISTRICT_CENTROIDS = {
 class NominatimGeocoder:
     def __init__(self):
         self.base_url = "https://nominatim.openstreetmap.org/search"
-        self.headers = {
-            "User-Agent": "RzeszowPropertyHunter/1.0 (automated house monitor; rzeszow-hunter@local)"
-        }
+        self.headers = {"User-Agent": "RzeszowPropertyHunter/1.0 (automated house monitor; rzeszow-hunter@local)"}
         self._lock = asyncio.Lock()
         self._last_request_time = 0.0
 
-    async def _rate_limited_query(self, query: str) -> Optional[dict]:
+    async def _rate_limited_query(self, query: str) -> dict | None:
         """Query OSM Nominatim respecting 1 req/sec rate limit."""
         async with self._lock:
             now = time.time()
@@ -102,7 +100,7 @@ class NominatimGeocoder:
 
         return None
 
-    async def get_cached(self, session: AsyncSession, query_key: str) -> Optional[Tuple[float, float, str]]:
+    async def get_cached(self, session: AsyncSession, query_key: str) -> tuple[float, float, str] | None:
         stmt = select(GeocacheModel).where(GeocacheModel.query == query_key)
         res = await session.execute(stmt)
         cached = res.scalars().first()
@@ -123,18 +121,18 @@ class NominatimGeocoder:
             latitude=lat,
             longitude=lon,
             display_name=display_name,
-            cached_at=datetime.now(timezone.utc),
+            cached_at=datetime.now(UTC),
         )
         session.add(cache_entry)
         await session.flush()
 
     def _find_district_fallback(
         self,
-        street: Optional[str],
-        district: Optional[str],
-        city: Optional[str],
-        location_raw: Optional[str],
-    ) -> Optional[Tuple[float, float]]:
+        street: str | None,
+        district: str | None,
+        city: str | None,
+        location_raw: str | None,
+    ) -> tuple[float, float] | None:
         haystack = f"{street or ''} {district or ''} {city or ''} {location_raw or ''}".lower()
         for key, coords in RZESZOW_DISTRICT_CENTROIDS.items():
             if key in haystack:
@@ -144,11 +142,11 @@ class NominatimGeocoder:
     async def geocode(
         self,
         session: AsyncSession,
-        street: Optional[str] = None,
-        district: Optional[str] = None,
-        city: Optional[str] = None,
-        location_raw: Optional[str] = None,
-    ) -> Tuple[Optional[float], Optional[float], bool]:
+        street: str | None = None,
+        district: str | None = None,
+        city: str | None = None,
+        location_raw: str | None = None,
+    ) -> tuple[float | None, float | None, bool]:
         """
         Resolves (latitude, longitude, is_exact).
         Returns is_exact=True if resolved via street-level Nominatim,
@@ -210,9 +208,7 @@ async def backfill_missing_coordinates(limit: int = 200) -> int:
     async with get_session() as session:
         stmt = (
             select(ListingModel)
-            .where(
-                (ListingModel.latitude.is_(None)) | (ListingModel.longitude.is_(None))
-            )
+            .where((ListingModel.latitude.is_(None)) | (ListingModel.longitude.is_(None)))
             .limit(limit)
         )
         res = await session.execute(stmt)
@@ -236,9 +232,7 @@ async def backfill_missing_coordinates(limit: int = 200) -> int:
                 item.longitude = lon
                 item.is_exact_coords = is_exact
                 updated_count += 1
-                logger.debug(
-                    f"Geocoded '{item.title[:30]}': ({lat:.4f}, {lon:.4f}) [exact={is_exact}]"
-                )
+                logger.debug(f"Geocoded '{item.title[:30]}': ({lat:.4f}, {lon:.4f}) [exact={is_exact}]")
 
         await session.commit()
         logger.success(f"Successfully backfilled {updated_count} listing coordinates.")
