@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.6.0 (2026-09-10)
+
+### Features
+
+- Auto-backfill spatial due diligence for existing listings during sync
+  ([`47a1d56`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/47a1d56825015347f2c62e6f5c71990fd399790b))
+
+
 ## v1.5.0 (2026-09-10)
 
 ### Features
