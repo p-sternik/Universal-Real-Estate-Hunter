@@ -513,9 +513,28 @@ class LiveDashboardServer:
 
     async def handle_backfill_coords(self, request: web.Request) -> web.Response:
         from src.services.geocoder import backfill_missing_coordinates
+        from src.services.pipeline import ScraperPipeline
+        from src.storage.database import get_session
+        from src.storage.repository import ListingRepository
 
-        count = await backfill_missing_coordinates()
-        return web.json_response({"success": True, "updated": count})
+        coords_count = await backfill_missing_coordinates()
+        spatial_count = 0
+        try:
+            pipeline = ScraperPipeline()
+            async with get_session() as session:
+                repo = ListingRepository(session)
+                spatial_count = await pipeline.backfill_existing_spatial_data(session, repo)
+        except Exception as e:
+            logger.warning(f"[LiveDashboard] Spatial backfill error: {e}")
+
+        return web.json_response(
+            {
+                "success": True,
+                "coords_updated": coords_count,
+                "spatial_updated": spatial_count,
+                "updated": coords_count + spatial_count,
+            }
+        )
 
     async def _run_scrape_background(self, target_profile: str | None = None) -> None:
         from src.services.progress import global_tracker

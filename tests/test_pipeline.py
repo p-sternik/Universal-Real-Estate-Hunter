@@ -330,3 +330,77 @@ async def test_pipeline_integrates_advanced_spatial_features(async_session, monk
     # Score adjustment:
     # 80 + 5 (FTTH) - 15 (front < 16m) - 15 (slope > 8%) - 20 (power lines) + 5 (PKA) = 40.0
     assert model.qualification_score == 40.0
+
+
+@pytest.mark.asyncio
+async def test_pipeline_backfill_existing_spatial_data(async_session, monkeypatch):
+    """backfill_existing_spatial_data retroactively enriches existing DB listings missing spatial metrics."""
+    from src.services.geoportal import geoportal_service
+    from src.storage.models import ListingModel
+
+    # Create existing listing in database without spatial metrics
+    existing = ListingModel(
+        portal="otodom",
+        portal_id="backfill_test_123",
+        url="https://www.otodom.pl/pl/oferta/backfill-123",
+        property_fingerprint="fp_backfill_123",
+        title="Dom pod miastem",
+        price=600000.0,
+        price_per_m2=4285.7,
+        area_home=140.0,
+        latitude=50.04,
+        longitude=22.0,
+        is_exact_coords=True,
+        qualification_score=90.0,
+        pros=["Ogród"],
+        cons=["Do odświeżenia"],
+    )
+    async_session.add(existing)
+    await async_session.commit()
+
+    mock_audit = AsyncMock(
+        return_value={
+            "main_parcel_id": "186301_1.0221.999",
+            "broadband_status": "ŚWIATŁOWÓD_AKTYWNY",
+            "parcel_front_width_m": 22.0,
+            "parcel_length_m": 45.0,
+            "parcel_aspect_ratio": 2.05,
+            "parcel_shape_type": "REGULARNY",
+            "terrain_slope_pct": 3.0,
+            "terrain_aspect": "POŁUDNIOWY",
+            "walkability_pka_dist_m": 1200.0,
+            "walkability_pka_name": "Rzeszów Główny",
+            "power_lines_risk": "BRAK",
+        }
+    )
+    monkeypatch.setattr(geoportal_service, "audit_location", mock_audit)
+
+    repo = ListingRepository(async_session)
+    pipeline = make_pipeline(llm_enabled=False, engine_mock=AsyncMock())
+
+    updated_count = await pipeline.backfill_existing_spatial_data(async_session, repo)
+    assert updated_count == 1
+
+    # Fetch updated model from DB
+    updated_model = await repo.get_by_portal_id("otodom", "backfill_test_123")
+    assert updated_model is not None
+    assert updated_model.parcel_id == "186301_1.0221.999"
+    assert updated_model.broadband_status == "ŚWIATŁOWÓD_AKTYWNY"
+    assert updated_model.parcel_front_width_m == 22.0
+    assert updated_model.parcel_shape_type == "REGULARNY"
+    assert updated_model.terrain_slope_pct == 3.0
+    assert updated_model.terrain_aspect == "POŁUDNIOWY"
+    assert updated_model.walkability_pka_dist_m == 1200.0
+
+    # Pros should have FTTH, regular shape, south slope, and PKA
+    assert any("Światłowód aktywny" in p for p in updated_model.pros)
+    assert any("Foremna działka" in p for p in updated_model.pros)
+    assert any("Południowa ekspozycja" in p for p in updated_model.pros)
+    assert any("Stacja kolejowa PKA" in p for p in updated_model.pros)
+
+    # Initial 90.0 + 5 (FTTH) + 5 (PKA) = 100.0
+    assert updated_model.qualification_score == 100.0
+
+    # Second run should find 0 listings needing backfill
+    updated_again = await pipeline.backfill_existing_spatial_data(async_session, repo)
+    assert updated_again == 0

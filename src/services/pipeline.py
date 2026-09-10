@@ -1,9 +1,11 @@
 import asyncio
 import re
 import time
+from datetime import UTC, datetime
 from typing import Any
 
 from loguru import logger
+from sqlalchemy import select
 
 from config import settings
 from src.filters import QualificationEngine
@@ -15,7 +17,7 @@ from src.services.discord_notifier import DiscordNotifier
 from src.services.market_analyzer import analyze_negotiation, resolve_local_median
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
-from src.storage import ListingRepository, get_session, init_db
+from src.storage import ListingModel, ListingRepository, get_session, init_db
 
 
 class ScraperPipeline:
@@ -132,6 +134,30 @@ class ScraperPipeline:
                 listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
                 listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
 
+            for sf in (
+                "landslide_risk",
+                "egib_building_status",
+                "egib_soil_class",
+                "noise_level_db",
+                "noise_zone",
+                "nature_protected_zone",
+                "monument_zone",
+                "cemetery_buffer_zone",
+                "broadband_status",
+                "broadband_details",
+                "parcel_front_width_m",
+                "parcel_length_m",
+                "parcel_aspect_ratio",
+                "parcel_shape_type",
+                "terrain_slope_pct",
+                "terrain_aspect",
+                "walkability_pka_dist_m",
+                "walkability_pka_name",
+                "power_lines_risk",
+            ):
+                if getattr(listing, sf, None) is None and (v := getattr(existing_model, sf, None)) is not None:
+                    setattr(listing, sf, v)
+
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
         is_exact_coords = True
         stage1_passed = True
@@ -166,8 +192,14 @@ class ScraperPipeline:
             elif existing_model and existing_model.is_exact_coords is not None:
                 is_exact_coords = bool(existing_model.is_exact_coords)
 
-            # Audit location in Geoportal if coords are exact, and not already audited
-            if listing.coordinates and is_exact_coords and not listing.parcel_id:
+            # Audit location in Geoportal if coords are exact and spatial metrics missing
+            needs_spatial_audit = (
+                not listing.parcel_id
+                or getattr(listing, "broadband_status", None) is None
+                or getattr(listing, "parcel_front_width_m", None) is None
+                or getattr(listing, "terrain_slope_pct", None) is None
+            )
+            if listing.coordinates and is_exact_coords and needs_spatial_audit:
                 try:
                     from src.services.geoportal import geoportal_service
 
@@ -718,6 +750,19 @@ class ScraperPipeline:
             step_pct = base_pct + int((step_idx / total_steps) * 85)
             global_tracker.percentage = step_pct
 
+        # Backfill spatial audit for existing database listings missing new metrics
+        if not global_tracker.is_cancelled():
+            try:
+                async with get_session() as session:
+                    repo = ListingRepository(session)
+                    backfilled_cnt = await self.backfill_existing_spatial_data(session, repo)
+                    if backfilled_cnt > 0:
+                        logger.info(
+                            f"[Pipeline] Pomyślnie zaktualizowano dane przestrzenne dla {backfilled_cnt} istniejących ofert w bazie."
+                        )
+            except Exception as e:
+                logger.debug(f"[Pipeline] Spatial backfill error: {e}")
+
         t_process = time.perf_counter() - t_process_start
         portal_timings = ", ".join(f"{name}={elapsed:.1f}s" for name, elapsed in scrape_portal_times)
         logger.info(
@@ -749,3 +794,176 @@ class ScraperPipeline:
             f"Price changes: {total_price_changes} | Qualified: {total_qualified} | Notified: {total_notified}"
         )
         return summary
+
+    async def backfill_existing_spatial_data(
+        self,
+        session: Any,
+        repo: ListingRepository,
+        limit: int = 200,
+    ) -> int:
+        """
+        Enriches existing listings in the database with the latest spatial due diligence data
+        (SIDUSIS FTTH, ULDK OBB parcel geometry, GUGiK NMT slope/aspect, PKA walkability, power lines).
+        Also geocodes any listings missing coordinates.
+        """
+        from src.services.geocoder import geocoder
+        from src.services.geoportal import geoportal_service
+
+        # 1. Geocode listings missing coordinates
+        missing_coords_stmt = (
+            select(ListingModel)
+            .where((ListingModel.latitude.is_(None)) | (ListingModel.longitude.is_(None)))
+            .limit(limit)
+        )
+        res_coords = await session.execute(missing_coords_stmt)
+        for item in res_coords.scalars().all():
+            lat, lon, is_exact = await geocoder.geocode(
+                session=session,
+                street=item.street,
+                district=item.district,
+                city=item.city,
+                location_raw=item.location_raw,
+            )
+            if lat and lon:
+                item.latitude = lat
+                item.longitude = lon
+                item.is_exact_coords = is_exact
+
+        # 2. Find listings with exact coordinates that lack spatial metrics
+        stmt = (
+            select(ListingModel)
+            .where(
+                ListingModel.latitude.isnot(None),
+                ListingModel.longitude.isnot(None),
+                ListingModel.is_exact_coords.is_(True),
+                (
+                    ListingModel.broadband_status.is_(None)
+                    | ListingModel.parcel_front_width_m.is_(None)
+                    | ListingModel.terrain_slope_pct.is_(None)
+                    | ListingModel.parcel_id.is_(None)
+                ),
+            )
+            .limit(limit)
+        )
+        res = await session.execute(stmt)
+        items = list(res.scalars().all())
+        if not items:
+            return 0
+
+        updated_count = 0
+        for item in items:
+            try:
+                assert item.latitude is not None and item.longitude is not None
+                geo_audit = await geoportal_service.audit_location(item.latitude, item.longitude, radius_meters=120)
+                if not geo_audit:
+                    continue
+
+                if geo_audit.get("main_parcel_id") and not item.parcel_id:
+                    item.parcel_id = geo_audit["main_parcel_id"]
+                    item.cadastral_area = geo_audit.get("cadastral_area")
+                    item.geoportal_url = geo_audit.get("geoportal_url")
+                    item.mpzp_zone = geo_audit.get("mpzp_zone")
+                    item.mpzp_status = geo_audit.get("mpzp_status")
+                    item.flood_risk_zone = geo_audit.get("flood_risk_zone")
+
+                for f in (
+                    "landslide_risk",
+                    "egib_building_status",
+                    "egib_soil_class",
+                    "noise_level_db",
+                    "noise_zone",
+                    "nature_protected_zone",
+                    "monument_zone",
+                    "cemetery_buffer_zone",
+                    "broadband_status",
+                    "broadband_details",
+                    "parcel_front_width_m",
+                    "parcel_length_m",
+                    "parcel_aspect_ratio",
+                    "parcel_shape_type",
+                    "terrain_slope_pct",
+                    "terrain_aspect",
+                    "walkability_pka_dist_m",
+                    "walkability_pka_name",
+                    "power_lines_risk",
+                ):
+                    if (v := geo_audit.get(f)) is not None:
+                        setattr(item, f, v)
+
+                item_pros = list(item.pros or [])
+                item_cons = list(item.cons or [])
+                score_mod = 0.0
+
+                if item.broadband_status == "ŚWIATŁOWÓD_AKTYWNY" and not any(
+                    "światłowód" in p.lower() for p in item_pros
+                ):
+                    item_pros.append("🌐 Światłowód aktywny FTTH (potwierdzony w SIDUSIS internet.gov.pl)")
+                    score_mod += 5.0
+                elif item.broadband_status in ("BRAK", "BRAK_ZASIĘGU") and not any(
+                    "brak stacjonarnego internetu" in c.lower() for c in item_cons
+                ):
+                    item_cons.append(
+                        "⚠️ Brak stacjonarnego internetu szerokopasmowego (SIDUSIS): Konieczność łączności LTE/5G lub Starlink"
+                    )
+                    score_mod -= 5.0
+
+                if item.parcel_front_width_m is not None:
+                    if item.parcel_front_width_m < 16.0 and not any("wąski front" in c.lower() for c in item_cons):
+                        item_cons.append(
+                            f"📐 Wąski front działki ({item.parcel_front_width_m:.1f} m < 16 m): Restrykcje odległościowe Prawa Budowlanego"
+                        )
+                        score_mod -= 15.0
+                    elif (
+                        item.parcel_shape_type == "REGULARNY"
+                        and item.parcel_front_width_m >= 18.0
+                        and not any("foremna działka" in p.lower() for p in item_pros)
+                    ):
+                        item_pros.append(f"📐 Foremna działka: szerokość frontu {item.parcel_front_width_m:.0f} m")
+
+                if item.terrain_slope_pct is not None:
+                    if item.terrain_slope_pct > 8.0 and not any("strome nachylenie" in c.lower() for c in item_cons):
+                        item_cons.append(
+                            f"⛰️ Strome nachylenie terenu (spadek {item.terrain_slope_pct:.1f}%): Ryzyko murów oporowych i spływu wód"
+                        )
+                        score_mod -= 15.0
+                    elif (
+                        item.terrain_aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
+                        and item.terrain_slope_pct >= 2.0
+                        and not any("południowa ekspozycja" in p.lower() for p in item_pros)
+                    ):
+                        item_pros.append(
+                            f"☀️ Południowa ekspozycja stoku (spadek {item.terrain_slope_pct:.1f}%) — doskonałe nasłonecznienie pod fotowoltaikę"
+                        )
+
+                if (
+                    item.power_lines_risk
+                    and any(k in item.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN"))
+                    and not any("wysokiego napięcia" in c.lower() for c in item_cons)
+                ):
+                    item_cons.append(f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({item.power_lines_risk})")
+                    score_mod -= 20.0
+
+                if (
+                    item.walkability_pka_dist_m is not None
+                    and item.walkability_pka_dist_m <= 1500
+                    and not any("stacja kolejowa pka" in p.lower() for p in item_pros)
+                ):
+                    item_pros.append(
+                        f"🚆 Stacja kolejowa PKA ({item.walkability_pka_name or 'PKA'}: {item.walkability_pka_dist_m} m)"
+                    )
+                    score_mod += 5.0
+
+                item.pros = item_pros
+                item.cons = item_cons
+                if score_mod != 0.0 and item.qualification_score is not None:
+                    item.qualification_score = max(0.0, min(150.0, item.qualification_score + score_mod))
+
+                item.updated_at = datetime.now(UTC)
+                updated_count += 1
+            except Exception as e:
+                logger.debug(f"[Pipeline] Backfill spatial audit error for #{item.id}: {e}")
+
+        if updated_count > 0:
+            await session.commit()
+            logger.info(f"[Pipeline] Backfilled spatial due diligence for {updated_count} existing listings.")
+        return updated_count
