@@ -26,33 +26,6 @@ class Settings(BaseSettings):
     MAX_AREA_HOME: float = 145.0
     MIN_AREA_PLOT: float = 250.0  # If < 250 and middle segment -> reject; if None -> analyze desc
 
-    # Stage I: Blacklist keywords (case-insensitive substring check)
-    BLACKLIST_KEYWORDS: list[str] = Field(
-        default_factory=lambda: [
-            "matysówka",
-            "matysowka",
-            "matysowska",
-            "tyczyn",
-            "chmielnik",
-            "biała",
-            "biala",
-            "zwięczyca",
-            "zwieczyca",
-            "kielanówka",
-            "kielanowka",
-            "górna słocina",
-            "gorna slocina",
-            "św. rocha",
-            "sw. rocha",
-            "sw rocha",
-            "św rocha",
-            "skarpie",
-            "na skarpie",
-            "teren osuwiskowy",
-            "osuwisko",
-        ]
-    )
-
     # Stage I: Whitelist configurations
     # Whitelist is prioritized. Offers matching whitelist receive high priority / bonus tag.
     WHITELIST_AREAS: list[dict] = Field(

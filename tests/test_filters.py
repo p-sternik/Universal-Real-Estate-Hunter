@@ -104,21 +104,20 @@ def test_stage1_area_home_filter():
 
 
 def test_stage1_blacklist():
-    f = Stage1Filter()
-
     blacklist_terms = [
-        "Matysówka",
-        "Matysowska",
-        "Tyczyn",
-        "Chmielnik",
-        "Biała",
-        "Zwięczyca",
-        "Kielanówka",
-        "Górna Słocina",
-        "św. Rocha",
+        "matysówka",
+        "matysowska",
+        "tyczyn",
+        "chmielnik",
+        "biała",
+        "zwięczyca",
+        "kielanówka",
+        "górna słocina",
+        "św. rocha",
         "na skarpie",
         "teren osuwiskowy",
     ]
+    f = Stage1Filter(blacklist=blacklist_terms)
 
     for term in blacklist_terms:
         listing = create_sample_listing(location_raw=f"Rzeszów okolice, {term}")
@@ -140,12 +139,13 @@ def test_stage1_whitelist():
     assert passed is True
     assert matched == "Słocina Dolna"
 
-    # Górna Słocina -> Rejected by blacklist even if Słocina
+    # Górna Słocina -> Rejected by blacklist even if Słocina (explicit terms)
+    f_bl = Stage1Filter(blacklist=["górna słocina", "św. rocha"])
     listing_gorna = create_sample_listing(
         location_raw="Rzeszów, Górna Słocina",
         street="św. Rocha",
     )
-    passed, reasons, _ = f.evaluate(listing_gorna)
+    passed, reasons, _ = f_bl.evaluate(listing_gorna)
     assert passed is False
 
 
@@ -552,7 +552,7 @@ async def test_qualification_engine_year_built_rejects_old_house():
 
 
 def test_stage1_blacklist_negation_and_transit():
-    f1 = Stage1Filter()
+    f1 = Stage1Filter(blacklist=["osuwisko", "skarpie", "na skarpie", "tyczyn"])
 
     # Negated hazard words: should NOT trigger blacklist
     listing_negated = create_sample_listing(
@@ -653,7 +653,6 @@ async def test_qualification_engine_ai_due_diligence_fields_from_llm():
         "contact_phone": "+48 600 123 456",
         "contact_person": "Jan Kowalski",
     }
-
     listing = create_sample_listing(
         raw_description="Segment skrajny z garażem. Dojazd asfaltowy. Opiekun oferty: Jan Kowalski.",
     )
@@ -667,6 +666,42 @@ async def test_qualification_engine_ai_due_diligence_fields_from_llm():
     ]
     assert res.contact_phone == "+48 600 123 456"
     assert res.contact_person == "Jan Kowalski"
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_llm_discrepancies_and_sewerage_brak():
+    engine = QualificationEngine(llm_enabled=False)
+    engine.llm = AsyncMock()
+    engine.llm.analyze_description.return_value = {
+        "sewerage": "brak",
+        "discrepancies": ["Portal podaje ogrzewanie gazowe, ale opis wymienia piec na pellet."],
+    }
+
+    listing = create_sample_listing(
+        raw_description="Segment skrajny z garażem. Dojazd asfaltowy.",
+    )
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+
+    assert any("Brak przyłącza kanalizacyjnego" in c for c in res.cons)
+    assert any("Rozbieżność portal vs opis" in c for c in res.cons)
+
+
+def test_llm_slice_description_head_and_tail():
+    from src.filters.llm_analyzer import LLMAnalyzer
+
+    desc = "A" * 2000 + "MIDDLE-CONTENT-THAT-SHOULD-BE-DROPPED" + "B" * 700
+    sliced = LLMAnalyzer._slice_description(desc)
+    assert "A" * 2000 in sliced
+    assert "B" * 700 in sliced
+    assert "MIDDLE-CONTENT" not in sliced
+    assert "[...]" in sliced
+
+
+def test_llm_slice_description_short_unchanged():
+    from src.filters.llm_analyzer import LLMAnalyzer
+
+    desc = "Krótki opis ogłoszenia."
+    assert LLMAnalyzer._slice_description(desc) == desc
 
 
 @pytest.mark.asyncio

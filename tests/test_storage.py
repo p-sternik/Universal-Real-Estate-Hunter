@@ -250,6 +250,42 @@ async def test_repository_gallery_images(async_session: AsyncSession):
 
 
 @pytest.mark.asyncio
+async def test_repository_delete_all_listings(async_session: AsyncSession):
+    repo = ListingRepository(async_session)
+
+    listings = [
+        ListingModel(
+            portal="Otodom",
+            portal_id=f"reset-{i}",
+            url=f"https://otodom.pl/x/reset-{i}",
+            property_fingerprint=f"fp-{i}",
+            title=f"Dom {i}",
+            price=1_000_000 - i,
+            price_per_m2=8_000,
+            area_home=100,
+        )
+        for i in range(3)
+    ]
+    async_session.add_all(listings)
+    await async_session.flush()
+
+    deleted = await repo.delete_all_listings()
+    assert deleted == 3
+
+    from sqlalchemy import func, select
+
+    res = await async_session.execute(select(func.count(ListingModel.id)))
+    assert res.scalar() == 0
+
+
+@pytest.mark.asyncio
+async def test_repository_delete_all_listings_empty(async_session: AsyncSession):
+    repo = ListingRepository(async_session)
+    deleted = await repo.delete_all_listings()
+    assert deleted == 0
+
+
+@pytest.mark.asyncio
 async def test_repository_ai_due_diligence_fields(async_session: AsyncSession):
     repo = ListingRepository(async_session)
     fp = generate_property_fingerprint(price=950_000, area_home=115.0, area_plot=300.0)

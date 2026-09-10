@@ -129,7 +129,6 @@ class QualificationEngine:
                 finish_map = {
                     "deweloperski": FinishCondition.DEWELOPERSKI,
                     "pod_klucz": FinishCondition.DO_ZAMIESZKANIA,
-                    "do_zamieszkania": FinishCondition.DO_ZAMIESZKANIA,
                     "do_wykonczenia": FinishCondition.DO_WYKONCZENIA,
                     "surowy_zamkniety": FinishCondition.SUROWY_ZAMKNIETY,
                     "surowy_otwarty": FinishCondition.SUROWY_OTWARTY,
@@ -146,11 +145,15 @@ class QualificationEngine:
                 }
                 if sewer_raw in sewer_map:
                     listing.sewerage = sewer_map[sewer_raw]
+                elif sewer_raw == "brak":
+                    cons.append("⚠️ [LLM] Brak przyłącza kanalizacyjnego na działce / w budynku")
 
                 for hc in llm_insights.get("hidden_costs", []):
                     cons.append(f"⚠️ [Ukryty koszt] {hc}")
                 for lr in llm_insights.get("legal_risks", []):
                     cons.append(f"⚖️ [Ryzyko prawne] {lr}")
+                for d in llm_insights.get("discrepancies", []):
+                    cons.append(f"🔍 [LLM] Rozbieżność portal vs opis: {d}")
                 for p in llm_insights.get("pros", []):
                     if p not in pros:
                         pros.append(f"[LLM] {p}")

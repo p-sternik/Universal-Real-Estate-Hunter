@@ -69,6 +69,7 @@ class LiveDashboardServer:
         self.app.router.add_post("/api/scrapers", self.handle_update_scrapers)
         self.app.router.add_get("/api/scheduler", self.handle_get_scheduler)
         self.app.router.add_post("/api/scheduler", self.handle_update_scheduler)
+        self.app.router.add_post("/api/data/reset", self.handle_reset_data)
 
     async def handle_get_config(self, request: web.Request) -> web.Response:
         cfg = config_manager.get_config()
@@ -154,6 +155,36 @@ class LiveDashboardServer:
         saved = config_manager.update_scheduler(data)
         logger.info(f"[LiveDashboard] Zaktualizowano konfigurację harmonogramu: {saved.model_dump()}")
         return web.json_response(saved.model_dump())
+
+    async def handle_reset_data(self, request: web.Request) -> web.Response:
+        data: dict[str, Any] = {}
+        if request.can_read_body:
+            try:
+                data = await request.json()
+            except Exception:
+                data = {}
+        if data.get("confirm") is not True:
+            return web.json_response(
+                {"error": 'Wymagane potwierdzenie: {"confirm": true}'},
+                status=400,
+            )
+
+        profile_scope = str(data.get("profile") or "").strip()
+        async with get_session() as session:
+            repo = ListingRepository(session)
+            if profile_scope and profile_scope.upper() != "ALL":
+                target_name = None
+                for p in config_manager.get_config().profiles:
+                    if p.id == profile_scope or p.name.lower() == profile_scope.lower():
+                        target_name = p.name
+                        break
+                deleted = await repo.delete_by_profile(profile_id=profile_scope, profile_name=target_name)
+            else:
+                deleted = await repo.delete_all_listings()
+
+        scope_label = profile_scope or "ALL"
+        logger.warning(f"[LiveDashboard] Reset danych: usunięto {deleted} ofert (zakres: {scope_label}).")
+        return web.json_response({"success": True, "deleted_listings": deleted, "scope": scope_label})
 
     async def handle_scrape_status(self, request: web.Request) -> web.Response:
         from src.services.progress import global_tracker

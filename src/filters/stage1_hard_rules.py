@@ -58,11 +58,7 @@ class Stage1Filter:
         self.max_rooms = max_rooms if max_rooms is not None else getattr(cfg, "max_rooms", None)
         self.min_floor = min_floor if min_floor is not None else getattr(cfg, "min_floor", None)
         self.max_floor = max_floor if max_floor is not None else getattr(cfg, "max_floor", None)
-        self.blacklist = (
-            blacklist
-            if blacklist is not None
-            else (getattr(cfg, "blacklist_keywords", None) or settings.BLACKLIST_KEYWORDS)
-        )
+        self.blacklist = blacklist if blacklist is not None else (getattr(cfg, "blacklist_keywords", None) or [])
         self.whitelist_areas = (
             whitelist_areas
             if whitelist_areas is not None

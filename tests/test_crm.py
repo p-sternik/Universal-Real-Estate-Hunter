@@ -325,3 +325,47 @@ async def test_live_dashboard_profile_filter_and_deletion(tmp_path):
         check_resp = await client.get(f"/api/listings?profile={test_prof_id}")
         check_data = await check_resp.json()
         assert len(check_data) == 0
+
+
+@pytest.mark.asyncio
+async def test_live_dashboard_reset_data_endpoint():
+    from src.storage.database import get_session, init_db
+
+    await init_db()
+
+    test_prof_id = "test_prof_reset"
+    async with get_session() as session:
+        repo = ListingRepository(session)
+        listing = ListingSchema(
+            id="reset-api-1",
+            portal="Otodom",
+            title="Dom do resetu API",
+            url="https://otodom.pl/oferta/reset-api-1",
+            price=650_000,
+            price_per_m2=6_500,
+            area_home=100.0,
+            location_raw="Rzeszów",
+            profile_id=test_prof_id,
+            profile_name=test_prof_id,
+        )
+        filt = FilterResult(
+            is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True
+        )
+        await repo.save_or_update(listing, filt)
+
+    server = LiveDashboardServer(port=8085)
+    async with TestClient(TestServer(server.app)) as client:
+        # Without confirmation -> 400
+        guard_resp = await client.post("/api/data/reset", json={"confirm": False})
+        assert guard_resp.status == 400
+
+        # Profile-scoped reset -> success, only test listings removed
+        reset_resp = await client.post("/api/data/reset", json={"confirm": True, "profile": test_prof_id})
+        assert reset_resp.status == 200
+        reset_data = await reset_resp.json()
+        assert reset_data["success"] is True
+        assert reset_data["deleted_listings"] >= 1
+
+        async with get_session() as session:
+            repo = ListingRepository(session)
+            assert await repo.get_by_url("https://otodom.pl/oferta/reset-api-1") is None

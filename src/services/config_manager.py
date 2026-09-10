@@ -495,7 +495,7 @@ class ConfigManager:
             allow_visualisations=True,
             building_types=["szeregowiec", "bliźniak", "wolnostojący", "inny"],
             whitelist_areas=settings.WHITELIST_AREAS,
-            blacklist_keywords=settings.BLACKLIST_KEYWORDS,
+            blacklist_keywords=[],
         )
 
     def _get_default_config(self) -> SearchConfig:

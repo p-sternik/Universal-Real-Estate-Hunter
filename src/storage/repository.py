@@ -289,6 +289,19 @@ class ListingRepository:
             await self.session.flush()
         return listing
 
+    async def delete_all_listings(self) -> int:
+        """Delete all listings and their price histories (full database reset)."""
+        stmt = select(ListingModel.id)
+        res = await self.session.execute(stmt)
+        listing_ids = list(res.scalars().all())
+        count = len(listing_ids)
+        if listing_ids:
+            await self.session.execute(delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids)))
+            await self.session.execute(delete(ListingModel).where(ListingModel.id.in_(listing_ids)))
+        await self.session.commit()
+        logger.warning(f"[ListingRepository] Full reset: deleted {count} listings.")
+        return count
+
     async def delete_by_profile(self, profile_id: str, profile_name: str | None = None) -> int:
         """Delete all listings and their price histories associated with a given profile ID or profile name."""
         conditions = [ListingModel.profile_id == profile_id]

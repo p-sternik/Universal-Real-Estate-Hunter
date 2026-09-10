@@ -2442,6 +2442,7 @@
             </div>
 
             <div class="config-actions">
+                <button class="btn" style="background:#c0392b;color:#fff;border:1px solid #96281b;margin-right:auto;" onclick="resetDatabaseData()">🗑️ Reset bazy danych</button>
                 <button class="btn" onclick="closeConfigModal(null)">Anuluj</button>
                 <button class="btn" onclick="saveConfiguration(false)">💾 Zapisz konfigurację</button>
                 <button class="btn btn-primary" onclick="saveConfiguration(true)">🚀 Zapisz i uruchom scraping</button>
@@ -3137,6 +3138,37 @@
             } catch (err) {
                 console.error("Failed to save config:", err);
                 showToast("Błąd zapisu konfiguracji.");
+            }
+        }
+
+        async function resetDatabaseData() {
+            const scope = currentProfileId || null;
+            const scopeLabel = scope ? `profilu "${scope}"` : 'CAŁEJ bazy danych';
+            const typed = prompt(
+                `UWAGA: Usuniesz WSZYSTKIE oferty z ${scopeLabel}\n(wraz z historią cen, notatkami i statusami CRM).\n\nAby potwierdzić, wpisz: RESET`,
+                ''
+            );
+            if (typed !== 'RESET') {
+                showToast('Anulowano — nie wpisano RESET.');
+                return;
+            }
+            try {
+                const res = await fetch('/api/data/reset', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ confirm: true, profile: scope })
+                });
+                if (res.ok) {
+                    const out = await res.json();
+                    showToast(`🗑️ Usunięto ${out.deleted_listings} ofert (zakres: ${out.scope}).`);
+                    await fetchListings();
+                } else {
+                    const err = await res.json().catch(() => ({}));
+                    showToast(err.error || 'Błąd resetu bazy danych.');
+                }
+            } catch (e) {
+                console.error('Reset failed:', e);
+                showToast('Błąd resetu bazy danych.');
             }
         }
 
