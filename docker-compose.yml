@@ -15,7 +15,7 @@ services:
         required: false
     volumes:
       - estate_data:/app/data
-    command: ["python", "main.py", "dashboard", "--port", "8080", "--no-open"]
+    command: ["python", "main.py", "dashboard", "--host", "0.0.0.0", "--port", "8080", "--no-open"]
 
   # Automated Background Scraper & Monitoring Daemon
   scraper:

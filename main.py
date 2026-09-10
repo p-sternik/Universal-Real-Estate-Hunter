@@ -380,10 +380,12 @@ def main():
 
     # Live Preview Web Server (dynamic, direct DB connection)
     dash_parser = subparsers.add_parser("dashboard", help="Start real-time Live Preview Web Server")
+    dash_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
     dash_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     dash_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
 
     server_parser = subparsers.add_parser("server", help="Alias for dashboard")
+    server_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
     server_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     server_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
 
@@ -422,7 +424,8 @@ def main():
         asyncio.run(run_once(profile=getattr(args, "profile", None)))
     elif cmd in ("dashboard", "server"):
         from src.services.live_dashboard import LiveDashboardServer
-        srv = LiveDashboardServer(port=args.port)
+        host = getattr(args, "host", "0.0.0.0")
+        srv = LiveDashboardServer(host=host, port=args.port)
         try:
             asyncio.run(srv.run(auto_open=not args.no_open))
         except (KeyboardInterrupt, SystemExit):

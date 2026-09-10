@@ -20,7 +20,7 @@ else:
 
 
 class LiveDashboardServer:
-    def __init__(self, host: str = "127.0.0.1", port: int = 8080):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
         self.host = host
         self.port = port
         self.app = web.Application()
@@ -227,17 +227,18 @@ class LiveDashboardServer:
                 return
             raise
 
-        local_url = f"http://{self.host}:{self.port}"
-        logger.success(f"🚀 Live Preview Dashboard aktywny pod adresem: {local_url}")
+        display_host = "127.0.0.1" if self.host in ("0.0.0.0", "") else self.host
+        display_url = f"http://{display_host}:{self.port}"
+        logger.success(f"🚀 Live Preview Dashboard aktywny pod adresem: {display_url} (nasłuch na {self.host}:{self.port})")
         print(f"\n========================================================")
         print(f"  🏡 LIVE UNIVERSAL DASHBOARD & CRM DZIAŁA:")
-        print(f"     {local_url}")
+        print(f"     {display_url}")
         print(f"  (Naciśnij Ctrl+C aby zatrzymać serwer)")
         print(f"========================================================\n")
 
         if auto_open:
             try:
-                webbrowser.open(local_url)
+                webbrowser.open(display_url)
             except Exception as e:
                 logger.debug(f"Could not open browser automatically: {e}")
 
