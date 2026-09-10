@@ -8,13 +8,13 @@ services:
       - "8080:8080"
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////app/data/listings.db
+      - SEARCH_CONFIG_PATH=/app/data/search_config.json
       - TZ=Europe/Warsaw
     env_file:
       - path: .env
         required: false
     volumes:
-      - ./data:/app/data
-      - ./search_config.json:/app/search_config.json
+      - estate_data:/app/data
     command: ["python", "main.py", "dashboard", "--port", "8080", "--no-open"]
 
   # Automated Background Scraper & Monitoring Daemon
@@ -26,11 +26,14 @@ services:
       - dashboard
     environment:
       - DATABASE_URL=sqlite+aiosqlite:////app/data/listings.db
+      - SEARCH_CONFIG_PATH=/app/data/search_config.json
       - TZ=Europe/Warsaw
     env_file:
       - path: .env
         required: false
     volumes:
-      - ./data:/app/data
-      - ./search_config.json:/app/search_config.json
+      - estate_data:/app/data
     command: ["python", "main.py", "run"]
+
+volumes:
+  estate_data:

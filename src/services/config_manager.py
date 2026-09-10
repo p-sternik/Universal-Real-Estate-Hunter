@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from config import settings
 
-CONFIG_FILE_PATH = Path("search_config.json")
+CONFIG_FILE_PATH = Path(os.getenv("SEARCH_CONFIG_PATH", "search_config.json"))
 
 POLISH_CHAR_MAP = {
     "ą": "a", "ć": "c", "ę": "e", "ł": "l", "ń": "n",
@@ -415,6 +415,19 @@ class ConfigManager:
             except Exception as e:
                 logger.warning(f"[ConfigManager] Błąd odczytu {self.config_path}, przywracam domyślne: {e}")
 
+        # Check fallback root config (e.g. inside Docker image when volume config_path doesn't exist yet)
+        fallback = Path("search_config.json")
+        if fallback.exists() and fallback.resolve() != self.config_path.resolve():
+            try:
+                with open(fallback, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self._config = self._migrate_legacy_dict(data)
+                logger.info(f"[ConfigManager] Zainicjalizowano konfigurację z szablonu {fallback} do {self.config_path}")
+                self.save_config()
+                return self._config
+            except Exception as e:
+                logger.warning(f"[ConfigManager] Błąd odczytu fallback {fallback}: {e}")
+
         self._config = self._get_default_config()
         self.save_config()
         return self._config
@@ -423,6 +436,7 @@ class ConfigManager:
         if self._config is None:
             self._config = self._get_default_config()
         try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self._config.model_dump(), f, ensure_ascii=False, indent=2)
             logger.info(f"[ConfigManager] Zapisano konfigurację do {self.config_path}")
