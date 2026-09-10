@@ -1,33 +1,33 @@
-from enum import Enum
+from enum import StrEnum
 
 
-class PropertyCategory(str, Enum):
+class PropertyCategory(StrEnum):
     DOM = "dom"
     MIESZKANIE = "mieszkanie"
     DZIALKA = "dzialka"
 
 
-class OwnerType(str, Enum):
+class OwnerType(StrEnum):
     ALL = "all"
     PRIVATE = "private"
     AGENCY = "agency"
     DEVELOPER = "developer"
 
 
-class BuildingType(str, Enum):
+class BuildingType(StrEnum):
     SZEREGOWIEC = "szeregowiec"
     BLIZNIAK = "bliźniak"
     WOLNOSTOJACY = "wolnostojący"
     INNY = "inny"
 
 
-class SegmentSubtype(str, Enum):
+class SegmentSubtype(StrEnum):
     SKRAJNY = "skrajny/narożny"
     SRODKOWY = "środkowy"
     NIEOKRESLONY = "nieokreślony"
 
 
-class RoadType(str, Enum):
+class RoadType(StrEnum):
     ASFALT = "asfalt"
     KOSTKA = "kostka"
     UTWARDZONA = "utwardzona"
@@ -35,13 +35,13 @@ class RoadType(str, Enum):
     NIEZNANA = "nieznana"
 
 
-class MarketType(str, Enum):
+class MarketType(StrEnum):
     PIERWOTNY = "pierwotny"
     WTORNY = "wtórny"
     NIEOKRESLONY = "nieokreślony"
 
 
-class FinishCondition(str, Enum):
+class FinishCondition(StrEnum):
     DEWELOPERSKI = "deweloperski"
     DO_WYKONCZENIA = "do wykończenia"
     SUROWY_ZAMKNIETY = "surowy zamknięty"
@@ -51,14 +51,14 @@ class FinishCondition(str, Enum):
     NIEOKRESLONY = "nieokreślony"
 
 
-class SewerageType(str, Enum):
+class SewerageType(StrEnum):
     MIEJSKA = "miejska"
     SZAMBO = "szambo"
     OCZYSZCZALNIA = "oczyszczalnia"
     NIEZNANA = "nieznana"
 
 
-class HeatingType(str, Enum):
+class HeatingType(StrEnum):
     POMPA_CIEPLA = "pompa ciepła"
     GAZOWE = "gazowe"
     PELLET_WEGIEL = "piec/paliwo stałe"
@@ -67,7 +67,7 @@ class HeatingType(str, Enum):
     NIEZNANE = "nieznane"
 
 
-class QualificationStatus(str, Enum):
+class QualificationStatus(StrEnum):
     QUALIFIED_WHITELIST = "QUALIFIED_WHITELIST"
     QUALIFIED = "QUALIFIED"
     NEEDS_REVIEW = "NEEDS_REVIEW"
@@ -75,7 +75,7 @@ class QualificationStatus(str, Enum):
     REJECTED_STAGE2 = "REJECTED_STAGE2"
 
 
-class UserCRMStatus(str, Enum):
+class UserCRMStatus(StrEnum):
     NEW = "NEW"
     FAVORITE = "FAVORITE"
     TO_VISIT = "TO_VISIT"
