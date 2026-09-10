@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.6.1 (2026-09-10)
+
+### Bug Fixes
+
+- Resolve sqlite database locked error and add rich progress logging with live filter
+  ([`50e9df2`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/50e9df2c14c001a8d61eab195a94565c98db1253))
+
+
 ## v1.6.0 (2026-09-10)
 
 ### Features
