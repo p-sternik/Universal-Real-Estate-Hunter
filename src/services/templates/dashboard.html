@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Universal Real Estate Hunter — Market Intelligence & CRM</title>
-    
+
     <!-- Modern Enterprise Typography: Inter & JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-    
+
     <!-- Leaflet Map CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
 
@@ -1394,6 +1394,184 @@
             color: #fff;
         }
 
+        /* AI Due Diligence Modal */
+        #aiModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.78);
+            backdrop-filter: blur(6px);
+            z-index: 9998;
+            justify-content: center;
+            align-items: flex-start;
+            padding: 32px 16px;
+            overflow-y: auto;
+        }
+        .ai-card {
+            background: var(--surface-overlay);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 640px;
+            margin: auto;
+            padding: 20px 22px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        }
+        .ai-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .ai-header h2 {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .ai-header .ai-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .ai-section {
+            margin-bottom: 16px;
+        }
+        .ai-section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: var(--text-muted);
+            margin-bottom: 6px;
+        }
+        .ai-summary-text {
+            font-size: 13px;
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 10px 12px;
+            background: var(--surface-input);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+        }
+        .ai-questions-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+        .ai-questions-list li {
+            font-size: 12px;
+            color: var(--text-primary);
+            padding: 8px 10px;
+            background: var(--surface-input);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-sm);
+            margin-bottom: 4px;
+            line-height: 1.5;
+        }
+        .ai-questions-list li::before {
+            content: "❓ ";
+        }
+        .ai-contact-card {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            background: var(--surface-input);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+        }
+        .ai-contact-card a {
+            color: var(--accent-blue);
+            font-weight: 600;
+            font-size: 13px;
+        }
+        .ai-contact-card a:hover {
+            text-decoration: underline;
+        }
+        .ai-contact-name {
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+        .ai-budget-table {
+            width: 100%;
+            font-size: 12px;
+            border-collapse: collapse;
+        }
+        .ai-budget-table td {
+            padding: 5px 8px;
+            border-bottom: 1px solid var(--border-subtle);
+            color: var(--text-primary);
+        }
+        .ai-budget-table td:last-child {
+            text-align: right;
+            font-family: var(--font-mono);
+            font-weight: 500;
+        }
+        .ai-budget-table tr.total td {
+            font-weight: 700;
+            border-top: 2px solid var(--border);
+            color: var(--accent-blue);
+            font-size: 13px;
+        }
+        .ai-price-drop-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 600;
+            padding: 2px 7px;
+            border-radius: var(--radius-sm);
+            background: rgba(16, 185, 129, 0.12);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.25);
+        }
+        .ai-price-timeline {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+        .ai-price-timeline .ph-entry {
+            display: flex;
+            justify-content: space-between;
+            font-size: 11px;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            background: var(--surface-input);
+            border-radius: var(--radius-xs);
+        }
+        .ai-price-timeline .ph-entry .ph-price {
+            font-family: var(--font-mono);
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .ai-copy-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .ai-copy-btn:hover {
+            background: var(--surface-card-hover);
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+        .ai-no-data {
+            font-size: 12px;
+            color: var(--text-muted);
+            font-style: italic;
+            padding: 8px 0;
+        }
+
         /* Config Modal */
         #configModal {
             display: none;
@@ -1709,7 +1887,7 @@
                         <circle cx="11" cy="11" r="8"></circle>
                         <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
                     </svg>
-                    <input type="text" id="searchInput" placeholder="Szukaj po ulicy, dzielnicy, cechach (np. Słocina, Paderewskiego, pompa ciepła)..." oninput="applyFilters()">
+                    <input type="text" id="searchInput" placeholder="Szukaj po ulicy, dzielnicy, cechach (np. Słocina, Paderewskiego, pompa ciepła)..." oninput="debouncedApplyFilters()">
                     <kbd class="kbd-badge">Ctrl+K</kbd>
                 </div>
 
@@ -1752,19 +1930,19 @@
                 </div>
                 <div class="field-group">
                     <label for="filterMaxPrice">Maks. cena (PLN)</label>
-                    <input type="number" id="filterMaxPrice" placeholder="Bez limitu" oninput="applyFilters()">
+                    <input type="number" id="filterMaxPrice" placeholder="Bez limitu" oninput="debouncedApplyFilters()">
                 </div>
                 <div class="field-group">
                     <label>Metraż (m²)</label>
                     <div class="field-range">
-                        <input type="number" id="filterMinArea" placeholder="Od" oninput="applyFilters()">
+                        <input type="number" id="filterMinArea" placeholder="Od" oninput="debouncedApplyFilters()">
                         <span>–</span>
-                        <input type="number" id="filterMaxArea" placeholder="Do" oninput="applyFilters()">
+                        <input type="number" id="filterMaxArea" placeholder="Do" oninput="debouncedApplyFilters()">
                     </div>
                 </div>
                 <div class="field-group">
                     <label for="filterMinPlot">Min. działka (m²)</label>
-                    <input type="number" id="filterMinPlot" placeholder="np. 300" oninput="applyFilters()">
+                    <input type="number" id="filterMinPlot" placeholder="np. 300" oninput="debouncedApplyFilters()">
                 </div>
                 <div class="field-group">
                     <label for="filterMarket">Rynek</label>
@@ -1873,6 +2051,7 @@
                 <button type="button" class="config-tab-btn active" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">🎯 Profile wyszukiwania</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">🌐 Scrapery & Portale</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">⏱️ Harmonogram</button>
+                <button type="button" class="config-tab-btn" id="tabBtnAi" onclick="switchConfigTab('ai')">🤖 AI Analiza</button>
             </div>
 
             <!-- TAB 1: PROFILES -->
@@ -2237,10 +2416,90 @@
                 </div>
             </div>
 
+            <!-- TAB 4: AI ANALYSIS -->
+            <div id="configTabAi" style="display:none;">
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+                    Ustawienia analizy AI ogłoszeń (LLM) — podsumowania, pytania do agenta, dane kontaktowe.
+                </div>
+
+                <div style="margin:8px 0 12px 0;">
+                    <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-primary);">
+                        <input type="checkbox" id="cfgLlmAnalysis" style="width:auto;">
+                        <span><strong>Włącz analizę AI (LLM) ogłoszeń</strong></span>
+                    </label>
+                    <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
+                        Generuje TL;DR, pytania do agenta i dane kontaktowe dla każdego ogłoszenia.<br>
+                        Wymaga klucza API w <code>.env</code>: <code>OPENROUTER_API_KEY</code>, <code>OPENAI_API_KEY</code>
+                        lub lokalnego Ollama.
+                    </div>
+                </div>
+
+                <div style="font-size:11px;color:var(--text-muted);margin-top:14px;padding:10px 12px;background:var(--surface-input);border:1px solid var(--border-subtle);border-radius:var(--radius-md);">
+                    💡 Analiza uzupełnia się automatycznie przy kolejnym cyklu scrapingu — również dla ofert
+                    zapisanych wcześniej (jednorazowy backfill). Oferty z niezmienionym opisem i istniejącą
+                    analizą nie są ponownie wysyłane do LLM (oszczędność kosztów).
+                </div>
+            </div>
+
             <div class="config-actions">
                 <button class="btn" onclick="closeConfigModal(null)">Anuluj</button>
                 <button class="btn" onclick="saveConfiguration(false)">💾 Zapisz konfigurację</button>
                 <button class="btn btn-primary" onclick="saveConfiguration(true)">🚀 Zapisz i uruchom scraping</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- AI Due Diligence Modal -->
+    <div id="aiModal" onclick="closeAiModal(event)">
+        <div class="ai-card" onclick="event.stopPropagation()">
+            <div class="ai-header">
+                <div>
+                    <h2>🤖 AI Analiza & Due Diligence</h2>
+                    <div class="ai-subtitle" id="aiModalTitle"></div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="closeAiModal(null)">✕</button>
+            </div>
+
+            <!-- TL;DR Summary -->
+            <div class="ai-section">
+                <div class="ai-section-title">📋 Podsumowanie (TL;DR)</div>
+                <div id="aiSummaryContent" class="ai-summary-text"></div>
+            </div>
+
+            <!-- Contact Card -->
+            <div class="ai-section" id="aiContactSection" style="display:none;">
+                <div class="ai-section-title">📞 Kontakt</div>
+                <div class="ai-contact-card">
+                    <div>
+                        <span class="ai-contact-name" id="aiContactPerson"></span>
+                        <a id="aiContactPhone" href=""></a>
+                    </div>
+                    <button class="ai-copy-btn" onclick="copyAiSms()" title="Kopiuj gotową wiadomość SMS">📋 Kopiuj SMS</button>
+                </div>
+            </div>
+
+            <!-- Questions for Agent -->
+            <div class="ai-section">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+                    <div class="ai-section-title" style="margin-bottom:0;">❓ Pytania do agenta / sprzedającego</div>
+                    <button class="ai-copy-btn" onclick="copyAiQuestions()">📋 Kopiuj pytania</button>
+                </div>
+                <ul id="aiQuestionsList" class="ai-questions-list"></ul>
+            </div>
+
+            <!-- All-in Budget Calculator -->
+            <div class="ai-section">
+                <div class="ai-section-title">💰 Szacunkowy koszt nabycia (All-in Budget)</div>
+                <table class="ai-budget-table" id="aiBudgetTable">
+                    <tbody id="aiBudgetBody"></tbody>
+                </table>
+            </div>
+
+            <!-- Price Drop History -->
+            <div class="ai-section" id="aiPriceDropSection" style="display:none;">
+                <div class="ai-section-title">📉 Historia zmian ceny</div>
+                <div id="aiPriceDropBadge"></div>
+                <div id="aiPriceTimeline" class="ai-price-timeline" style="margin-top:8px;"></div>
             </div>
         </div>
     </div>
@@ -2258,7 +2517,13 @@
         let map = null;
         let markersGroup = null;
         let markersMap = {};
+        let coordCounts = {};
         let activeConfig = null;
+        let fetchEtag = null;
+        let lastServerSigs = {};
+        let lastFetchAt = 0;
+        let searchDebounceTimer = null;
+        let gridRenderToken = 0;
 
         function showToast(msg) {
             const t = document.getElementById('toast');
@@ -2454,15 +2719,19 @@
             const btnP = document.getElementById('tabBtnProfiles');
             const btnS = document.getElementById('tabBtnScrapers');
             const btnSch = document.getElementById('tabBtnScheduler');
+            const btnAi = document.getElementById('tabBtnAi');
             const tabP = document.getElementById('configTabProfiles');
             const tabS = document.getElementById('configTabScrapers');
             const tabSch = document.getElementById('configTabScheduler');
+            const tabAi = document.getElementById('configTabAi');
             if (btnP) btnP.classList.toggle('active', tab === 'profiles');
             if (btnS) btnS.classList.toggle('active', tab === 'scrapers');
             if (btnSch) btnSch.classList.toggle('active', tab === 'scheduler');
+            if (btnAi) btnAi.classList.toggle('active', tab === 'ai');
             if (tabP) tabP.style.display = (tab === 'profiles') ? 'block' : 'none';
             if (tabS) tabS.style.display = (tab === 'scrapers') ? 'block' : 'none';
             if (tabSch) tabSch.style.display = (tab === 'scheduler') ? 'block' : 'none';
+            if (tabAi) tabAi.style.display = (tab === 'ai') ? 'block' : 'none';
         }
 
         function toggleNightModeInputs(enabled) {
@@ -2780,6 +3049,11 @@
                 document.getElementById('cfgNightIntervalMinutes').value = sched.night_interval_minutes || 60;
             }
 
+            // Populate AI analysis tab
+            if (document.getElementById('cfgLlmAnalysis')) {
+                document.getElementById('cfgLlmAnalysis').checked = !!activeConfig.llm_analysis_enabled;
+            }
+
             if (!currentProfileId && allProfiles.length > 0) {
                 currentProfileId = allProfiles[0].id;
             }
@@ -2835,7 +3109,8 @@
             const payload = {
                 profiles: allProfiles,
                 scrapers: scrapersPayload,
-                scheduler: schedulerPayload
+                scheduler: schedulerPayload,
+                llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false
             };
 
             try {
@@ -2866,13 +3141,46 @@
         }
 
         async function fetchListings() {
+            lastFetchAt = Date.now();
             try {
-                const res = await fetch('/api/listings');
-                allListings = await res.json();
+                const headers = {};
+                if (fetchEtag) headers['If-None-Match'] = fetchEtag;
+                const res = await fetch('/api/listings', { headers });
+                if (res.status === 304) return;
+
+                const newEtag = res.headers.get('ETag');
+                const data = await res.json();
+
+                const newSigs = {};
+                data.forEach(i => { newSigs[i.id] = JSON.stringify(i); });
+
+                const firstLoad = allListings.length === 0 && fetchEtag === null;
+                allListings = data;
+
+                const changed = new Set();
+                const removed = new Set();
+                if (!firstLoad) {
+                    for (const id of Object.keys(lastServerSigs)) {
+                        if (!(id in newSigs)) removed.add(+id);
+                        else if (lastServerSigs[id] !== newSigs[id]) changed.add(+id);
+                    }
+                    for (const id of Object.keys(newSigs)) {
+                        if (!(id in lastServerSigs)) changed.add(+id);
+                    }
+                }
+                lastServerSigs = newSigs;
+                fetchEtag = newEtag;
+
                 renderProfileTabs();
                 const baseListings = getListingsForActiveProfile();
                 updateStats(baseListings);
-                applyFilters();
+
+                if (firstLoad) {
+                    applyFilters();
+                    return;
+                }
+                if (changed.size === 0 && removed.size === 0) return;
+                applyFiltersIncremental(changed, removed);
             } catch (err) {
                 console.error("Failed to load listings:", err);
                 showToast("Błąd ładowania ofert z bazy danych.");
@@ -2945,7 +3253,7 @@
             setFilter('ALL');
         }
 
-        function applyFilters() {
+        function computeFilteredItems() {
             const query = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
             const sortMode = document.getElementById('sortSelect')?.value || 'score_desc';
 
@@ -2962,7 +3270,6 @@
             const heatingVal = document.getElementById('filterHeating')?.value || 'ALL';
 
             const baseListings = getListingsForActiveProfile();
-            updateStats(baseListings);
 
             let filtered = baseListings.filter(item => {
                 // Preset Status Filter via Integrated KPI Strip
@@ -3017,11 +3324,35 @@
                 filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
             }
 
-            const cntEl = document.getElementById('cntFiltered');
-            if (cntEl) cntEl.innerText = filtered.length;
+            return filtered;
+        }
 
+        function updateFilteredCount(count) {
+            const cntEl = document.getElementById('cntFiltered');
+            if (cntEl) cntEl.innerText = count;
+        }
+
+        function debouncedApplyFilters() {
+            clearTimeout(searchDebounceTimer);
+            searchDebounceTimer = setTimeout(applyFilters, 250);
+        }
+
+        function applyFilters() {
+            const baseListings = getListingsForActiveProfile();
+            updateStats(baseListings);
+            const filtered = computeFilteredItems();
+            updateFilteredCount(filtered.length);
             renderGrid(filtered);
             renderMapMarkers(filtered);
+        }
+
+        function applyFiltersIncremental(changedSet, removedSet) {
+            const baseListings = getListingsForActiveProfile();
+            updateStats(baseListings);
+            const filtered = computeFilteredItems();
+            updateFilteredCount(filtered.length);
+            renderGridIncremental(filtered, changedSet);
+            updateMapMarkers(filtered, changedSet, removedSet);
         }
 
         function resetLiveFilters() {
@@ -3041,99 +3372,120 @@
             applyFilters();
         }
 
+        function addMapMarker(item) {
+            let pinClass = "pin-blue";
+            const cat = item.category || 'dom';
+            let pinIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏠');
+
+            if (item.user_status === 'FAVORITE') {
+                pinClass = "pin-gold";
+                pinIcon = "★";
+            } else if (item.user_status === 'TO_VISIT') {
+                pinClass = "pin-purple";
+                pinIcon = "📅";
+            } else if (item.user_status === 'REJECTED' || item.qualification_status.startsWith('REJECTED')) {
+                pinClass = "pin-gray";
+                pinIcon = "✕";
+            } else if (item.qualification_status === 'QUALIFIED_WHITELIST') {
+                pinClass = "pin-green";
+                pinIcon = "★";
+            } else if (item.qualification_status === 'NEEDS_REVIEW') {
+                pinClass = "pin-orange";
+                pinIcon = "🔍";
+            }
+
+            if (!item.is_exact_coords) {
+                pinClass += " pin-approx";
+            }
+
+            // Small collision jitter for multi-unit complexes
+            const coordKey = `${item.latitude.toFixed(4)},${item.longitude.toFixed(4)}`;
+            coordCounts[coordKey] = (coordCounts[coordKey] || 0) + 1;
+            const offsetMultiplier = (coordCounts[coordKey] - 1);
+            const jitterLat = item.latitude + (offsetMultiplier * 0.00015);
+            const jitterLon = item.longitude + (offsetMultiplier * 0.0002);
+
+            const iconHtml = `<div class="custom-pin ${pinClass}" title="${escapeHtml(item.title)}">${pinIcon}</div>`;
+            const icon = L.divIcon({
+                html: iconHtml,
+                className: 'custom-div-icon',
+                iconSize: [26, 26],
+                iconAnchor: [13, 13],
+                popupAnchor: [0, -13]
+            });
+
+            const marker = L.marker([jitterLat, jitterLon], { icon: icon });
+
+            const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=400&q=80";
+            const imgSrc = item.main_image_url || fallbackImg;
+            const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : 'b/d';
+            const precisionText = item.is_exact_coords ? '📍 Dokładna lokalizacja' : '📍 Przybliżona (rejon)';
+            const popupCatIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏡');
+            const specsText = cat === 'dzialka'
+                ? `Działka: ${plotText}`
+                : (cat === 'mieszkanie' ? `${item.area_home.toFixed(0)} m² • ${item.rooms ? item.rooms + ' pok. • ' : ''}` : `${item.area_home.toFixed(0)} m² • Działka: ${plotText} • `);
+
+            const popupHtml = `
+                <div class="popup-card">
+                    <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.src='${fallbackImg}'" onclick="openImgModal('${escapeHtml(imgSrc)}')">
+                    <div class="popup-body">
+                        <div class="popup-price">${Math.round(item.price).toLocaleString('pl-PL')} zł</div>
+                        <div class="popup-title"><a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.title)}</a></div>
+                        <div class="popup-specs">${popupCatIcon} ${specsText}${escapeHtml(item.street || item.district || item.city || '')}</div>
+                        <div style="font-size: 10px; color: ${item.is_exact_coords ? '#34d399' : '#fbbf24'}; margin-bottom: 6px;">${precisionText}</div>
+                        <div class="popup-actions">
+                            <button class="btn btn-sm ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="updateStatus(${item.id}, 'FAVORITE')">★ Ulubione</button>
+                            <button class="btn btn-sm ${item.user_status === 'TO_VISIT' ? 'active-visit' : ''}" onclick="updateStatus(${item.id}, 'TO_VISIT')">📅 Do wizyty</button>
+                            <button class="btn btn-sm" onclick="updateStatus(${item.id}, 'REJECTED')">✕</button>
+                            ${item.geoportal_url ? `<a href="${escapeHtml(item.geoportal_url)}" target="_blank" class="btn btn-sm" style="color:#34d399;text-decoration:none;" title="Geoportal">🗺️ Geoportal</a>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            marker.bindPopup(popupHtml);
+            marker.on('click', () => {
+                highlightCard(item.id);
+            });
+
+            markersGroup.addLayer(marker);
+            markersMap[item.id] = marker;
+            return marker;
+        }
+
         function renderMapMarkers(items) {
             if (!map || !markersGroup) return;
 
             markersGroup.clearLayers();
             markersMap = {};
+            coordCounts = {};
 
             const validCoordsItems = items.filter(i => i.latitude && i.longitude);
-            const coordCounts = {};
 
-            validCoordsItems.forEach(item => {
-                let pinClass = "pin-blue";
-                const cat = item.category || 'dom';
-                let pinIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏠');
-
-                if (item.user_status === 'FAVORITE') {
-                    pinClass = "pin-gold";
-                    pinIcon = "★";
-                } else if (item.user_status === 'TO_VISIT') {
-                    pinClass = "pin-purple";
-                    pinIcon = "📅";
-                } else if (item.user_status === 'REJECTED' || item.qualification_status.startsWith('REJECTED')) {
-                    pinClass = "pin-gray";
-                    pinIcon = "✕";
-                } else if (item.qualification_status === 'QUALIFIED_WHITELIST') {
-                    pinClass = "pin-green";
-                    pinIcon = "★";
-                } else if (item.qualification_status === 'NEEDS_REVIEW') {
-                    pinClass = "pin-orange";
-                    pinIcon = "🔍";
-                }
-
-                if (!item.is_exact_coords) {
-                    pinClass += " pin-approx";
-                }
-
-                // Small collision jitter for multi-unit complexes
-                const coordKey = `${item.latitude.toFixed(4)},${item.longitude.toFixed(4)}`;
-                coordCounts[coordKey] = (coordCounts[coordKey] || 0) + 1;
-                const offsetMultiplier = (coordCounts[coordKey] - 1);
-                const jitterLat = item.latitude + (offsetMultiplier * 0.00015);
-                const jitterLon = item.longitude + (offsetMultiplier * 0.0002);
-
-                const iconHtml = `<div class="custom-pin ${pinClass}" title="${escapeHtml(item.title)}">${pinIcon}</div>`;
-                const icon = L.divIcon({
-                    html: iconHtml,
-                    className: 'custom-div-icon',
-                    iconSize: [26, 26],
-                    iconAnchor: [13, 13],
-                    popupAnchor: [0, -13]
-                });
-
-                const marker = L.marker([jitterLat, jitterLon], { icon: icon });
-
-                const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=400&q=80";
-                const imgSrc = item.main_image_url || fallbackImg;
-                const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : 'b/d';
-                const precisionText = item.is_exact_coords ? '📍 Dokładna lokalizacja' : '📍 Przybliżona (rejon)';
-                const popupCatIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏡');
-                const specsText = cat === 'dzialka'
-                    ? `Działka: ${plotText}`
-                    : (cat === 'mieszkanie' ? `${item.area_home.toFixed(0)} m² • ${item.rooms ? item.rooms + ' pok. • ' : ''}` : `${item.area_home.toFixed(0)} m² • Działka: ${plotText} • `);
-
-                const popupHtml = `
-                    <div class="popup-card">
-                        <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.src='${fallbackImg}'" onclick="openImgModal('${escapeHtml(imgSrc)}')">
-                        <div class="popup-body">
-                            <div class="popup-price">${Math.round(item.price).toLocaleString('pl-PL')} zł</div>
-                            <div class="popup-title"><a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.title)}</a></div>
-                            <div class="popup-specs">${popupCatIcon} ${specsText}${escapeHtml(item.street || item.district || item.city || '')}</div>
-                            <div style="font-size: 10px; color: ${item.is_exact_coords ? '#34d399' : '#fbbf24'}; margin-bottom: 6px;">${precisionText}</div>
-                            <div class="popup-actions">
-                                <button class="btn btn-sm ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="updateStatus(${item.id}, 'FAVORITE')">★ Ulubione</button>
-                                <button class="btn btn-sm ${item.user_status === 'TO_VISIT' ? 'active-visit' : ''}" onclick="updateStatus(${item.id}, 'TO_VISIT')">📅 Do wizyty</button>
-                                <button class="btn btn-sm" onclick="updateStatus(${item.id}, 'REJECTED')">✕</button>
-                                ${item.geoportal_url ? `<a href="${escapeHtml(item.geoportal_url)}" target="_blank" class="btn btn-sm" style="color:#34d399;text-decoration:none;" title="Geoportal">🗺️ Geoportal</a>` : ''}
-                            </div>
-                        </div>
-                    </div>
-                `;
-
-                marker.bindPopup(popupHtml);
-                marker.on('click', () => {
-                    highlightCard(item.id);
-                });
-
-                markersGroup.addLayer(marker);
-                markersMap[item.id] = marker;
-            });
+            validCoordsItems.forEach(addMapMarker);
 
             if (validCoordsItems.length > 0) {
                 try {
                     map.fitBounds(markersGroup.getBounds(), { padding: [30, 30], maxZoom: 15 });
                 } catch (e) {}
+            }
+        }
+
+        function updateMapMarkers(items, changedSet, removedSet) {
+            if (!map || !markersGroup) return;
+
+            const wanted = new Set(items.map(i => i.id));
+
+            for (const id of Object.keys(markersMap)) {
+                if (!wanted.has(+id) || changedSet.has(+id)) {
+                    markersGroup.removeLayer(markersMap[id]);
+                    delete markersMap[id];
+                }
+            }
+
+            for (const item of items) {
+                if (!item.latitude || !item.longitude) continue;
+                if (!markersMap[item.id]) addMapMarker(item);
             }
         }
 
@@ -3224,18 +3576,88 @@
             const container = document.getElementById('listingsContainer');
             if (!container) return;
 
+            const token = ++gridRenderToken;
+            container.innerHTML = '';
+
             if (items.length === 0) {
                 container.innerHTML = '<div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">Brak ofert spełniających aktywne kryteria wyszukiwania.</div>';
                 return;
             }
 
+            const CHUNK = 48;
+            let i = 0;
+            const step = () => {
+                if (token !== gridRenderToken) return;
+                const slice = items.slice(i, i + CHUNK);
+                container.insertAdjacentHTML('beforeend', slice.map(buildCardHtml).join(''));
+                i += CHUNK;
+                if (i < items.length) requestAnimationFrame(step);
+            };
+            requestAnimationFrame(step);
+        }
+
+        function renderGridIncremental(items, changedSet) {
+            const container = document.getElementById('listingsContainer');
+            if (!container) return;
+
+            if (items.length === 0) {
+                gridRenderToken++;
+                container.innerHTML = '<div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">Brak ofert spełniających aktywne kryteria wyszukiwania.</div>';
+                return;
+            }
+
+            if (!container.querySelector('article.card') || changedSet.size > 60) {
+                renderGrid(items);
+                return;
+            }
+
+            gridRenderToken++;
+
+            const wantedIds = items.map(i => i.id);
+            const wantedSet = new Set(wantedIds);
+
+            container.querySelectorAll('article.card').forEach(n => {
+                const cardId = parseInt(n.id.replace('card-', ''), 10);
+                if (!wantedSet.has(cardId)) n.remove();
+            });
+
+            items.forEach(item => {
+                const existing = document.getElementById('card-' + item.id);
+                if (!existing) {
+                    const html = buildCardHtml(item);
+                    const idx = wantedIds.indexOf(item.id);
+                    let ref = null;
+                    for (let j = idx + 1; j < wantedIds.length; j++) {
+                        ref = document.getElementById('card-' + wantedIds[j]);
+                        if (ref) break;
+                    }
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    if (tmp.firstElementChild) container.insertBefore(tmp.firstElementChild, ref);
+                } else if (changedSet.has(item.id)) {
+                    const html = buildCardHtml(item);
+                    const tmp = document.createElement('div');
+                    tmp.innerHTML = html;
+                    if (tmp.firstElementChild) existing.replaceWith(tmp.firstElementChild);
+                }
+            });
+
+            let cursor = container.firstElementChild;
+            for (const id of wantedIds) {
+                const node = document.getElementById('card-' + id);
+                if (!node) continue;
+                if (node !== cursor) container.insertBefore(node, cursor);
+                cursor = node.nextElementSibling;
+            }
+        }
+
+        function buildCardHtml(item) {
             const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80";
 
-            container.innerHTML = items.map(item => {
-                let badgeClass = "badge-rejected";
-                let badgeLabel = "Odrzucona";
+            let badgeClass = "badge-rejected";
+            let badgeLabel = "Odrzucona";
 
-                if (item.qualification_status === 'QUALIFIED_WHITELIST') {
+            if (item.qualification_status === 'QUALIFIED_WHITELIST') {
                     badgeClass = "badge-whitelist";
                     badgeLabel = "Whitelist";
                 } else if (item.is_qualified) {
@@ -3377,6 +3799,7 @@
                         <div class="card-price-row">
                             <span class="price-val">${Math.round(item.price).toLocaleString('pl-PL')} zł</span>
                             <span class="price-m2">· ${Math.round(item.price_per_m2).toLocaleString('pl-PL')} zł/m²</span>
+                            ${item.price_drop_amount ? `<span class="ai-price-drop-badge">📉 -${item.price_drop_amount.toLocaleString('pl-PL')} zł (-${item.price_drop_pct}%)</span>` : ''}
                         </div>
 
                         <div class="card-location">
@@ -3423,6 +3846,9 @@
                                 <a href="${escapeHtml(item.url)}" class="btn-link" target="_blank" rel="noopener noreferrer">
                                     Otwórz ↗
                                 </a>
+                                <button class="btn-link" onclick="event.stopPropagation(); openAiModal(${item.id})" title="AI Analiza & Due Diligence">
+                                    🤖 Analiza
+                                </button>
                             </div>
                         </div>
 
@@ -3437,7 +3863,6 @@
                     </div>
                 </article>
                 `;
-            }).join('');
         }
 
         function escapeHtml(str) {
@@ -3519,7 +3944,7 @@
                 try {
                     const stRes = await fetch('/api/scrape/status');
                     const st = await stRes.json();
-                    
+
                     document.getElementById('progPercent').innerText = st.percentage + '%';
                     document.getElementById('progBar').style.width = st.percentage + '%';
                     document.getElementById('progStep').innerText = st.current_step;
@@ -3564,6 +3989,170 @@
             }
         }
 
+        // ========================
+        // AI Due Diligence Modal
+        // ========================
+        let currentAiItem = null;
+
+        function openAiModal(listingId) {
+            const item = allListings.find(i => i.id === listingId);
+            if (!item) return;
+            currentAiItem = item;
+
+            document.getElementById('aiModalTitle').innerText = item.title || '';
+
+            // Summary
+            const summaryEl = document.getElementById('aiSummaryContent');
+            summaryEl.innerText = item.ai_summary || 'Brak analizy AI — uruchom scraping z włączonym LLM, aby wygenerować podsumowanie.';
+
+            // Contact
+            const contactSection = document.getElementById('aiContactSection');
+            if (item.contact_phone || item.contact_person) {
+                contactSection.style.display = 'block';
+                const phoneEl = document.getElementById('aiContactPhone');
+                const personEl = document.getElementById('aiContactPerson');
+                if (item.contact_phone) {
+                    const cleanPhone = item.contact_phone.replace(/[\s-]/g, '');
+                    phoneEl.href = 'tel:' + cleanPhone;
+                    phoneEl.innerText = '📞 ' + item.contact_phone;
+                } else {
+                    phoneEl.href = '';
+                    phoneEl.innerText = '';
+                }
+                personEl.innerText = item.contact_person ? ('👤 ' + item.contact_person) : '';
+            } else {
+                contactSection.style.display = 'none';
+            }
+
+            // Questions
+            const qList = document.getElementById('aiQuestionsList');
+            const questions = item.ai_questions || [];
+            if (questions.length > 0) {
+                qList.innerHTML = questions.map(q => `<li>${escapeHtml(q)}</li>`).join('');
+            } else {
+                qList.innerHTML = '<li class="ai-no-data" style="list-style:none;">Brak pytań — uruchom scraping z LLM.</li>';
+            }
+
+            // Budget Calculator
+            buildBudgetTable(item);
+
+            // Price Drop History
+            const phSection = document.getElementById('aiPriceDropSection');
+            const phCount = item.price_history_count || 0;
+            if (phCount >= 2) {
+                phSection.style.display = 'block';
+                const badgeEl = document.getElementById('aiPriceDropBadge');
+                if (item.price_drop_amount) {
+                    badgeEl.innerHTML = `<span class="ai-price-drop-badge">📉 Spadek: -${item.price_drop_amount.toLocaleString('pl-PL')} zł (-${item.price_drop_pct}%)</span>`;
+                } else {
+                    badgeEl.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Cena bez zmian od pierwszego wpisu.</span>';
+                }
+                const timeline = document.getElementById('aiPriceTimeline');
+                timeline.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Ładowanie historii cen…</span>';
+                fetch(`/api/listings/${item.id}/price-history`)
+                    .then(r => r.json())
+                    .then(ph => {
+                        if (!Array.isArray(ph) || ph.length < 2) {
+                            phSection.style.display = 'none';
+                            return;
+                        }
+                        timeline.innerHTML = ph.map(h => {
+                            const d = h.date ? new Date(h.date).toLocaleDateString('pl-PL') : '—';
+                            return `<div class="ph-entry"><span>${d}</span><span class="ph-price">${Math.round(h.price).toLocaleString('pl-PL')} zł</span></div>`;
+                        }).join('');
+                    })
+                    .catch(() => {
+                        timeline.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Nie udało się pobrać historii cen.</span>';
+                    });
+            } else {
+                phSection.style.display = 'none';
+            }
+
+            document.getElementById('aiModal').style.display = 'flex';
+        }
+
+        function closeAiModal(e) {
+            if (e && e.target && e.target.id !== 'aiModal') return;
+            document.getElementById('aiModal').style.display = 'none';
+            currentAiItem = null;
+        }
+
+        function buildBudgetTable(item) {
+            const price = item.price || 0;
+            const market = (item.market || '').toLowerCase();
+            const isPrimary = market.includes('pierwotny');
+            const pcc = isPrimary ? 0 : Math.round(price * 0.02);
+            const notaryBase = Math.min(10000, Math.max(100, Math.round(price * 0.005)));
+            const vatNotary = Math.round(notaryBase * 0.23);
+            const kwFee = 200;
+            const notaryTotal = notaryBase + vatNotary + kwFee;
+
+            // Hidden costs from cons
+            let hiddenTotal = 0;
+            const hiddenItems = [];
+            (item.cons || []).forEach(c => {
+                if (c.includes('[Ukryty koszt]')) {
+                    const numMatch = c.match(/(\d[\d\s]*\d)\s*zł/);
+                    if (numMatch) {
+                        const val = parseInt(numMatch[1].replace(/\s/g, ''));
+                        hiddenTotal += val;
+                        hiddenItems.push({label: c.replace('⚠️ [Ukryty koszt] ', ''), val});
+                    } else {
+                        hiddenItems.push({label: c.replace('⚠️ [Ukryty koszt] ', ''), val: 0});
+                    }
+                }
+            });
+
+            // Finishing estimate
+            const finish = (item.finish_condition || '').toLowerCase();
+            let finishCostPerM2 = 0;
+            let finishLabel = '';
+            if (finish.includes('deweloperski') || finish.includes('wykonczenia')) {
+                finishCostPerM2 = 1500;
+                finishLabel = 'Wykończenie (~1 500 zł/m²)';
+            } else if (finish.includes('surowy_zamkniety') || finish.includes('surowy zamknięty')) {
+                finishCostPerM2 = 2500;
+                finishLabel = 'Wykończenie od surowego (~2 500 zł/m²)';
+            } else if (finish.includes('surowy_otwarty') || finish.includes('surowy otwarty')) {
+                finishCostPerM2 = 3500;
+                finishLabel = 'Wykończenie od surowego otwartego (~3 500 zł/m²)';
+            }
+            const finishCost = Math.round(finishCostPerM2 * (item.area_home || 0));
+
+            const total = price + pcc + notaryTotal + hiddenTotal + finishCost;
+
+            let rows = `<tr><td>Cena ofertowa</td><td>${price.toLocaleString('pl-PL')} zł</td></tr>`;
+            rows += `<tr><td>Podatek PCC (2%)${isPrimary ? ' — rynek pierwotny: 0 zł' : ''}</td><td>${pcc.toLocaleString('pl-PL')} zł</td></tr>`;
+            rows += `<tr><td>Notariusz + opłata KW</td><td>${notaryTotal.toLocaleString('pl-PL')} zł</td></tr>`;
+            hiddenItems.forEach(h => {
+                rows += `<tr><td>⚠️ ${escapeHtml(h.label)}</td><td>${h.val ? h.val.toLocaleString('pl-PL') + ' zł' : '?'}</td></tr>`;
+            });
+            if (finishCost > 0) {
+                rows += `<tr><td>🔨 ${finishLabel}</td><td>~${finishCost.toLocaleString('pl-PL')} zł</td></tr>`;
+            }
+            rows += `<tr class="total"><td>RAZEM (szacunkowo)</td><td>~${total.toLocaleString('pl-PL')} zł</td></tr>`;
+
+            document.getElementById('aiBudgetBody').innerHTML = rows;
+        }
+
+        function copyAiQuestions() {
+            if (!currentAiItem) return;
+            const qs = currentAiItem.ai_questions || [];
+            if (qs.length === 0) { showToast('Brak pytań do skopiowania.'); return; }
+            const text = qs.map((q, i) => `${i + 1}. ${q}`).join('\n');
+            navigator.clipboard.writeText(text).then(() => showToast('📋 Pytania skopiowane do schowka!'));
+        }
+
+        function copyAiSms() {
+            if (!currentAiItem) return;
+            const item = currentAiItem;
+            const phone = item.contact_phone || '';
+            const title = item.title || '';
+            const price = item.price ? Math.round(item.price).toLocaleString('pl-PL') + ' zł' : '';
+            const sms = `Dzień dobry,\nJestem zainteresowany/a ofertą: "${title}" (${price}).\nCzy nieruchomość jest nadal dostępna? Kiedy mogę umówić się na oględziny?\nPozdrawiam`;
+            navigator.clipboard.writeText(sms).then(() => showToast('📋 Gotowa wiadomość SMS skopiowana!'));
+        }
+
         // Global keyboard shortcut Ctrl+K for search and Arrow keys for gallery modal
         window.addEventListener('keydown', (e) => {
             const m = document.getElementById('imgModal');
@@ -3581,6 +4170,13 @@
                     closeImgModal();
                     return;
                 }
+            }
+            // Close AI modal on Escape
+            const aiM = document.getElementById('aiModal');
+            if (aiM && aiM.style.display === 'flex' && e.key === 'Escape') {
+                e.preventDefault();
+                closeAiModal(null);
+                return;
             }
             if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
                 e.preventDefault();
@@ -3600,7 +4196,13 @@
             await fetchListings();
         });
 
-        setInterval(fetchListings, 45000);
+        setInterval(() => {
+            if (!document.hidden) fetchListings();
+        }, 45000);
+
+        document.addEventListener('visibilitychange', () => {
+            if (!document.hidden && Date.now() - lastFetchAt > 10000) fetchListings();
+        });
     </script>
 </body>
 </html>
