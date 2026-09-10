@@ -30,7 +30,12 @@ class QualificationEngine:
         self.stage2 = Stage2SemanticFilter()
         self.llm = LLMAnalyzer()
 
-    async def evaluate_listing(self, listing: ListingSchema, profile: Optional[Any] = None) -> FilterResult:
+    async def evaluate_listing(
+        self,
+        listing: ListingSchema,
+        profile: Optional[Any] = None,
+        skip_llm: bool = False,
+    ) -> FilterResult:
         """
         Runs the multi-stage qualification pipeline on a single listing.
         """
@@ -92,31 +97,32 @@ class QualificationEngine:
         listing.has_fiber = has_fiber
 
         # Step 3: Optional LLM Enrichment
-        llm_insights = await self.llm.analyze_description(listing)
-        if llm_insights:
-            if llm_insights.get("is_corner"):
-                is_corner = True
-                listing.segment_subtype = SegmentSubtype.SKRAJNY
-            elif llm_insights.get("is_middle"):
-                listing.segment_subtype = SegmentSubtype.SRODKOWY
-            if llm_insights.get("road_is_bad") and passed_stage2:
-                passed_stage2 = False
-                stage2_reasons.append("LLM: Wykryto nieutwardzoną / polną drogę dojazdową")
-            if llm_insights.get("has_parking_or_garage"):
-                has_parking = True
-            if llm_insights.get("extracted_plot_m2") and not listing.area_plot:
-                try:
-                    listing.area_plot = float(llm_insights["extracted_plot_m2"])
-                except (ValueError, TypeError):
-                    pass
-            for hc in llm_insights.get("hidden_costs", []):
-                cons.append(f"⚠️ [Ukryty koszt] {hc}")
-            for p in llm_insights.get("pros", []):
-                if p not in pros:
-                    pros.append(f"[LLM] {p}")
-            for c in llm_insights.get("cons", []):
-                if c not in cons:
-                    cons.append(f"[LLM] {c}")
+        if not skip_llm:
+            llm_insights = await self.llm.analyze_description(listing)
+            if llm_insights:
+                if llm_insights.get("is_corner"):
+                    is_corner = True
+                    listing.segment_subtype = SegmentSubtype.SKRAJNY
+                elif llm_insights.get("is_middle"):
+                    listing.segment_subtype = SegmentSubtype.SRODKOWY
+                if llm_insights.get("road_is_bad") and passed_stage2:
+                    passed_stage2 = False
+                    stage2_reasons.append("LLM: Wykryto nieutwardzoną / polną drogę dojazdową")
+                if llm_insights.get("has_parking_or_garage"):
+                    has_parking = True
+                if llm_insights.get("extracted_plot_m2") and not listing.area_plot:
+                    try:
+                        listing.area_plot = float(llm_insights["extracted_plot_m2"])
+                    except (ValueError, TypeError):
+                        pass
+                for hc in llm_insights.get("hidden_costs", []):
+                    cons.append(f"⚠️ [Ukryty koszt] {hc}")
+                for p in llm_insights.get("pros", []):
+                    if p not in pros:
+                        pros.append(f"[LLM] {p}")
+                for c in llm_insights.get("cons", []):
+                    if c not in cons:
+                        cons.append(f"[LLM] {c}")
 
         if not passed_stage2:
             return FilterResult(

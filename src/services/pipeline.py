@@ -61,7 +61,12 @@ class ScraperPipeline:
             if not listing.profile_name:
                 listing.profile_name = profile.name
 
-        # 1. Check duplicate by fingerprint
+        # 1. Look up existing record in database
+        existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(
+            listing.portal, listing.id
+        )
+
+        # 1.1 Check duplicate by fingerprint
         if listing.property_fingerprint:
             duplicate_model = await repo.find_duplicate_by_fingerprint(listing.property_fingerprint)
             if duplicate_model and duplicate_model.url != listing.url:
@@ -71,58 +76,80 @@ class ScraperPipeline:
                 )
                 result["is_duplicate_fingerprint"] = True
 
-        # 1.5 Restore stored detail data when the detail fetch was skipped (fresh data)
-        if listing.skip_detail:
-            existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(
-                listing.portal, listing.id
+        # 1.2 Restore stored detail data when detail was skipped or already cached in DB
+        if existing_model:
+            if not listing.raw_description and existing_model.raw_description:
+                listing.raw_description = existing_model.raw_description
+            if listing.finish_condition == FinishCondition.NIEOKRESLONY and existing_model.finish_condition:
+                try:
+                    listing.finish_condition = FinishCondition(existing_model.finish_condition)
+                except ValueError:
+                    pass
+            if listing.sewerage == SewerageType.NIEZNANA and existing_model.sewerage:
+                try:
+                    listing.sewerage = SewerageType(existing_model.sewerage)
+                except ValueError:
+                    pass
+            if listing.heating == HeatingType.NIEZNANE and existing_model.heating:
+                try:
+                    listing.heating = HeatingType(existing_model.heating)
+                except ValueError:
+                    pass
+            if not listing.has_fiber:
+                listing.has_fiber = bool(existing_model.has_fiber)
+            if not listing.has_visualisations:
+                listing.has_visualisations = bool(existing_model.has_visualisations)
+            if not listing.year_built:
+                listing.year_built = existing_model.year_built
+            if not listing.coordinates and existing_model.latitude and existing_model.longitude:
+                listing.coordinates = (existing_model.latitude, existing_model.longitude)
+            if listing.building_type.value == "inny" and existing_model.building_type != "inny":
+                try:
+                    listing.building_type = type(listing.building_type)(existing_model.building_type)
+                except ValueError:
+                    pass
+            if listing.access_road_type.value == "nieznana" and existing_model.access_road_type != "nieznana":
+                try:
+                    listing.access_road_type = type(listing.access_road_type)(existing_model.access_road_type)
+                except ValueError:
+                    pass
+            if listing.market.value == "nieokreślony" and existing_model.market != "nieokreślony":
+                try:
+                    listing.market = type(listing.market)(existing_model.market)
+                except ValueError:
+                    pass
+            if not listing.parcel_id and existing_model.parcel_id:
+                listing.parcel_id = existing_model.parcel_id
+                listing.cadastral_area = existing_model.cadastral_area
+                listing.geoportal_url = existing_model.geoportal_url
+
+        # Check if LLM can be skipped because this listing was already analyzed
+        skip_llm = False
+        if existing_model and existing_model.qualification_status:
+            desc_unchanged = (
+                not listing.raw_description
+                or (existing_model.raw_description and listing.raw_description.strip() == existing_model.raw_description.strip())
             )
-            if existing_model:
-                if not listing.raw_description and existing_model.raw_description:
-                    listing.raw_description = existing_model.raw_description
-                if listing.finish_condition == FinishCondition.NIEOKRESLONY and existing_model.finish_condition:
-                    try:
-                        listing.finish_condition = FinishCondition(existing_model.finish_condition)
-                    except ValueError:
-                        pass
-                if listing.sewerage == SewerageType.NIEZNANA and existing_model.sewerage:
-                    try:
-                        listing.sewerage = SewerageType(existing_model.sewerage)
-                    except ValueError:
-                        pass
-                if listing.heating == HeatingType.NIEZNANE and existing_model.heating:
-                    try:
-                        listing.heating = HeatingType(existing_model.heating)
-                    except ValueError:
-                        pass
-                if not listing.has_fiber:
-                    listing.has_fiber = bool(existing_model.has_fiber)
-                if not listing.has_visualisations:
-                    listing.has_visualisations = bool(existing_model.has_visualisations)
-                if not listing.year_built:
-                    listing.year_built = existing_model.year_built
-                if not listing.coordinates and existing_model.latitude and existing_model.longitude:
-                    listing.coordinates = (existing_model.latitude, existing_model.longitude)
-                if listing.building_type.value == "inny" and existing_model.building_type != "inny":
-                    try:
-                        listing.building_type = type(listing.building_type)(existing_model.building_type)
-                    except ValueError:
-                        pass
-                if listing.access_road_type.value == "nieznana" and existing_model.access_road_type != "nieznana":
-                    try:
-                        listing.access_road_type = type(listing.access_road_type)(existing_model.access_road_type)
-                    except ValueError:
-                        pass
-                if listing.market.value == "nieokreślony" and existing_model.market != "nieokreślony":
-                    try:
-                        listing.market = type(listing.market)(existing_model.market)
-                    except ValueError:
-                        pass
+            if desc_unchanged:
+                skip_llm = True
 
         # 2. Run two-stage qualification engine
-        filter_result = await self.engine.evaluate_listing(listing, profile=profile)
+        filter_result = await self.engine.evaluate_listing(listing, profile=profile, skip_llm=skip_llm)
+
+        # If LLM was skipped, preserve previously saved LLM pros/cons
+        if skip_llm and existing_model:
+            if existing_model.pros:
+                for p in existing_model.pros:
+                    if p.startswith("[LLM]") and p not in filter_result.pros:
+                        filter_result.pros.append(p)
+            if existing_model.cons:
+                for c in existing_model.cons:
+                    if (c.startswith("[LLM]") or c.startswith("⚠️ [Ukryty koszt]")) and c not in filter_result.cons:
+                        filter_result.cons.append(c)
+
         result["qualified"] = filter_result.is_qualified
 
-        # 3. Resolve coordinates if missing
+        # 3. Resolve coordinates if missing (skip if already resolved in existing_model)
         is_exact_coords = True
         if not listing.coordinates:
             from src.services.geocoder import geocoder
@@ -136,9 +163,11 @@ class ScraperPipeline:
             if lat and lon:
                 listing.coordinates = (lat, lon)
                 is_exact_coords = is_exact
+        elif existing_model and existing_model.is_exact_coords is not None:
+            is_exact_coords = bool(existing_model.is_exact_coords)
 
-        # 3.5. Audit location in Geoportal if qualified and coordinates are exact
-        if listing.coordinates and is_exact_coords and filter_result.is_qualified:
+        # 3.5. Audit location in Geoportal if qualified, coords are exact, and not already audited
+        if listing.coordinates and is_exact_coords and filter_result.is_qualified and not listing.parcel_id:
             try:
                 from src.services.geoportal import geoportal_service
                 geo_audit = await geoportal_service.audit_location(
@@ -246,66 +275,89 @@ class ScraperPipeline:
                     scs.append(MorizonScraper(max_pages=cfg.scrapers.morizon.max_pages, profile=prof))
                 execution_plan.append((prof, scs))
 
-        total_steps = sum(len(scs) for _, scs in execution_plan) or 1
-        global_tracker.start_session(total_portals=total_steps)
-
-        step_idx = 0
+        flat_scrapers = []
         for profile, scrapers in execution_plan:
             prof_name = profile.name if profile else "Default"
             for scraper in scrapers:
-                step_idx += 1
-                base_pct = int(((step_idx - 1) / total_steps) * 85)
-                global_tracker.update_portal(f"{scraper.name} ({prof_name})", 1, getattr(scraper, "max_pages", 1), base_pct + 5)
-                scraper.progress_cb = global_tracker.update_portal_page
+                flat_scrapers.append((profile, prof_name, scraper))
+
+        total_steps = len(flat_scrapers) or 1
+        global_tracker.start_session(total_portals=total_steps)
+
+        # 1. Scrape all portals in parallel
+        async def scrape_portal(prof, prof_name, scraper):
+            global_tracker.update_portal(f"{scraper.name} ({prof_name})", 1, getattr(scraper, "max_pages", 1), 10)
+            scraper.progress_cb = global_tracker.update_portal_page
+            try:
+                listings = await scraper.scrape()
+                global_tracker.record_items(count=len(listings))
+                global_tracker.add_log(f"[{scraper.name} - {prof_name}] Pobrano {len(listings)} ogłoszeń.")
+                logger.info(f"[{scraper.name} - {prof_name}] Scraped {len(listings)} listings.")
+                return prof, prof_name, scraper.name, listings, None
+            except Exception as e:
+                logger.error(f"[Pipeline] Error running {scraper.name} for {prof_name}: {e}", exc_info=True)
+                global_tracker.add_log(f"[{scraper.name} - {prof_name}] Błąd: {e}", level="error")
+                return prof, prof_name, scraper.name, [], e
+            finally:
                 try:
-                    listings = await scraper.scrape()
-                    total_scraped += len(listings)
-                    global_tracker.record_items(count=len(listings))
-                    global_tracker.add_log(f"[{scraper.name} - {prof_name}] Pobrano {len(listings)} ogłoszeń.")
-                    logger.info(f"[{scraper.name} - {prof_name}] Scraped {len(listings)} listings. Processing...")
+                    await scraper.close()
+                except Exception:
+                    pass
 
-                    processed = 0
-                    for item in listings:
-                        async with get_session() as session:
-                            repo = ListingRepository(session)
-                            res = await self.process_listing(item, repo, profile=profile)
+        scrape_results = await asyncio.gather(*[scrape_portal(p, pn, sc) for p, pn, sc in flat_scrapers])
 
-                        processed += 1
-                        if res["is_new"]:
-                            total_new += 1
-                        if res["is_duplicate_fingerprint"]:
-                            total_duplicates += 1
-                        if res["price_changed"]:
-                            total_price_changes += 1
-                        if res["qualified"]:
-                            total_qualified += 1
-                            if res["is_new"]:
-                                global_tracker.add_log(
-                                    f"⭐ Nowa oferta [{prof_name}]: {item.title[:45]} ({item.price:,.0f} zł)",
-                                    level="success",
-                                )
-                        if res["notified"]:
-                            total_notified += 1
+        # 2. Concurrently process listings with Semaphore
+        concurrency = getattr(settings, "CONCURRENT_REQUESTS", 3) or 3
+        sem = asyncio.Semaphore(concurrency)
 
-                        global_tracker.record_items(
-                            count=1,
-                            qualified=1 if res["qualified"] and res["is_new"] else 0,
-                            duplicates=1 if res["is_duplicate_fingerprint"] else 0,
+        step_idx = 0
+        for prof, prof_name, sc_name, listings, err in scrape_results:
+            step_idx += 1
+            total_scraped += len(listings)
+            base_pct = int(((step_idx - 1) / total_steps) * 85)
+
+            if not listings:
+                continue
+
+            processed = 0
+            async def safe_process(item):
+                nonlocal processed
+                async with sem:
+                    async with get_session() as session:
+                        repo = ListingRepository(session)
+                        res = await self.process_listing(item, repo, profile=prof)
+                    processed += 1
+                    if processed % 5 == 0 or processed == len(listings):
+                        global_tracker.update_processing(processed, len(listings))
+                    return item, res
+
+            results = await asyncio.gather(*[safe_process(item) for item in listings])
+
+            for item, res in results:
+                if res["is_new"]:
+                    total_new += 1
+                if res["is_duplicate_fingerprint"]:
+                    total_duplicates += 1
+                if res["price_changed"]:
+                    total_price_changes += 1
+                if res["qualified"]:
+                    total_qualified += 1
+                    if res["is_new"]:
+                        global_tracker.add_log(
+                            f"⭐ Nowa oferta [{prof_name}]: {item.title[:45]} ({item.price:,.0f} zł)",
+                            level="success",
                         )
-                        if processed % 5 == 0 or processed == len(listings):
-                            global_tracker.update_processing(processed, len(listings))
+                if res["notified"]:
+                    total_notified += 1
 
-                    step_pct = base_pct + int((step_idx / total_steps) * 85)
-                    global_tracker.percentage = step_pct
+                global_tracker.record_items(
+                    count=1,
+                    qualified=1 if res["qualified"] and res["is_new"] else 0,
+                    duplicates=1 if res["is_duplicate_fingerprint"] else 0,
+                )
 
-                except Exception as e:
-                    logger.error(f"[Pipeline] Error running {scraper.name} for {prof_name}: {e}", exc_info=True)
-                    global_tracker.add_log(f"[{scraper.name} - {prof_name}] Błąd: {e}", level="error")
-                finally:
-                    try:
-                        await scraper.close()
-                    except Exception:
-                        pass
+            step_pct = base_pct + int((step_idx / total_steps) * 85)
+            global_tracker.percentage = step_pct
 
         summary = {
             "total_scraped": total_scraped,

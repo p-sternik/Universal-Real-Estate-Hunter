@@ -77,6 +77,7 @@ Zwróć poprawny JSON o schemacie:
                 client = AsyncOpenAI(
                     api_key=self.openrouter_key,
                     base_url="https://openrouter.ai/api/v1",
+                    timeout=15.0,
                     default_headers={
                         "HTTP-Referer": "https://github.com/p-sternik/Universal-Real-Estate-Hunter",
                         "X-Title": "Universal Real Estate Hunter",
@@ -101,7 +102,7 @@ Zwróć poprawny JSON o schemacie:
         if self.openai_key:
             try:
                 from openai import AsyncOpenAI
-                kwargs = {"api_key": self.openai_key}
+                kwargs = {"api_key": self.openai_key, "timeout": 15.0}
                 if self.openai_base_url:
                     kwargs["base_url"] = self.openai_base_url
                 client = AsyncOpenAI(**kwargs)
