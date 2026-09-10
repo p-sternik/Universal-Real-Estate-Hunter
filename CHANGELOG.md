@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.4.0 (2026-09-10)
+
+### Features
+
+- Implement Tier 1 geospatial due diligence and spatial audit integration
+  ([`4b070d8`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/4b070d88ca0eec005c388a084c0639fecef8a716))
+
+
 ## v1.3.0 (2026-09-10)
 
 ### Code Style
