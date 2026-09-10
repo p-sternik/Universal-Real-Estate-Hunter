@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.6.3 (2026-09-10)
+
+### Bug Fixes
+
+- Resolve sqlite readonly database and lock contention across containers
+  ([`1dd0e73`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/1dd0e738aa66342bbeabd62d260952951dbb6abb))
+
+
 ## v1.6.2 (2026-09-10)
 
 ### Bug Fixes
