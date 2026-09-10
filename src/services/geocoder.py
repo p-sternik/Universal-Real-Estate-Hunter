@@ -1,0 +1,246 @@
+import asyncio
+import time
+from datetime import datetime, timezone
+from typing import Optional, Tuple
+import httpx
+from loguru import logger
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from src.storage.database import get_session
+from src.storage.models import GeocacheModel, ListingModel
+
+# Well-known centroids for Rzeszów districts and surrounding towns
+RZESZOW_DISTRICT_CENTROIDS = {
+    "słocina": (50.0242, 22.0520),
+    "slocina": (50.0242, 22.0520),
+    "zalesie": (50.0150, 22.0250),
+    "staromieście": (50.0610, 22.0120),
+    "staromiescie": (50.0610, 22.0120),
+    "drabinianka": (50.0130, 22.0010),
+    "budziwój": (49.9720, 21.9890),
+    "budziwoj": (49.9720, 21.9890),
+    "biała": (49.9880, 22.0180),
+    "biala": (49.9880, 22.0180),
+    "przybyszówka": (50.0350, 21.9450),
+    "przybyszowka": (50.0350, 21.9450),
+    "baranówka": (50.0520, 21.9780),
+    "baranowka": (50.0520, 21.9780),
+    "wilkowyja": (50.0380, 22.0400),
+    "załęże": (50.0560, 22.0390),
+    "zaleze": (50.0560, 22.0390),
+    "pobitno": (50.0410, 22.0290),
+    "nowe miasto": (50.0280, 22.0080),
+    "krasne": (50.0430, 22.0830),
+    "trzebownisko": (50.0780, 22.0520),
+    "nowa wieś": (50.0980, 22.0550),
+    "nowa wies": (50.0980, 22.0550),
+    "jasionka": (50.1110, 22.0620),
+    "tajęcina": (50.1250, 22.0350),
+    "tajecina": (50.1250, 22.0350),
+    "zaczernie": (50.0920, 22.0150),
+    "głogów małopolski": (50.1510, 21.9610),
+    "glogow malopolski": (50.1510, 21.9610),
+    "głogów młp": (50.1510, 21.9610),
+    "glogow mlp": (50.1510, 21.9610),
+    "boguchwała": (49.9840, 21.9390),
+    "boguchwala": (49.9840, 21.9390),
+    "tyczyn": (49.9650, 22.0350),
+    "świlcza": (50.0680, 21.8980),
+    "swilcza": (50.0680, 21.8980),
+    "bratkowice": (50.0950, 21.8100),
+    "rudna mała": (50.0950, 21.9750),
+    "rudna mala": (50.0950, 21.9750),
+    "rudna wielka": (50.0820, 21.9350),
+    "malawa": (50.0210, 22.0910),
+    "chmielnik": (49.9780, 22.1400),
+    "łańcut": (50.0690, 22.2310),
+    "lancut": (50.0690, 22.2310),
+    "rzeszów": (50.0375, 22.0047),
+    "rzeszow": (50.0375, 22.0047),
+}
+
+
+class NominatimGeocoder:
+    def __init__(self):
+        self.base_url = "https://nominatim.openstreetmap.org/search"
+        self.headers = {
+            "User-Agent": "RzeszowPropertyHunter/1.0 (automated house monitor; rzeszow-hunter@local)"
+        }
+        self._lock = asyncio.Lock()
+        self._last_request_time = 0.0
+
+    async def _rate_limited_query(self, query: str) -> Optional[dict]:
+        """Query OSM Nominatim respecting 1 req/sec rate limit."""
+        async with self._lock:
+            now = time.time()
+            elapsed = now - self._last_request_time
+            if elapsed < 1.1:
+                await asyncio.sleep(1.1 - elapsed)
+
+            params = {
+                "q": query,
+                "format": "json",
+                "limit": 1,
+                "countrycodes": "pl",
+                "addressdetails": 1,
+            }
+
+            try:
+                async with httpx.AsyncClient(timeout=8.0) as client:
+                    resp = await client.get(self.base_url, params=params, headers=self.headers)
+                    self._last_request_time = time.time()
+                    if resp.status_code == 200:
+                        data = resp.json()
+                        if data and isinstance(data, list) and len(data) > 0:
+                            return data[0]
+                    else:
+                        logger.warning(f"Nominatim returned status {resp.status_code} for query: {query}")
+            except Exception as e:
+                logger.warning(f"Nominatim query failed for '{query}': {e}")
+                self._last_request_time = time.time()
+
+        return None
+
+    async def get_cached(self, session: AsyncSession, query_key: str) -> Optional[Tuple[float, float, str]]:
+        stmt = select(GeocacheModel).where(GeocacheModel.query == query_key)
+        res = await session.execute(stmt)
+        cached = res.scalars().first()
+        if cached:
+            return (cached.latitude, cached.longitude, cached.display_name or "")
+        return None
+
+    async def set_cache(
+        self,
+        session: AsyncSession,
+        query_key: str,
+        lat: float,
+        lon: float,
+        display_name: str,
+    ) -> None:
+        cache_entry = GeocacheModel(
+            query=query_key,
+            latitude=lat,
+            longitude=lon,
+            display_name=display_name,
+            cached_at=datetime.now(timezone.utc),
+        )
+        session.add(cache_entry)
+        await session.flush()
+
+    def _find_district_fallback(
+        self,
+        street: Optional[str],
+        district: Optional[str],
+        city: Optional[str],
+        location_raw: Optional[str],
+    ) -> Optional[Tuple[float, float]]:
+        haystack = f"{street or ''} {district or ''} {city or ''} {location_raw or ''}".lower()
+        for key, coords in RZESZOW_DISTRICT_CENTROIDS.items():
+            if key in haystack:
+                return coords
+        return None
+
+    async def geocode(
+        self,
+        session: AsyncSession,
+        street: Optional[str] = None,
+        district: Optional[str] = None,
+        city: Optional[str] = None,
+        location_raw: Optional[str] = None,
+    ) -> Tuple[Optional[float], Optional[float], bool]:
+        """
+        Resolves (latitude, longitude, is_exact).
+        Returns is_exact=True if resolved via street-level Nominatim,
+        or is_exact=False if resolved via district/city fallback.
+        """
+        city_name = (city or "Rzeszów").strip()
+
+        # 1. Try Street + City on Nominatim
+        if street:
+            clean_street = street.replace("ul.", "").replace("ulica", "").strip()
+            query = f"{clean_street}, {city_name}, Polska"
+            query_key = f"street:{query}".lower()
+
+            cached = await self.get_cached(session, query_key)
+            if cached:
+                return (cached[0], cached[1], True)
+
+            data = await self._rate_limited_query(query)
+            if data:
+                lat = float(data["lat"])
+                lon = float(data["lon"])
+                display = data.get("display_name", "")
+                await self.set_cache(session, query_key, lat, lon, display)
+                return (lat, lon, True)
+
+        # 2. Try District + City on Nominatim
+        if district:
+            query = f"{district}, {city_name}, Polska"
+            query_key = f"district:{query}".lower()
+
+            cached = await self.get_cached(session, query_key)
+            if cached:
+                return (cached[0], cached[1], False)
+
+            data = await self._rate_limited_query(query)
+            if data:
+                lat = float(data["lat"])
+                lon = float(data["lon"])
+                display = data.get("display_name", "")
+                await self.set_cache(session, query_key, lat, lon, display)
+                return (lat, lon, False)
+
+        # 3. Try Instant Offline Centroid Fallback
+        fallback = self._find_district_fallback(street, district, city, location_raw)
+        if fallback:
+            return (fallback[0], fallback[1], False)
+
+        # 4. No location resolved - leave coordinates empty (no misleading pin)
+        return (None, None, False)
+
+
+# Singleton instance
+geocoder = NominatimGeocoder()
+
+
+async def backfill_missing_coordinates(limit: int = 200) -> int:
+    """Finds listings with NULL coordinates and fills them in."""
+    updated_count = 0
+    async with get_session() as session:
+        stmt = (
+            select(ListingModel)
+            .where(
+                (ListingModel.latitude.is_(None)) | (ListingModel.longitude.is_(None))
+            )
+            .limit(limit)
+        )
+        res = await session.execute(stmt)
+        missing_items = list(res.scalars().all())
+
+        if not missing_items:
+            logger.info("No listings need coordinate backfill.")
+            return 0
+
+        logger.info(f"Backfilling coordinates for {len(missing_items)} listings...")
+        for item in missing_items:
+            lat, lon, is_exact = await geocoder.geocode(
+                session=session,
+                street=item.street,
+                district=item.district,
+                city=item.city,
+                location_raw=item.location_raw,
+            )
+            if lat and lon:
+                item.latitude = lat
+                item.longitude = lon
+                item.is_exact_coords = is_exact
+                updated_count += 1
+                logger.debug(
+                    f"Geocoded '{item.title[:30]}': ({lat:.4f}, {lon:.4f}) [exact={is_exact}]"
+                )
+
+        await session.commit()
+        logger.success(f"Successfully backfilled {updated_count} listing coordinates.")
+
+    return updated_count

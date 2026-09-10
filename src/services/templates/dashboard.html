@@ -1,0 +1,3315 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Universal Real Estate Hunter — Market Intelligence & CRM</title>
+    
+    <!-- Modern Enterprise Typography: Inter & JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+    
+    <!-- Leaflet Map CSS -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+
+    <style>
+        /* ==========================================================================
+           ANTI-AI SLOP DESIGN SYSTEM (Linear / Raycast / Vercel Standards)
+           High data density, strict neutral palette, 1px precision borders.
+           ========================================================================== */
+        :root {
+            /* Neutral Graphite Canvas */
+            --bg: #090a0f;
+            --surface: #111318;
+            --surface-card: #14171f;
+            --surface-card-hover: #181d26;
+            --surface-input: #0c0e14;
+            --surface-subtle: #191e28;
+            --surface-overlay: #151821;
+
+            /* Precision 1px Borders */
+            --border: #222631;
+            --border-subtle: #181c25;
+            --border-hover: #323846;
+            --border-active: #3b82f6;
+
+            /* Strict Typography Hierarchy */
+            --text-primary: #f4f5f7;
+            --text-secondary: #9da4b2;
+            --text-muted: #656c7a;
+            --text-faint: #444a57;
+
+            /* Functional, Restrained Accents */
+            --accent-blue: #3b82f6;
+            --accent-blue-subtle: rgba(59, 130, 246, 0.12);
+            --accent-emerald: #10b981;
+            --accent-emerald-subtle: rgba(16, 185, 129, 0.12);
+            --accent-amber: #f59e0b;
+            --accent-amber-subtle: rgba(245, 158, 11, 0.12);
+            --accent-purple: #a855f7;
+            --accent-purple-subtle: rgba(168, 85, 247, 0.12);
+            --accent-rose: #f43f5e;
+            --accent-rose-subtle: rgba(244, 63, 94, 0.12);
+
+            /* Geometric Radii (4px - 8px) */
+            --radius-xs: 3px;
+            --radius-sm: 4px;
+            --radius-md: 6px;
+            --radius-lg: 8px;
+
+            /* Font Stacks */
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, monospace;
+        }
+
+        /* Reset & Base Styles */
+        *, *::before, *::after {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+
+        body {
+            font-family: var(--font-sans);
+            background: var(--bg);
+            color: var(--text-primary);
+            padding: 16px 20px;
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            font-size: 13px;
+            line-height: 1.5;
+        }
+
+        .container {
+            max-width: 1780px;
+            margin: 0 auto;
+        }
+
+        a {
+            color: inherit;
+            text-decoration: none;
+        }
+
+        /* Tabular Figures for All Numerical Data */
+        .tabular, .price-val, .price-m2, .kpi-num, .spec-item strong, .stat-val {
+            font-variant-numeric: tabular-nums;
+        }
+
+        /* ==========================================================================
+           1. TOP NAVIGATION & HEADER
+           ========================================================================== */
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 16px;
+            padding-bottom: 14px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 16px;
+        }
+
+        .brand-cluster {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .brand-logo {
+            width: 32px;
+            height: 32px;
+            border-radius: var(--radius-md);
+            background: var(--surface-subtle);
+            border: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            color: var(--text-primary);
+        }
+
+        .brand-meta {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .brand-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .brand-title {
+            font-size: 15px;
+            font-weight: 600;
+            letter-spacing: -0.01em;
+            color: var(--text-primary);
+        }
+
+        .chip-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 11px;
+            font-weight: 500;
+            padding: 2px 7px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--surface-input);
+            color: var(--text-secondary);
+        }
+
+        .chip-live {
+            background: var(--accent-emerald-subtle);
+            color: #34d399;
+            border-color: rgba(16, 185, 129, 0.25);
+        }
+
+        .live-dot {
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            background: var(--accent-emerald);
+        }
+
+        .brand-subtitle {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        /* Buttons (Linear Style: Flat, 1px Border, Crisp States) */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-family: var(--font-sans);
+            font-size: 12px;
+            font-weight: 500;
+            padding: 6px 12px;
+            border-radius: var(--radius-md);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            border: 1px solid var(--border);
+            background: var(--surface);
+            color: var(--text-secondary);
+            line-height: 1.4;
+            white-space: nowrap;
+        }
+
+        .btn:hover {
+            background: var(--surface-card-hover);
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+
+        .btn:focus-visible {
+            outline: 2px solid var(--accent-blue);
+            outline-offset: 1px;
+        }
+
+        .btn-primary {
+            background: #2563eb;
+            border-color: #3b82f6;
+            color: #ffffff;
+            font-weight: 600;
+        }
+
+        .btn-primary:hover {
+            background: #1d4ed8;
+            border-color: #2563eb;
+            color: #ffffff;
+        }
+
+        .btn-ghost {
+            background: transparent;
+            border-color: transparent;
+            color: var(--text-muted);
+        }
+
+        .btn-ghost:hover {
+            background: var(--surface-subtle);
+            border-color: var(--border);
+            color: var(--text-primary);
+        }
+
+        .btn-sm {
+            padding: 4px 8px;
+            font-size: 11px;
+        }
+
+        /* ==========================================================================
+           2. INTEGRATED SEGMENTED KPI CARDS (Eliminates Duplicate Filter Tabs)
+           ========================================================================== */
+        .kpi-strip {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(135px, 1fr));
+            gap: 8px;
+            margin-bottom: 14px;
+        }
+
+        .kpi-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 9px 12px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            min-height: 58px;
+        }
+
+        .kpi-card:hover {
+            border-color: var(--border-hover);
+            background: var(--surface-card-hover);
+        }
+
+        .kpi-card.active {
+            border-color: var(--border-active);
+            background: var(--accent-blue-subtle);
+        }
+
+        .kpi-card.active .kpi-label {
+            color: var(--accent-blue);
+            font-weight: 600;
+        }
+
+        .kpi-card.active .kpi-num {
+            color: #ffffff;
+        }
+
+        .kpi-label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 2px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .kpi-num {
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text-primary);
+            line-height: 1.1;
+        }
+
+        .kpi-static {
+            cursor: default;
+        }
+        .kpi-static:hover {
+            border-color: var(--border);
+            background: var(--surface);
+        }
+
+        /* ==========================================================================
+           3. ANALYTICAL CONTROLS & COMMAND BAR
+           ========================================================================== */
+        .controls-panel {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .controls-top {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+
+        /* Linear-Style Search / Command Bar */
+        .command-bar {
+            position: relative;
+            flex: 1 1 340px;
+            display: flex;
+            align-items: center;
+        }
+
+        .command-bar svg {
+            position: absolute;
+            left: 10px;
+            color: var(--text-muted);
+            pointer-events: none;
+        }
+
+        .command-bar input {
+            width: 100%;
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 7px 55px 7px 32px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-family: inherit;
+            transition: border-color 0.15s ease;
+        }
+
+        .command-bar input:focus {
+            outline: none;
+            border-color: var(--border-active);
+        }
+
+        .kbd-badge {
+            position: absolute;
+            right: 8px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            color: var(--text-faint);
+            background: var(--surface-subtle);
+            border: 1px solid var(--border);
+            padding: 2px 5px;
+            border-radius: var(--radius-xs);
+            pointer-events: none;
+        }
+
+        /* View Mode Segmented Switcher */
+        .segmented-switcher {
+            display: inline-flex;
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 2px;
+            gap: 2px;
+        }
+
+        .view-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 5px 11px;
+            border-radius: var(--radius-sm);
+            font-size: 11px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            white-space: nowrap;
+        }
+
+        .view-btn.active {
+            background: var(--surface-subtle);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            font-weight: 600;
+        }
+
+        .view-btn:hover:not(.active) {
+            color: var(--text-secondary);
+        }
+
+        /* Sort Select */
+        .sort-wrap select {
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-family: inherit;
+            cursor: pointer;
+        }
+        .sort-wrap select:focus {
+            outline: none;
+            border-color: var(--border-active);
+        }
+
+        /* Precision Filter Grid with Explicit Labels */
+        .filters-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1.3fr 1fr 1.1fr 1.2fr auto;
+            gap: 10px;
+            align-items: flex-end;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        @media (max-width: 1024px) {
+            .filters-grid {
+                grid-template-columns: repeat(3, 1fr) auto;
+            }
+        }
+        @media (max-width: 768px) {
+            .filters-grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        .field-group {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+        }
+
+        .field-group label {
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .field-group input, .field-group select {
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 5px 8px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-family: inherit;
+            width: 100%;
+        }
+
+        .field-group input:focus, .field-group select:focus {
+            outline: none;
+            border-color: var(--border-active);
+        }
+
+        .field-range {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .field-range span {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        .status-counter-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-muted);
+            padding-top: 4px;
+        }
+
+        .status-counter-bar strong {
+            color: var(--text-primary);
+        }
+
+        /* ==========================================================================
+           4. WORKSPACE LAYOUT (Map + Listings Grid)
+           ========================================================================== */
+        #appWorkspace {
+            display: grid;
+            gap: 16px;
+            width: 100%;
+            transition: all 0.2s ease;
+        }
+
+        /* Mode 1: Grid Only */
+        .mode-grid #appWorkspace {
+            grid-template-columns: 1fr;
+        }
+        .mode-grid #mapWrapper {
+            display: none !important;
+        }
+        .mode-grid .listings-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 14px;
+            max-height: none;
+            overflow-y: visible;
+        }
+
+        /* Mode 2: Split View (Map 50% Left / Listings 50% Right) */
+        .mode-split #appWorkspace {
+            grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            align-items: start;
+        }
+        .mode-split #mapWrapper {
+            display: block;
+            position: sticky;
+            top: 14px;
+            height: calc(100vh - 75px);
+            min-height: 520px;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            z-index: 5;
+            isolation: isolate;
+        }
+        .mode-split .listings-container {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            min-width: 0;
+            max-height: calc(100vh - 75px);
+            overflow-y: auto;
+            padding-right: 6px;
+            z-index: 1;
+        }
+        .mode-split .listings-container .card {
+            flex-shrink: 0;
+            min-height: fit-content;
+        }
+
+        /* Mode 3: Map Only */
+        .mode-map #appWorkspace {
+            grid-template-columns: 1fr;
+        }
+        .mode-map #mapWrapper {
+            display: block;
+            height: calc(100vh - 160px);
+            min-height: 600px;
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            border: 1px solid var(--border);
+            z-index: 5;
+            isolation: isolate;
+        }
+        .mode-map .listings-container {
+            display: none !important;
+        }
+
+        /* Sleek Native Scrollbar */
+        .listings-container::-webkit-scrollbar {
+            width: 5px;
+        }
+        .listings-container::-webkit-scrollbar-track {
+            background: var(--bg);
+        }
+        .listings-container::-webkit-scrollbar-thumb {
+            background: var(--border);
+            border-radius: var(--radius-sm);
+        }
+        .listings-container::-webkit-scrollbar-thumb:hover {
+            background: var(--border-hover);
+        }
+
+        /* Fallback for smaller screens */
+        @media (max-width: 1080px) {
+            .mode-split #appWorkspace {
+                grid-template-columns: 1fr;
+            }
+            .mode-split #mapWrapper {
+                position: static;
+                height: 380px;
+                min-height: 380px;
+            }
+            .mode-split .listings-container {
+                max-height: none;
+                overflow-y: visible;
+            }
+        }
+
+        /* Leaflet Dark Filter Overlay */
+        #map { width: 100%; height: 100%; }
+        .leaflet-tile-pane {
+            filter: brightness(0.8) invert(1) contrast(1.15) hue-rotate(200deg) saturate(0.35);
+        }
+
+        /* ==========================================================================
+           5. LISTING CARD COMPONENT (Enterprise B2B Standard)
+           ========================================================================== */
+        .card {
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: border-color 0.15s ease;
+            position: relative;
+        }
+
+        .card:hover {
+            border-color: var(--border-hover);
+        }
+
+        .card.card-highlight {
+            border-color: var(--accent-amber) !important;
+            animation: cardBlink 1.4s ease-in-out;
+        }
+        @keyframes cardBlink {
+            0% { border-color: var(--border); }
+            50% { border-color: var(--accent-amber); }
+            100% { border-color: var(--border); }
+        }
+
+        .card.is-favorite { border-left: 3px solid var(--accent-amber); }
+        .card.is-tovisit { border-left: 3px solid var(--accent-purple); }
+        .card.is-rejected { border-left: 3px solid var(--text-faint); opacity: 0.65; }
+
+        /* Card Image Container (16:9 ratio, Clean Overlay) */
+        .card-img-wrap {
+            position: relative;
+            aspect-ratio: 16 / 9;
+            max-height: 195px;
+            background: #090a0f;
+            cursor: pointer;
+            overflow: hidden;
+        }
+
+        .card-img-wrap img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            transition: opacity 0.2s ease;
+        }
+
+        .card-img-wrap:hover img {
+            opacity: 0.92;
+        }
+
+        /* Single Discreet Badge on Top-Left */
+        .card-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            padding: 2px 7px;
+            border-radius: var(--radius-sm);
+            backdrop-filter: blur(8px);
+            z-index: 2;
+        }
+
+        .badge-whitelist {
+            background: rgba(16, 185, 129, 0.18);
+            color: #34d399;
+            border: 1px solid rgba(16, 185, 129, 0.35);
+        }
+
+        .badge-qualified {
+            background: rgba(59, 130, 246, 0.18);
+            color: #60a5fa;
+            border: 1px solid rgba(59, 130, 246, 0.35);
+        }
+
+        .badge-review {
+            background: rgba(245, 158, 11, 0.18);
+            color: #fbbf24;
+            border: 1px solid rgba(245, 158, 11, 0.35);
+        }
+
+        .badge-rejected {
+            background: rgba(244, 63, 94, 0.18);
+            color: #f87171;
+            border: 1px solid rgba(244, 63, 94, 0.35);
+        }
+
+        /* Quick Star Button on Top-Right of Image */
+        .card-fav-btn {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            width: 26px;
+            height: 26px;
+            border-radius: var(--radius-sm);
+            background: rgba(9, 10, 15, 0.65);
+            backdrop-filter: blur(6px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            color: var(--text-muted);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            z-index: 2;
+        }
+        .card-fav-btn:hover {
+            color: var(--accent-amber);
+            border-color: rgba(245, 158, 11, 0.3);
+        }
+        .card-fav-btn.active {
+            color: var(--accent-amber);
+            background: rgba(245, 158, 11, 0.2);
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        .card-gallery-count {
+            position: absolute;
+            bottom: 8px;
+            right: 8px;
+            background: rgba(9, 10, 15, 0.75);
+            backdrop-filter: blur(6px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            color: #e2e8f0;
+            font-size: 10px;
+            font-weight: 500;
+            padding: 2px 6px;
+            border-radius: var(--radius-sm);
+            pointer-events: none;
+            z-index: 2;
+        }
+
+        .card-gallery-strip {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 5px 12px 2px 12px;
+            background: var(--surface);
+            border-bottom: 1px solid var(--border-subtle);
+            overflow-x: auto;
+        }
+
+        .card-thumb {
+            width: 44px;
+            height: 30px;
+            object-fit: cover;
+            border-radius: var(--radius-xs);
+            border: 1px solid var(--border);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            flex-shrink: 0;
+        }
+
+        .card-thumb:hover, .card-thumb.active {
+            border-color: var(--accent-blue);
+            transform: scale(1.04);
+        }
+
+        .thumb-more {
+            font-size: 10px;
+            font-family: var(--font-mono);
+            color: var(--text-muted);
+            padding: 2px 5px;
+            border-radius: var(--radius-xs);
+            background: var(--surface-card);
+            border: 1px solid var(--border);
+            flex-shrink: 0;
+            cursor: pointer;
+        }
+        .thumb-more:hover {
+            color: var(--text-primary);
+            border-color: var(--border-hover);
+        }
+
+        /* Card Content Area */
+        .card-content {
+            padding: 12px 14px;
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+            flex-grow: 1;
+        }
+
+        /* Meta Row: Source ID & Score */
+        .card-meta-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        .meta-source {
+            font-family: var(--font-mono);
+            font-size: 10px;
+            letter-spacing: 0.03em;
+            color: var(--text-muted);
+        }
+
+        .meta-score {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .meta-score strong {
+            color: var(--text-primary);
+        }
+
+        /* Card Title: 1 line with ellipsis */
+        .card-title {
+            font-size: 13px;
+            font-weight: 600;
+            line-height: 1.35;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .card-title a {
+            color: var(--text-primary);
+            transition: color 0.15s ease;
+        }
+        .card-title a:hover {
+            color: var(--accent-blue);
+        }
+
+        /* Price Row: Bold Numerical Accent + Secondary Per M2 */
+        .card-price-row {
+            display: flex;
+            align-items: baseline;
+            gap: 6px;
+            margin-top: 1px;
+            margin-bottom: 2px;
+        }
+
+        .price-val {
+            font-size: 17px;
+            font-weight: 700;
+            color: #ffffff;
+        }
+
+        .price-m2 {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+
+        /* Location Line */
+        .card-location {
+            font-size: 11px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .loc-precision {
+            font-size: 9px;
+            font-weight: 600;
+            text-transform: uppercase;
+            padding: 1px 4px;
+            border-radius: var(--radius-xs);
+        }
+        .tag-exact { background: var(--accent-emerald-subtle); color: #34d399; }
+        .tag-approx { background: var(--accent-amber-subtle); color: #fbbf24; }
+
+        /* Specifications: Clean Dot-Separated String */
+        .card-specs {
+            display: flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 6px;
+            font-size: 11px;
+            color: var(--text-secondary);
+            padding: 6px 0;
+            border-top: 1px solid var(--border-subtle);
+            border-bottom: 1px solid var(--border-subtle);
+            margin: 4px 0;
+        }
+
+        .spec-item strong {
+            color: var(--text-primary);
+        }
+
+        .spec-sep {
+            color: var(--text-faint);
+            font-size: 10px;
+        }
+
+        /* Rejection Box */
+        .rejection-box {
+            background: var(--accent-rose-subtle);
+            border: 1px solid rgba(244, 63, 94, 0.2);
+            border-radius: var(--radius-sm);
+            padding: 6px 8px;
+            font-size: 11px;
+            color: #f87171;
+            margin-top: 4px;
+        }
+        .rejection-box strong {
+            display: block;
+            margin-bottom: 2px;
+            color: #fca5a5;
+        }
+
+        /* Checklist Features */
+        .card-features {
+            font-size: 11px;
+            color: var(--text-secondary);
+            margin-top: 2px;
+        }
+        .card-features ul {
+            list-style: none;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .card-features li {
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #a7f3d0;
+        }
+        .card-features li.warning {
+            color: #fca5a5;
+        }
+
+        /* Card Footer: CRM Segmented Bar + Secondary Actions */
+        .card-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding-top: 8px;
+            margin-top: auto;
+            border-top: 1px solid var(--border-subtle);
+            gap: 8px;
+        }
+
+        .crm-toolbar {
+            display: inline-flex;
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 2px;
+            gap: 1px;
+        }
+
+        .crm-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-muted);
+            padding: 4px 7px;
+            border-radius: var(--radius-xs);
+            font-size: 11px;
+            font-weight: 500;
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.15s ease;
+            white-space: nowrap;
+        }
+        .crm-btn:hover {
+            color: var(--text-primary);
+            background: var(--surface-subtle);
+        }
+        .crm-btn.active-fav {
+            color: var(--accent-amber);
+            background: rgba(245, 158, 11, 0.15);
+            font-weight: 600;
+        }
+        .crm-btn.active-visit {
+            color: var(--accent-purple);
+            background: rgba(168, 85, 247, 0.15);
+            font-weight: 600;
+        }
+        .crm-btn.active-rej {
+            color: var(--accent-rose);
+            background: rgba(244, 63, 94, 0.15);
+            font-weight: 600;
+        }
+
+        .card-links {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .btn-link, .btn-icon {
+            font-size: 11px;
+            font-family: inherit;
+            color: var(--text-secondary);
+            padding: 4px 8px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+            background: var(--surface);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-link:hover, .btn-icon:hover {
+            background: var(--surface-card-hover);
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+        .btn-geoportal-live {
+            background: rgba(16, 185, 129, 0.08) !important;
+            border-color: rgba(16, 185, 129, 0.28) !important;
+            color: #34d399 !important;
+            font-weight: 500;
+        }
+        .btn-geoportal-live:hover {
+            background: rgba(16, 185, 129, 0.18) !important;
+            border-color: #34d399 !important;
+            color: #6ee7b7 !important;
+        }
+
+        /* Notes Drawer */
+        .notes-drawer {
+            display: none;
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid var(--border-subtle);
+        }
+        .notes-drawer textarea {
+            width: 100%;
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            padding: 6px 8px;
+            font-size: 11px;
+            font-family: inherit;
+            resize: vertical;
+            min-height: 50px;
+        }
+        .notes-drawer textarea:focus {
+            outline: none;
+            border-color: var(--border-active);
+        }
+        .notes-footer {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-top: 5px;
+        }
+        .notes-status-text {
+            font-size: 10px;
+            color: var(--text-muted);
+        }
+        .notes-save-btn {
+            background: var(--surface-subtle);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 10px;
+            padding: 3px 8px;
+            border-radius: var(--radius-xs);
+            cursor: pointer;
+        }
+        .notes-save-btn:hover {
+            border-color: var(--border-hover);
+        }
+
+        /* ==========================================================================
+           6. LEAFLET POPUP & PIN STYLING
+           ========================================================================== */
+        .custom-pin {
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            border: 2px solid var(--bg);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.6);
+            cursor: pointer;
+            transition: transform 0.15s ease;
+        }
+        .custom-pin:hover {
+            transform: scale(1.2);
+            z-index: 1000 !important;
+        }
+        .pin-blue { background: #2563eb; color: #fff; }
+        .pin-green { background: #10b981; color: #fff; }
+        .pin-gold { background: #f59e0b; color: #fff; }
+        .pin-purple { background: #9333ea; color: #fff; }
+        .pin-orange { background: #ea580c; color: #fff; }
+        .pin-gray { background: #475569; color: #94a3b8; }
+        .pin-approx { border-style: dashed; }
+
+        .leaflet-popup-content-wrapper {
+            background: var(--surface-overlay) !important;
+            border: 1px solid var(--border) !important;
+            border-radius: var(--radius-lg) !important;
+            color: var(--text-primary) !important;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.6) !important;
+            padding: 0 !important;
+            overflow: hidden !important;
+        }
+        .leaflet-popup-tip {
+            background: var(--surface-overlay) !important;
+            border: 1px solid var(--border) !important;
+        }
+        .leaflet-popup-content {
+            margin: 0 !important;
+            line-height: 1.4 !important;
+        }
+        .popup-card {
+            width: 250px;
+        }
+        .popup-img {
+            width: 100%;
+            height: 110px;
+            object-fit: cover;
+            cursor: pointer;
+        }
+        .popup-body {
+            padding: 10px 12px;
+        }
+        .popup-price {
+            font-size: 14px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 2px;
+        }
+        .popup-title {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            margin-bottom: 4px;
+        }
+        .popup-specs {
+            font-size: 10px;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+        }
+        .popup-actions {
+            display: flex;
+            gap: 4px;
+        }
+
+        /* ==========================================================================
+           7. LIVE PROGRESS MONITOR PANEL
+           ========================================================================== */
+        #progressPanel {
+            display: none;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            padding: 12px 16px;
+            margin-bottom: 16px;
+        }
+        .prog-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        .prog-bar-track {
+            background: var(--surface-input);
+            border-radius: var(--radius-xs);
+            height: 4px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            border: 1px solid var(--border-subtle);
+        }
+        .prog-bar-fill {
+            background: var(--accent-blue);
+            width: 0%;
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        .prog-metrics {
+            display: flex;
+            gap: 16px;
+            font-size: 11px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+            flex-wrap: wrap;
+        }
+        .prog-metrics strong {
+            color: var(--text-primary);
+        }
+        .prog-logs {
+            max-height: 80px;
+            overflow-y: auto;
+            background: var(--surface-input);
+            border: 1px solid var(--border-subtle);
+            border-radius: var(--radius-md);
+            padding: 6px 10px;
+            font-family: var(--font-mono);
+            font-size: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        /* ==========================================================================
+           8. MODALS & TOAST
+           ========================================================================== */
+        #imgModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.88);
+            backdrop-filter: blur(8px);
+            z-index: 10000;
+            justify-content: center;
+            align-items: center;
+            cursor: pointer;
+            gap: 16px;
+        }
+        .img-modal-content {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            max-width: 90vw;
+            max-height: 90vh;
+        }
+        #imgModal img {
+            max-width: 88vw;
+            max-height: 80vh;
+            object-fit: contain;
+            border-radius: var(--radius-lg);
+            border: 1px solid var(--border);
+            cursor: default;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.8);
+        }
+        .img-modal-caption {
+            font-family: var(--font-mono);
+            font-size: 12px;
+            color: var(--text-secondary);
+            background: rgba(17, 19, 24, 0.75);
+            padding: 4px 10px;
+            border-radius: var(--radius-sm);
+            border: 1px solid var(--border);
+        }
+        .img-modal-btn {
+            background: rgba(17, 19, 24, 0.85);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            font-size: 22px;
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s ease;
+            user-select: none;
+            z-index: 10002;
+        }
+        .img-modal-btn:hover {
+            background: var(--surface-hover);
+            border-color: var(--border-hover);
+            color: #fff;
+            transform: scale(1.08);
+        }
+        #imgModalClose {
+            position: absolute;
+            top: 20px;
+            right: 25px;
+            font-size: 30px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            z-index: 10003;
+            transition: color 0.15s;
+        }
+        #imgModalClose:hover {
+            color: #fff;
+        }
+
+        /* Config Modal */
+        #configModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.7);
+            backdrop-filter: blur(4px);
+            z-index: 9999;
+            justify-content: center;
+            align-items: center;
+            padding: 16px;
+        }
+        .config-card {
+            background: var(--surface-overlay);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-lg);
+            width: 100%;
+            max-width: 680px;
+            max-height: 88vh;
+            overflow-y: auto;
+            padding: 20px 22px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+        }
+        .checkbox-group {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px 16px;
+        }
+        .check-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 13px;
+            color: var(--text-primary);
+            cursor: pointer;
+        }
+        .check-item input {
+            width: auto;
+            margin: 0;
+        }
+        .config-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid var(--border-subtle);
+        }
+        .config-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .config-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .config-tabs {
+            display: flex;
+            gap: 6px;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 14px;
+        }
+        .config-tab-btn {
+            background: transparent;
+            border: none;
+            border-bottom: 2px solid transparent;
+            color: var(--text-muted);
+            padding: 6px 12px;
+            font-size: 12px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .config-tab-btn:hover {
+            color: var(--text-primary);
+        }
+        .config-tab-btn.active {
+            color: var(--accent-blue);
+            border-bottom-color: var(--accent-blue);
+        }
+        .config-profile-bar {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 8px 10px;
+            margin-bottom: 14px;
+        }
+        .portal-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-md);
+            padding: 10px 14px;
+            margin-bottom: 8px;
+        }
+        .portal-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .portal-pages {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+        .portal-pages input {
+            width: 70px !important;
+            text-align: center;
+        }
+        .config-field {
+            margin-bottom: 12px;
+        }
+        .config-field label {
+            display: block;
+            font-size: 10px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: 4px;
+        }
+        .config-field input, .config-field select, .config-field textarea {
+            width: 100%;
+            background: var(--surface-input);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 6px 10px;
+            border-radius: var(--radius-md);
+            font-size: 12px;
+            font-family: inherit;
+        }
+        .config-field input:focus, .config-field select:focus, .config-field textarea:focus {
+            outline: none;
+            border-color: var(--border-active);
+        }
+        .city-chips {
+            display: flex;
+            gap: 4px;
+            flex-wrap: wrap;
+            margin-top: 6px;
+        }
+        .chip {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-secondary);
+            padding: 3px 7px;
+            border-radius: var(--radius-xs);
+            font-size: 11px;
+            cursor: pointer;
+        }
+        .chip:hover {
+            border-color: var(--border-hover);
+            color: var(--text-primary);
+        }
+        .config-row2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+        .config-row3 {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 10px;
+        }
+        .config-actions {
+            display: flex;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-top: 18px;
+            padding-top: 14px;
+            border-top: 1px solid var(--border-subtle);
+        }
+
+        /* Toast */
+        #toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--surface-overlay);
+            border: 1px solid var(--border);
+            color: var(--text-primary);
+            padding: 8px 14px;
+            border-radius: var(--radius-md);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            display: none;
+            z-index: 10001;
+            font-size: 12px;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body class="mode-split">
+    <div class="container">
+        <!-- Top Navigation Header -->
+        <header>
+            <div class="brand-cluster">
+                <div class="brand-logo">🏡</div>
+                <div class="brand-meta">
+                    <div class="brand-title-row">
+                        <h1 class="brand-title">Universal Real Estate Hunter</h1>
+                        <span class="chip-badge" id="headerLocationBadge">📍 Rzeszów (+15 km)</span>
+                        <span class="chip-badge chip-live"><span class="live-dot"></span> LIVE</span>
+                    </div>
+                    <div class="brand-subtitle">System analityczny i monitoring ofert sprzedaży domów • Otodom, OLX, Nieruchomości-online</div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button class="btn" onclick="openConfigModal()">⚙️ Konfiguracja</button>
+                <button class="btn" onclick="fetchListings()">🔄 Odśwież</button>
+                <button class="btn btn-primary" id="btnScrape" onclick="triggerScrape()">⚡ Uruchom scraping</button>
+            </div>
+        </header>
+
+        <!-- Live Scraping Progress Panel -->
+        <section id="progressPanel">
+            <div class="prog-header">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="live-dot"></span>
+                    <div>
+                        <span id="progStep" style="font-weight: 600; color: #fff;">Pobieranie ofert...</span>
+                        <span id="progPortal" style="font-size: 11px; color: var(--text-muted); margin-left: 6px;">Portale w toku...</span>
+                    </div>
+                </div>
+                <div id="progPercent" style="font-weight: 700; color: #34d399; font-variant-numeric: tabular-nums;">0%</div>
+            </div>
+            <div class="prog-bar-track">
+                <div id="progBar" class="prog-bar-fill"></div>
+            </div>
+            <div class="prog-metrics">
+                <div>Pobrane: <strong id="progScraped">0</strong></div>
+                <div>Zakwalifikowane: <strong id="progQualified" style="color: #34d399;">0</strong></div>
+                <div>Duplikaty: <strong id="progDups">0</strong></div>
+                <div>Czas: <strong id="progElapsed">0s</strong></div>
+            </div>
+            <div id="progLogs" class="prog-logs">
+                <div style="color: var(--text-faint);">Oczekiwanie na rozpoczęcie cyklu...</div>
+            </div>
+        </section>
+
+        <!-- Integrated Segmented KPI Cards (Active Filter Selector) -->
+        <section class="kpi-strip">
+            <div class="kpi-card active" data-filter="ALL" onclick="setFilter('ALL', this)">
+                <div class="kpi-label">Wszystkie</div>
+                <div class="kpi-num" id="stTotal">-</div>
+            </div>
+            <div class="kpi-card" data-filter="CRM_FAVORITE" onclick="setFilter('CRM_FAVORITE', this)">
+                <div class="kpi-label">⭐ Ulubione</div>
+                <div class="kpi-num" id="stFavorite" style="color: var(--accent-amber);">-</div>
+            </div>
+            <div class="kpi-card" data-filter="CRM_TO_VISIT" onclick="setFilter('CRM_TO_VISIT', this)">
+                <div class="kpi-label">📅 Do wizyty</div>
+                <div class="kpi-num" id="stToVisit" style="color: #c084fc;">-</div>
+            </div>
+            <div class="kpi-card" data-filter="QUALIFIED_WHITELIST" onclick="setFilter('QUALIFIED_WHITELIST', this)">
+                <div class="kpi-label">⭐ Whitelist</div>
+                <div class="kpi-num" id="stWhitelist" style="color: #34d399;">-</div>
+            </div>
+            <div class="kpi-card" data-filter="QUALIFIED" onclick="setFilter('QUALIFIED', this)">
+                <div class="kpi-label">✅ Kwalifikacja</div>
+                <div class="kpi-num" id="stQualified" style="color: #60a5fa;">-</div>
+            </div>
+            <div class="kpi-card" data-filter="NEEDS_REVIEW" onclick="setFilter('NEEDS_REVIEW', this)">
+                <div class="kpi-label">🔍 Do weryfikacji</div>
+                <div class="kpi-num" id="cntRev" style="color: #fbbf24;">-</div>
+            </div>
+            <div class="kpi-card" data-filter="REJECTED" onclick="setFilter('REJECTED', this)">
+                <div class="kpi-label">❌ Odrzucone</div>
+                <div class="kpi-num" id="cntRej" style="color: #f87171;">-</div>
+            </div>
+            <div class="kpi-card kpi-static">
+                <div class="kpi-label">Śr. cena / m²</div>
+                <div class="kpi-num" id="stAvgPrice" style="font-size: 16px;">-</div>
+            </div>
+
+            <!-- Hidden compatibility spans for legacy selectors -->
+            <span id="cntAll" style="display:none"></span>
+            <span id="cntFav" style="display:none"></span>
+            <span id="cntVisit" style="display:none"></span>
+            <span id="cntWl" style="display:none"></span>
+            <span id="cntQual" style="display:none"></span>
+        </section>
+
+        <!-- Analytical Controls & Filter Bar -->
+        <section class="controls-panel">
+            <div class="controls-top">
+                <!-- Command Bar Search -->
+                <div class="command-bar">
+                    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="11" cy="11" r="8"></circle>
+                        <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    </svg>
+                    <input type="text" id="searchInput" placeholder="Szukaj po ulicy, dzielnicy, cechach (np. Słocina, Paderewskiego, pompa ciepła)..." oninput="applyFilters()">
+                    <kbd class="kbd-badge">Ctrl+K</kbd>
+                </div>
+
+                <!-- View Switcher (Segmented Control) -->
+                <div class="segmented-switcher">
+                    <button class="view-btn" id="btnViewGrid" onclick="switchViewMode('grid')">🗂️ Kafelki</button>
+                    <button class="view-btn active" id="btnViewSplit" onclick="switchViewMode('split')">🗺️ Split (Mapa + Lista)</button>
+                    <button class="view-btn" id="btnViewMap" onclick="switchViewMode('map')">📍 Pełna Mapa</button>
+                </div>
+
+                <!-- Sort Control -->
+                <div class="sort-wrap">
+                    <select id="sortSelect" onchange="applyFilters()">
+                        <option value="score_desc">Sortuj: Score (najwyższy)</option>
+                        <option value="price_asc">Cena (od najniższej)</option>
+                        <option value="price_desc">Cena (od najwyższej)</option>
+                        <option value="area_desc">Metraż (od największego)</option>
+                        <option value="price_m2_asc">Cena / m² (najniższa)</option>
+                        <option value="created_desc">Data dodania (najnowsze)</option>
+                    </select>
+                </div>
+            </div>
+
+            <!-- Structured Parameters Grid with Explicit Labels -->
+            <div class="filters-grid">
+                <div class="field-group">
+                    <label for="filterCategory">Kategoria</label>
+                    <select id="filterCategory" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie kategorie</option>
+                        <option value="dom">🏡 Domy</option>
+                        <option value="mieszkanie">🏢 Mieszkania</option>
+                        <option value="dzialka">🌳 Działki</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterProfile">Profil</label>
+                    <select id="filterProfile" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie profile</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterMaxPrice">Maks. cena (PLN)</label>
+                    <input type="number" id="filterMaxPrice" placeholder="Bez limitu" oninput="applyFilters()">
+                </div>
+                <div class="field-group">
+                    <label>Metraż (m²)</label>
+                    <div class="field-range">
+                        <input type="number" id="filterMinArea" placeholder="Od" oninput="applyFilters()">
+                        <span>–</span>
+                        <input type="number" id="filterMaxArea" placeholder="Do" oninput="applyFilters()">
+                    </div>
+                </div>
+                <div class="field-group">
+                    <label for="filterMinPlot">Min. działka (m²)</label>
+                    <input type="number" id="filterMinPlot" placeholder="np. 300" oninput="applyFilters()">
+                </div>
+                <div class="field-group">
+                    <label for="filterMarket">Rynek</label>
+                    <select id="filterMarket" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie</option>
+                        <option value="pierwotny">Pierwotny</option>
+                        <option value="wtórny">Wtórny</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterBuildingType">Typ zabudowy</label>
+                    <select id="filterBuildingType" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie typy</option>
+                        <option value="szeregowiec">Szeregowiec</option>
+                        <option value="bliźniak">Bliźniak</option>
+                        <option value="wolnostojący">Wolnostojący</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterFinish">Stan</label>
+                    <select id="filterFinish" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie stany</option>
+                        <option value="deweloperski">Deweloperski</option>
+                        <option value="surowy zamknięty">Surowy zamknięty</option>
+                        <option value="surowy otwarty">Surowy otwarty</option>
+                        <option value="do zamieszkania">Do zamieszkania</option>
+                        <option value="do remontu">Do remontu</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterVis">Zdjęcia</label>
+                    <select id="filterVis" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie</option>
+                        <option value="NO_VIS">Tylko realne zdjęcia</option>
+                        <option value="ONLY_VIS">Tylko wizualizacje</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterSewerage">Ścieki</label>
+                    <select id="filterSewerage" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie</option>
+                        <option value="miejska">Kanalizacja miejska</option>
+                        <option value="oczyszczalnia">Oczyszczalnia</option>
+                        <option value="szambo">Szambo</option>
+                    </select>
+                </div>
+                <div class="field-group">
+                    <label for="filterHeating">Ogrzewanie</label>
+                    <select id="filterHeating" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie</option>
+                        <option value="pompa ciepła">Pompa ciepła</option>
+                        <option value="gazowe">Gazowe</option>
+                        <option value="piec/paliwo stałe">Piec / paliwo stałe</option>
+                        <option value="elektryczne">Elektryczne</option>
+                        <option value="miejskie">Miejskie</option>
+                    </select>
+                </div>
+                <div>
+                    <button class="btn btn-ghost btn-sm" onclick="resetLiveFilters()">↺ Resetuj</button>
+                </div>
+            </div>
+
+            <div class="status-counter-bar">
+                <div>
+                    Wyniki spełniające kryteria: <strong id="cntFiltered">0</strong> z <span id="cntTotalAll">0</span> ofert
+                </div>
+            </div>
+        </section>
+
+        <!-- Workspace (Map & Listings) -->
+        <main id="appWorkspace">
+            <div id="mapWrapper">
+                <div id="map"></div>
+            </div>
+            <div class="listings-container" id="listingsContainer">
+                <div style="text-align: center; padding: 40px; color: var(--text-muted);">
+                    Ładowanie ofert z bazy danych SQLite...
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Image Lightbox Modal -->
+    <div id="imgModal" onclick="closeImgModal()">
+        <span id="imgModalClose">&times;</span>
+        <button id="imgModalPrev" class="img-modal-btn prev" onclick="event.stopPropagation(); navModalGallery(-1)" title="Poprzednie zdjęcie">&#10094;</button>
+        <div class="img-modal-content" onclick="event.stopPropagation()">
+            <img id="imgModalSrc" src="" alt="Zdjęcie w pełnym rozmiarze">
+            <div id="imgModalCaption" class="img-modal-caption"></div>
+        </div>
+        <button id="imgModalNext" class="img-modal-btn next" onclick="event.stopPropagation(); navModalGallery(1)" title="Następne zdjęcie">&#10095;</button>
+    </div>
+
+    <!-- Search Configuration Modal -->
+    <div id="configModal" onclick="closeConfigModal(event)">
+        <div class="config-card" onclick="event.stopPropagation()">
+            <div class="config-header">
+                <div>
+                    <h2 class="config-title">⚙️ Konfiguracja wyszukiwania i scraperów</h2>
+                    <div class="config-subtitle">Zarządzanie profilami (domy, mieszkania, działki) oraz portalami</div>
+                </div>
+                <button class="btn btn-ghost btn-sm" onclick="closeConfigModal(null)">✕</button>
+            </div>
+
+            <div class="config-tabs">
+                <button type="button" class="config-tab-btn active" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">🎯 Profile wyszukiwania</button>
+                <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">🌐 Scrapery & Portale</button>
+                <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">⏱️ Harmonogram</button>
+            </div>
+
+            <!-- TAB 1: PROFILES -->
+            <div id="configTabProfiles">
+                <!-- Profile Bar -->
+                <div class="config-profile-bar">
+                    <label style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;">Profil:</label>
+                    <select id="cfgProfileSelect" onchange="onProfileSelectChange(this.value)" style="flex:1;"></select>
+                    <button type="button" class="btn btn-sm" onclick="createNewProfile()">+ Nowy profil</button>
+                    <button type="button" class="btn btn-sm btn-ghost" id="btnDeleteProfile" onclick="deleteCurrentProfile()" style="color:#f87171;" title="Usuń profil">🗑️</button>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label for="cfgProfileName">Nazwa profilu:</label>
+                        <input type="text" id="cfgProfileName" placeholder="np. Domy Rzeszów">
+                    </div>
+                    <div class="config-field">
+                        <label for="cfgProfileCategory">Kategoria nieruchomości:</label>
+                        <select id="cfgProfileCategory" onchange="onCategorySelectChange(this.value)">
+                            <option value="dom">🏡 Dom</option>
+                            <option value="mieszkanie">🏢 Mieszkanie</option>
+                            <option value="dzialka">🌳 Działka</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div style="margin-bottom:12px;">
+                    <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-primary);">
+                        <input type="checkbox" id="cfgProfileEnabled" style="width:auto;">
+                        <span>Włączony w automatycznym cyklu scrapingu</span>
+                    </label>
+                </div>
+
+                <div class="config-field">
+                    <label for="cfgCity">Lokalizacja / Miasto:</label>
+                    <input type="text" id="cfgCity" placeholder="np. Rzeszów, Kraków, Warszawa...">
+                    <div class="city-chips">
+                        <span class="chip" onclick="setCfgCity('Rzeszów')">Rzeszów</span>
+                        <span class="chip" onclick="setCfgCity('Kraków')">Kraków</span>
+                        <span class="chip" onclick="setCfgCity('Warszawa')">Warszawa</span>
+                        <span class="chip" onclick="setCfgCity('Wrocław')">Wrocław</span>
+                        <span class="chip" onclick="setCfgCity('Lublin')">Lublin</span>
+                        <span class="chip" onclick="setCfgCity('Katowice')">Katowice</span>
+                        <span class="chip" onclick="setCfgCity('Poznań')">Poznań</span>
+                        <span class="chip" onclick="setCfgCity('Gdańsk')">Gdańsk</span>
+                        <span class="chip" onclick="setCfgCity('Łańcut')">Łańcut</span>
+                    </div>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label for="cfgRadius">Promień (+km):</label>
+                        <select id="cfgRadius">
+                            <option value="0">+0 km (tylko miasto)</option>
+                            <option value="5">+5 km</option>
+                            <option value="10">+10 km</option>
+                            <option value="15">+15 km</option>
+                            <option value="25">+25 km</option>
+                            <option value="50">+50 km</option>
+                        </select>
+                    </div>
+                    <div class="config-field">
+                        <label for="cfgMarket">Rynek:</label>
+                        <select id="cfgMarket">
+                            <option value="all">Wszystkie</option>
+                            <option value="pierwotny">Pierwotny</option>
+                            <option value="wtórny">Wtórny</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label for="cfgOwnerType">Ogłoszeniodawca:</label>
+                        <select id="cfgOwnerType">
+                            <option value="all">Wszyscy</option>
+                            <option value="private">Tylko osoby prywatne</option>
+                            <option value="agency">Tylko biura nieruchomości</option>
+                            <option value="developer">Tylko deweloperzy</option>
+                        </select>
+                    </div>
+                    <div></div>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label for="cfgMinPrice">Cena min. (PLN):</label>
+                        <input type="number" id="cfgMinPrice" placeholder="0">
+                    </div>
+                    <div class="config-field">
+                        <label for="cfgMaxPrice">Cena maks. (PLN):</label>
+                        <input type="number" id="cfgMaxPrice" placeholder="Bez limitu">
+                    </div>
+                </div>
+
+                <!-- Dynamic Category Containers -->
+                <!-- Dom specific -->
+                <div id="catBoxDom">
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinAreaHome">Metraż domu od (m²):</label>
+                            <input type="number" id="cfgMinAreaHome" placeholder="np. 90">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgMaxAreaHome">Metraż domu do (m²):</label>
+                            <input type="number" id="cfgMaxAreaHome" placeholder="np. 180">
+                        </div>
+                    </div>
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinAreaPlot">Min. działka (m²):</label>
+                            <input type="number" id="cfgMinAreaPlot" placeholder="np. 300">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgMaxAreaPlot">Maks. działka (m²):</label>
+                            <input type="number" id="cfgMaxAreaPlot" placeholder="Opcjonalnie">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Mieszkanie specific -->
+                <div id="catBoxMieszkanie" style="display:none;">
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinAreaApt">Metraż mieszkania od (m²):</label>
+                            <input type="number" id="cfgMinAreaApt" placeholder="np. 35">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgMaxAreaApt">Metraż mieszkania do (m²):</label>
+                            <input type="number" id="cfgMaxAreaApt" placeholder="np. 80">
+                        </div>
+                    </div>
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinRooms">Liczba pokoi od:</label>
+                            <input type="number" id="cfgMinRooms" placeholder="np. 2">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgMaxRooms">Liczba pokoi do:</label>
+                            <input type="number" id="cfgMaxRooms" placeholder="np. 4">
+                        </div>
+                    </div>
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinFloor">Piętro od:</label>
+                            <input type="number" id="cfgMinFloor" placeholder="np. 0">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgMaxFloor">Piętro do:</label>
+                            <input type="number" id="cfgMaxFloor" placeholder="np. 5">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Dzialka specific -->
+                <div id="catBoxDzialka" style="display:none;">
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinAreaPlotOnly">Powierzchnia działki od (m²):</label>
+                            <input type="number" id="cfgMinAreaPlotOnly" placeholder="np. 800">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgMaxAreaPlotOnly">Powierzchnia działki do (m²):</label>
+                            <input type="number" id="cfgMaxAreaPlotOnly" placeholder="np. 2500">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label for="cfgMinPriceM2">Cena / m² od (PLN):</label>
+                        <input type="number" id="cfgMinPriceM2" placeholder="Opcjonalnie">
+                    </div>
+                    <div class="config-field">
+                        <label for="cfgMaxPriceM2">Cena / m² do (PLN):</label>
+                        <input type="number" id="cfgMaxPriceM2" placeholder="Opcjonalnie">
+                    </div>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label for="cfgMinYearBuilt">Rok budowy od:</label>
+                        <input type="number" id="cfgMinYearBuilt" placeholder="np. 2015">
+                    </div>
+                    <div class="config-field">
+                        <label for="cfgMaxYearBuilt">Rok budowy do:</label>
+                        <input type="number" id="cfgMaxYearBuilt" placeholder="Opcjonalnie">
+                    </div>
+                </div>
+
+                <div class="config-field">
+                    <label>Stan wykończenia (zaznacz dopuszczalne; nic = brak filtra):</label>
+                    <div class="checkbox-group">
+                        <label class="check-item"><input type="checkbox" class="cfg-finish" value="do zamieszkania"> Do zamieszkania</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-finish" value="deweloperski"> Deweloperski</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-finish" value="do wykończenia"> Do wykończenia</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-finish" value="surowy zamknięty"> Surowy zamknięty</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-finish" value="surowy otwarty"> Surowy otwarty</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-finish" value="do remontu"> Do remontu</label>
+                    </div>
+                </div>
+
+                <div class="config-field">
+                    <label>Typ budynku (zaznacz dopuszczalne; nic = brak filtra):</label>
+                    <div class="checkbox-group">
+                        <label class="check-item"><input type="checkbox" class="cfg-building" value="wolnostojący"> Wolnostojący</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-building" value="bliźniak"> Bliźniak</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-building" value="szeregowiec"> Szeregowiec</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-building" value="inny"> Inny</label>
+                    </div>
+                </div>
+
+                <div class="config-field">
+                    <label>Ogrzewanie (zaznacz dopuszczalne; nic = brak filtra):</label>
+                    <div class="checkbox-group">
+                        <label class="check-item"><input type="checkbox" class="cfg-heating" value="pompa ciepła"> Pompa ciepła</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-heating" value="gazowe"> Gazowe</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-heating" value="miejskie"> Miejskie</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-heating" value="elektryczne"> Elektryczne</label>
+                        <label class="check-item"><input type="checkbox" class="cfg-heating" value="piec/paliwo stałe"> Piec / paliwo stałe</label>
+                    </div>
+                </div>
+
+                <div class="config-row2">
+                    <div class="config-field">
+                        <label class="check-item">
+                            <input type="checkbox" id="cfgRejectSeptic"> Odrzucaj oferty ze szambem
+                        </label>
+                    </div>
+                    <div class="config-field">
+                        <label class="check-item">
+                            <input type="checkbox" id="cfgAllowVis"> Dopuszczaj oferty z wizualizacjami
+                        </label>
+                    </div>
+                </div>
+
+                <div class="config-field">
+                    <label for="cfgBlacklist">Wykluczone słowa (Blacklist, oddzielone przecinkami):</label>
+                    <textarea id="cfgBlacklist" rows="2" placeholder="np. osuwisko, skarpie, zalewowe, Tyczyn..."></textarea>
+                </div>
+
+                <div class="config-field">
+                    <label for="cfgDiscordWebhook">Dedykowany Webhook Discord (opcjonalny dla profilu):</label>
+                    <input type="url" id="cfgDiscordWebhook" placeholder="https://discord.com/api/webhooks/...">
+                </div>
+            </div>
+
+            <!-- TAB 2: SCRAPERS -->
+            <div id="configTabScrapers" style="display:none;">
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                    Sterowanie pracą scraperów poszczególnych portali (włączanie, limity stron oraz opóźnienia zapytań).
+                </div>
+
+                <div class="portal-row">
+                    <div class="portal-info">
+                        <input type="checkbox" id="cfgScraperOtodom" style="width:auto;">
+                        <span>Otodom.pl</span>
+                    </div>
+                    <div class="portal-pages">
+                        <label for="cfgPagesOtodom">Maks. stron:</label>
+                        <input type="number" id="cfgPagesOtodom" min="1" max="50" value="5">
+                    </div>
+                </div>
+
+                <div class="portal-row">
+                    <div class="portal-info">
+                        <input type="checkbox" id="cfgScraperOlx" style="width:auto;">
+                        <span>OLX.pl</span>
+                    </div>
+                    <div class="portal-pages">
+                        <label for="cfgPagesOlx">Maks. stron:</label>
+                        <input type="number" id="cfgPagesOlx" min="1" max="50" value="5">
+                    </div>
+                </div>
+
+                <div class="portal-row">
+                    <div class="portal-info">
+                        <input type="checkbox" id="cfgScraperNieruchomosci" style="width:auto;">
+                        <span>Nieruchomości-online</span>
+                    </div>
+                    <div class="portal-pages">
+                        <label for="cfgPagesNieruchomosci">Maks. stron:</label>
+                        <input type="number" id="cfgPagesNieruchomosci" min="1" max="50" value="5">
+                    </div>
+                </div>
+
+                <div class="portal-row">
+                    <div class="portal-info">
+                        <input type="checkbox" id="cfgScraperMorizon" style="width:auto;">
+                        <span>Morizon.pl</span>
+                    </div>
+                    <div class="portal-pages">
+                        <label for="cfgPagesMorizon">Maks. stron:</label>
+                        <input type="number" id="cfgPagesMorizon" min="1" max="50" value="5">
+                    </div>
+                </div>
+
+                <div class="config-field" style="margin-top:16px;">
+                    <label for="cfgRequestDelay">Opóźnienie między żądaniami (sekundy):</label>
+                    <input type="number" id="cfgRequestDelay" step="0.5" min="0" value="1.0">
+                </div>
+            </div>
+
+            <!-- TAB 3: SCHEDULER -->
+            <div id="configTabScheduler" style="display:none;">
+                <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
+                    Ustawienia automatycznego przeszukiwania portali w trybie ciągłym (daemon <code>python main.py run</code>).
+                </div>
+
+                <div class="config-field">
+                    <label for="cfgIntervalMinutes">Interwał przeszukiwania w dzień (minuty):</label>
+                    <select id="cfgIntervalMinutes">
+                        <option value="10">Co 10 minut (agresywny / gorący rynek)</option>
+                        <option value="15">Co 15 minut (rekomendowany)</option>
+                        <option value="20" selected>Co 20 minut (standardowy / bezpieczny)</option>
+                        <option value="30">Co 30 minut</option>
+                        <option value="45">Co 45 minut</option>
+                        <option value="60">Co 60 minut (1 godzina)</option>
+                        <option value="120">Co 2 godziny</option>
+                    </select>
+                </div>
+
+                <div style="margin:16px 0 12px 0;">
+                    <label style="display:inline-flex;align-items:center;gap:8px;cursor:pointer;font-size:12px;color:var(--text-primary);">
+                        <input type="checkbox" id="cfgNightMode" checked style="width:auto;" onchange="toggleNightModeInputs(this.checked)">
+                        <span><strong>Włącz tryb nocny / godziny ciszy</strong></span>
+                    </label>
+                    <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
+                        Zmniejsza częstotliwość scrapowania w nocy, gdy nie pojawiają się nowe ogłoszenia.
+                    </div>
+                </div>
+
+                <div class="config-row2" id="nightSettingsRow">
+                    <div class="config-field">
+                        <label for="cfgQuietStart">Początek nocy (godzina):</label>
+                        <input type="time" id="cfgQuietStart" value="22:00">
+                    </div>
+                    <div class="config-field">
+                        <label for="cfgQuietEnd">Koniec nocy (godzina):</label>
+                        <input type="time" id="cfgQuietEnd" value="07:00">
+                    </div>
+                </div>
+
+                <div class="config-field" id="nightIntervalField">
+                    <label for="cfgNightIntervalMinutes">Interwał w nocy (minuty):</label>
+                    <select id="cfgNightIntervalMinutes">
+                        <option value="60" selected>Co 60 minut (rekomendowany)</option>
+                        <option value="120">Co 2 godziny</option>
+                        <option value="180">Co 3 godziny</option>
+                        <option value="360">Co 6 godzin</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="config-actions">
+                <button class="btn" onclick="closeConfigModal(null)">Anuluj</button>
+                <button class="btn" onclick="saveConfiguration(false)">💾 Zapisz konfigurację</button>
+                <button class="btn btn-primary" onclick="saveConfiguration(true)">🚀 Zapisz i uruchom scraping</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification Toast -->
+    <div id="toast">Powiadomienie</div>
+
+    <!-- Leaflet Map JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <script>
+        let allListings = [];
+        let currentFilter = 'ALL';
+        let currentViewMode = 'split';
+        let map = null;
+        let markersGroup = null;
+        let markersMap = {};
+        let activeConfig = null;
+
+        function showToast(msg) {
+            const t = document.getElementById('toast');
+            if (!t) return;
+            t.innerText = msg;
+            t.style.display = 'block';
+            setTimeout(() => { t.style.display = 'none'; }, 3200);
+        }
+
+        // Initialize Map with OpenStreetMap free tiles & Dark filter
+        function initLeafletMap(centerCoords = [50.0375, 22.0047]) {
+            if (map) {
+                map.setView(centerCoords, 12);
+                return;
+            }
+
+            map = L.map('map', {
+                center: centerCoords,
+                zoom: 12,
+                zoomControl: true,
+                scrollWheelZoom: true,
+            });
+
+            L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+                maxZoom: 19
+            }).addTo(map);
+
+            markersGroup = L.featureGroup().addTo(map);
+        }
+
+        function switchViewMode(mode) {
+            currentViewMode = mode;
+            document.body.className = 'mode-' + mode;
+
+            document.querySelectorAll('.view-btn').forEach(b => b.classList.remove('active'));
+            if (mode === 'grid') document.getElementById('btnViewGrid')?.classList.add('active');
+            if (mode === 'split') document.getElementById('btnViewSplit')?.classList.add('active');
+            if (mode === 'map') document.getElementById('btnViewMap')?.classList.add('active');
+
+            setTimeout(() => {
+                if (map) map.invalidateSize();
+            }, 250);
+        }
+
+        let allProfiles = [];
+        let currentProfileId = null;
+        let scrapersConfig = null;
+
+        function switchConfigTab(tab) {
+            const btnP = document.getElementById('tabBtnProfiles');
+            const btnS = document.getElementById('tabBtnScrapers');
+            const btnSch = document.getElementById('tabBtnScheduler');
+            const tabP = document.getElementById('configTabProfiles');
+            const tabS = document.getElementById('configTabScrapers');
+            const tabSch = document.getElementById('configTabScheduler');
+            if (btnP) btnP.classList.toggle('active', tab === 'profiles');
+            if (btnS) btnS.classList.toggle('active', tab === 'scrapers');
+            if (btnSch) btnSch.classList.toggle('active', tab === 'scheduler');
+            if (tabP) tabP.style.display = (tab === 'profiles') ? 'block' : 'none';
+            if (tabS) tabS.style.display = (tab === 'scrapers') ? 'block' : 'none';
+            if (tabSch) tabSch.style.display = (tab === 'scheduler') ? 'block' : 'none';
+        }
+
+        function toggleNightModeInputs(enabled) {
+            const row = document.getElementById('nightSettingsRow');
+            const interval = document.getElementById('nightIntervalField');
+            if (row) {
+                row.style.opacity = enabled ? '1' : '0.4';
+                row.style.pointerEvents = enabled ? 'auto' : 'none';
+            }
+            if (interval) {
+                interval.style.opacity = enabled ? '1' : '0.4';
+                interval.style.pointerEvents = enabled ? 'auto' : 'none';
+            }
+        }
+
+        function onCategorySelectChange(cat) {
+            const bDom = document.getElementById('catBoxDom');
+            const bApt = document.getElementById('catBoxMieszkanie');
+            const bPlot = document.getElementById('catBoxDzialka');
+            if (bDom) bDom.style.display = (cat === 'dom') ? 'block' : 'none';
+            if (bApt) bApt.style.display = (cat === 'mieszkanie') ? 'block' : 'none';
+            if (bPlot) bPlot.style.display = (cat === 'dzialka') ? 'block' : 'none';
+        }
+
+        async function fetchConfig() {
+            try {
+                const res = await fetch('/api/config');
+                activeConfig = await res.json();
+                allProfiles = activeConfig.profiles || [];
+                scrapersConfig = activeConfig.scrapers || {
+                    otodom: { enabled: true, max_pages: 5 },
+                    olx: { enabled: true, max_pages: 5 },
+                    nieruchomosci_online: { enabled: true, max_pages: 5 },
+                    morizon: { enabled: true, max_pages: 5 },
+                    request_delay: 1.0
+                };
+                if (allProfiles.length === 0) {
+                    allProfiles = [{
+                        id: "default",
+                        name: "Profil główny",
+                        category: "dom",
+                        enabled: true,
+                        city: activeConfig.city || "Rzeszów",
+                        distance_radius: activeConfig.distance_radius || 15,
+                        market_type: activeConfig.market_type || "all",
+                        owner_type: "all",
+                        min_price: activeConfig.min_price || 0,
+                        max_price: activeConfig.max_price || 1300000,
+                        min_area_home: activeConfig.min_area_home || 90,
+                        max_area_home: activeConfig.max_area_home || 145,
+                        min_area_plot: activeConfig.min_area_plot || 250,
+                        blacklist_keywords: activeConfig.blacklist_keywords || []
+                    }];
+                }
+
+                // Update filterProfile dropdown in analytical bar
+                const pSelect = document.getElementById('filterProfile');
+                if (pSelect) {
+                    const curVal = pSelect.value;
+                    pSelect.innerHTML = '<option value="ALL">Wszystkie profile</option>' +
+                        allProfiles.map(p => `<option value="${escapeHtml(p.name)}">${escapeHtml(p.name)}</option>`).join('');
+                    if (curVal && [...pSelect.options].some(o => o.value === curVal)) {
+                        pSelect.value = curVal;
+                    }
+                }
+
+                // Header badge
+                const badge = document.getElementById('headerLocationBadge');
+                if (badge) {
+                    const activeP = allProfiles.filter(p => p.enabled);
+                    if (activeP.length === 1) {
+                        badge.innerText = `📍 ${activeP[0].name} (${activeP[0].city} +${activeP[0].distance_radius} km)`;
+                    } else if (activeP.length > 1) {
+                        badge.innerText = `📍 ${activeP.length} profile (${activeP.map(p => p.city).slice(0, 2).join(', ')})`;
+                    } else {
+                        badge.innerText = `📍 ${activeConfig.city} (+${activeConfig.distance_radius} km)`;
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to load config:", err);
+            }
+        }
+
+        function refreshProfileSelect() {
+            const sel = document.getElementById('cfgProfileSelect');
+            if (!sel) return;
+            sel.innerHTML = allProfiles.map(p => {
+                const icon = p.category === 'mieszkanie' ? '🏢' : (p.category === 'dzialka' ? '🌳' : '🏡');
+                const stateDot = p.enabled ? '●' : '○';
+                return `<option value="${p.id}">${stateDot} ${icon} ${escapeHtml(p.name)} (${p.city})</option>`;
+            }).join('');
+            if (currentProfileId) sel.value = currentProfileId;
+        }
+
+        function loadProfileIntoForm(profId) {
+            const p = allProfiles.find(x => x.id === profId) || allProfiles[0];
+            if (!p) return;
+            currentProfileId = p.id;
+
+            document.getElementById('cfgProfileName').value = p.name || '';
+            document.getElementById('cfgProfileCategory').value = p.category || 'dom';
+            document.getElementById('cfgProfileEnabled').checked = p.enabled !== false;
+            document.getElementById('cfgCity').value = p.city || 'Rzeszów';
+            document.getElementById('cfgRadius').value = p.distance_radius ?? 15;
+            document.getElementById('cfgMarket').value = p.market_type || 'all';
+            document.getElementById('cfgOwnerType').value = p.owner_type || 'all';
+            document.getElementById('cfgMinPrice').value = p.min_price || 0;
+            document.getElementById('cfgMaxPrice').value = p.max_price || 1300000;
+            document.getElementById('cfgMinPriceM2').value = p.min_price_per_m2 || '';
+            document.getElementById('cfgMaxPriceM2').value = p.max_price_per_m2 || '';
+            document.getElementById('cfgMinYearBuilt').value = p.min_year_built || '';
+            document.getElementById('cfgMaxYearBuilt').value = p.max_year_built || '';
+            document.getElementById('cfgBlacklist').value = (p.blacklist_keywords || []).join(', ');
+            document.getElementById('cfgDiscordWebhook').value = p.discord_webhook_url || '';
+
+            const finishAllowed = p.allowed_finish_conditions || [];
+            const finishAll = finishAllowed.includes('all');
+            document.querySelectorAll('.cfg-finish').forEach(cb => { cb.checked = !finishAll && finishAllowed.includes(cb.value); });
+            const buildingAllowed = p.building_types || [];
+            document.querySelectorAll('.cfg-building').forEach(cb => { cb.checked = buildingAllowed.includes(cb.value); });
+            const heatingAllowed = p.allowed_heating_types || [];
+            const heatingAll = heatingAllowed.includes('all');
+            document.querySelectorAll('.cfg-heating').forEach(cb => { cb.checked = !heatingAll && heatingAllowed.includes(cb.value); });
+            document.getElementById('cfgRejectSeptic').checked = !!p.reject_septic_tank;
+            document.getElementById('cfgAllowVis').checked = p.allow_visualisations !== false;
+
+            // Category-specific boxes
+            document.getElementById('cfgMinAreaHome').value = p.min_area_home || '';
+            document.getElementById('cfgMaxAreaHome').value = p.max_area_home || '';
+            document.getElementById('cfgMinAreaPlot').value = p.min_area_plot || '';
+            document.getElementById('cfgMaxAreaPlot').value = p.max_area_plot || '';
+
+            document.getElementById('cfgMinAreaApt').value = p.min_area_home || '';
+            document.getElementById('cfgMaxAreaApt').value = p.max_area_home || '';
+            document.getElementById('cfgMinRooms').value = p.min_rooms || '';
+            document.getElementById('cfgMaxRooms').value = p.max_rooms || '';
+            document.getElementById('cfgMinFloor').value = (p.min_floor !== undefined && p.min_floor !== null) ? p.min_floor : '';
+            document.getElementById('cfgMaxFloor').value = (p.max_floor !== undefined && p.max_floor !== null) ? p.max_floor : '';
+
+            document.getElementById('cfgMinAreaPlotOnly').value = p.min_area_plot || '';
+            document.getElementById('cfgMaxAreaPlotOnly').value = p.max_area_plot || '';
+
+            onCategorySelectChange(p.category || 'dom');
+        }
+
+        function onProfileSelectChange(val) {
+            saveCurrentFormIntoMemory();
+            currentProfileId = val;
+            loadProfileIntoForm(val);
+        }
+
+        function createNewProfile() {
+            saveCurrentFormIntoMemory();
+            const newId = "profile_" + Date.now();
+            const newP = {
+                id: newId,
+                name: "Nowy profil " + (allProfiles.length + 1),
+                category: "mieszkanie",
+                enabled: true,
+                city: "Kraków",
+                distance_radius: 10,
+                market_type: "all",
+                owner_type: "all",
+                min_price: 300000,
+                max_price: 900000,
+                min_area_home: 40,
+                max_area_home: 80,
+                min_rooms: 2,
+                max_rooms: 4,
+                blacklist_keywords: [],
+                allowed_finish_conditions: ["all"],
+                building_types: ["szeregowiec", "bliźniak", "wolnostojący", "inny"],
+                allowed_heating_types: ["all"],
+                allow_visualisations: true,
+                reject_septic_tank: false
+            };
+            allProfiles.push(newP);
+            currentProfileId = newId;
+            refreshProfileSelect();
+            loadProfileIntoForm(newId);
+            showToast("Utworzono nowy profil");
+        }
+
+        function deleteCurrentProfile() {
+            if (allProfiles.length <= 1) {
+                alert("Nie można usunąć jedynego profilu wyszukiwania.");
+                return;
+            }
+            if (!confirm(`Czy na pewno chcesz usunąć profil "${document.getElementById('cfgProfileName').value}"?`)) {
+                return;
+            }
+            const idx = allProfiles.findIndex(p => p.id === currentProfileId);
+            if (idx >= 0) {
+                allProfiles.splice(idx, 1);
+            }
+            currentProfileId = allProfiles[0].id;
+            refreshProfileSelect();
+            loadProfileIntoForm(currentProfileId);
+            showToast("Profil został usunięty");
+        }
+
+        function saveCurrentFormIntoMemory() {
+            const p = allProfiles.find(x => x.id === currentProfileId);
+            if (!p) return;
+            const cat = document.getElementById('cfgProfileCategory').value;
+            p.name = document.getElementById('cfgProfileName').value.trim() || p.name;
+            p.category = cat;
+            p.enabled = document.getElementById('cfgProfileEnabled').checked;
+            p.city = document.getElementById('cfgCity').value.trim() || 'Rzeszów';
+            p.distance_radius = parseInt(document.getElementById('cfgRadius').value) || 15;
+            p.market_type = document.getElementById('cfgMarket').value;
+            p.owner_type = document.getElementById('cfgOwnerType').value;
+            p.min_price = parseFloat(document.getElementById('cfgMinPrice').value) || 0;
+            p.max_price = parseFloat(document.getElementById('cfgMaxPrice').value) || 1300000;
+            p.min_price_per_m2 = parseFloat(document.getElementById('cfgMinPriceM2').value) || null;
+            p.max_price_per_m2 = parseFloat(document.getElementById('cfgMaxPriceM2').value) || null;
+            p.min_year_built = parseInt(document.getElementById('cfgMinYearBuilt').value) || null;
+            p.max_year_built = parseInt(document.getElementById('cfgMaxYearBuilt').value) || null;
+            const blRaw = document.getElementById('cfgBlacklist').value;
+            p.blacklist_keywords = blRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
+            p.discord_webhook_url = document.getElementById('cfgDiscordWebhook').value.trim() || null;
+
+            const finishSel = Array.from(document.querySelectorAll('.cfg-finish:checked')).map(cb => cb.value);
+            p.allowed_finish_conditions = finishSel.length > 0 ? finishSel : ["all"];
+            p.building_types = Array.from(document.querySelectorAll('.cfg-building:checked')).map(cb => cb.value);
+            const heatingSel = Array.from(document.querySelectorAll('.cfg-heating:checked')).map(cb => cb.value);
+            p.allowed_heating_types = heatingSel.length > 0 ? heatingSel : ["all"];
+            p.reject_septic_tank = document.getElementById('cfgRejectSeptic').checked;
+            p.allow_visualisations = document.getElementById('cfgAllowVis').checked;
+
+            if (cat === 'dom') {
+                p.min_area_home = parseFloat(document.getElementById('cfgMinAreaHome').value) || 0;
+                p.max_area_home = parseFloat(document.getElementById('cfgMaxAreaHome').value) || null;
+                p.min_area_plot = parseFloat(document.getElementById('cfgMinAreaPlot').value) || 0;
+                p.max_area_plot = parseFloat(document.getElementById('cfgMaxAreaPlot').value) || null;
+            } else if (cat === 'mieszkanie') {
+                p.min_area_home = parseFloat(document.getElementById('cfgMinAreaApt').value) || 0;
+                p.max_area_home = parseFloat(document.getElementById('cfgMaxAreaApt').value) || null;
+                p.min_rooms = parseInt(document.getElementById('cfgMinRooms').value) || null;
+                p.max_rooms = parseInt(document.getElementById('cfgMaxRooms').value) || null;
+                const minF = document.getElementById('cfgMinFloor').value;
+                p.min_floor = minF !== '' ? parseInt(minF) : null;
+                const maxF = document.getElementById('cfgMaxFloor').value;
+                p.max_floor = maxF !== '' ? parseInt(maxF) : null;
+            } else if (cat === 'dzialka') {
+                p.min_area_plot = parseFloat(document.getElementById('cfgMinAreaPlotOnly').value) || 0;
+                p.max_area_plot = parseFloat(document.getElementById('cfgMaxAreaPlotOnly').value) || null;
+            }
+        }
+
+        function openConfigModal() {
+            if (!activeConfig) return;
+            switchConfigTab('profiles');
+
+            // Populate scrapers tab
+            const sc = scrapersConfig || {};
+            document.getElementById('cfgScraperOtodom').checked = sc.otodom ? sc.otodom.enabled !== false : true;
+            document.getElementById('cfgPagesOtodom').value = sc.otodom?.max_pages || 5;
+            document.getElementById('cfgScraperOlx').checked = sc.olx ? sc.olx.enabled !== false : true;
+            document.getElementById('cfgPagesOlx').value = sc.olx?.max_pages || 5;
+            document.getElementById('cfgScraperNieruchomosci').checked = sc.nieruchomosci_online ? sc.nieruchomosci_online.enabled !== false : true;
+            document.getElementById('cfgPagesNieruchomosci').value = sc.nieruchomosci_online?.max_pages || 5;
+            document.getElementById('cfgScraperMorizon').checked = sc.morizon ? sc.morizon.enabled !== false : true;
+            document.getElementById('cfgPagesMorizon').value = sc.morizon?.max_pages || 5;
+            document.getElementById('cfgRequestDelay').value = sc.request_delay ?? 1.0;
+
+            // Populate scheduler tab
+            const sched = activeConfig.scheduler || {};
+            if (document.getElementById('cfgIntervalMinutes')) {
+                document.getElementById('cfgIntervalMinutes').value = sched.interval_minutes || 20;
+            }
+            if (document.getElementById('cfgNightMode')) {
+                document.getElementById('cfgNightMode').checked = sched.night_mode !== false;
+                toggleNightModeInputs(sched.night_mode !== false);
+            }
+            if (document.getElementById('cfgQuietStart')) {
+                document.getElementById('cfgQuietStart').value = sched.quiet_hours_start || '22:00';
+            }
+            if (document.getElementById('cfgQuietEnd')) {
+                document.getElementById('cfgQuietEnd').value = sched.quiet_hours_end || '07:00';
+            }
+            if (document.getElementById('cfgNightIntervalMinutes')) {
+                document.getElementById('cfgNightIntervalMinutes').value = sched.night_interval_minutes || 60;
+            }
+
+            if (!currentProfileId && allProfiles.length > 0) {
+                currentProfileId = allProfiles[0].id;
+            }
+            refreshProfileSelect();
+            loadProfileIntoForm(currentProfileId);
+
+            document.getElementById('configModal').style.display = 'flex';
+        }
+
+        function closeConfigModal(e) {
+            if (!e || e.target.id === 'configModal' || e === null) {
+                document.getElementById('configModal').style.display = 'none';
+            }
+        }
+
+        function setCfgCity(city) {
+            document.getElementById('cfgCity').value = city;
+        }
+
+        async function saveConfiguration(triggerScrapingImmediately = false) {
+            saveCurrentFormIntoMemory();
+
+            // Collect scrapers settings
+            const scrapersPayload = {
+                otodom: {
+                    enabled: document.getElementById('cfgScraperOtodom').checked,
+                    max_pages: parseInt(document.getElementById('cfgPagesOtodom').value) || 5
+                },
+                olx: {
+                    enabled: document.getElementById('cfgScraperOlx').checked,
+                    max_pages: parseInt(document.getElementById('cfgPagesOlx').value) || 5
+                },
+                nieruchomosci_online: {
+                    enabled: document.getElementById('cfgScraperNieruchomosci').checked,
+                    max_pages: parseInt(document.getElementById('cfgPagesNieruchomosci').value) || 5
+                },
+                morizon: {
+                    enabled: document.getElementById('cfgScraperMorizon').checked,
+                    max_pages: parseInt(document.getElementById('cfgPagesMorizon').value) || 5
+                },
+                request_delay: parseFloat(document.getElementById('cfgRequestDelay').value) || 1.0
+            };
+
+            // Collect scheduler settings
+            const schedulerPayload = {
+                interval_minutes: parseInt(document.getElementById('cfgIntervalMinutes')?.value) || 20,
+                night_mode: document.getElementById('cfgNightMode')?.checked ?? true,
+                quiet_hours_start: document.getElementById('cfgQuietStart')?.value || '22:00',
+                quiet_hours_end: document.getElementById('cfgQuietEnd')?.value || '07:00',
+                night_interval_minutes: parseInt(document.getElementById('cfgNightIntervalMinutes')?.value) || 60
+            };
+
+            const payload = {
+                profiles: allProfiles,
+                scrapers: scrapersPayload,
+                scheduler: schedulerPayload
+            };
+
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (res.ok) {
+                    activeConfig = await res.json();
+                    allProfiles = activeConfig.profiles || allProfiles;
+                    scrapersConfig = activeConfig.scrapers || scrapersPayload;
+                    document.getElementById('configModal').style.display = 'none';
+                    showToast("Zapisano konfigurację");
+
+                    await fetchConfig();
+
+                    if (triggerScrapingImmediately) {
+                        triggerScrape();
+                    } else {
+                        await fetchListings();
+                    }
+                }
+            } catch (err) {
+                console.error("Failed to save config:", err);
+                showToast("Błąd zapisu konfiguracji.");
+            }
+        }
+
+        async function fetchListings() {
+            try {
+                const res = await fetch('/api/listings');
+                allListings = await res.json();
+                updateStats(allListings);
+                applyFilters();
+                showToast(`Załadowano ${allListings.length} ofert`);
+            } catch (err) {
+                console.error("Failed to load listings:", err);
+                showToast("Błąd ładowania ofert z bazy danych.");
+            }
+        }
+
+        function updateStats(items) {
+            const total = items.length;
+            const favs = items.filter(i => i.user_status === 'FAVORITE').length;
+            const toVisit = items.filter(i => i.user_status === 'TO_VISIT').length;
+            const wl = items.filter(i => i.qualification_status === 'QUALIFIED_WHITELIST').length;
+            const qual = items.filter(i => i.is_qualified).length;
+            const rev = items.filter(i => i.qualification_status === 'NEEDS_REVIEW').length;
+            const rej = items.filter(i => i.user_status === 'REJECTED' || i.qualification_status.startsWith('REJECTED')).length;
+
+            const safeSet = (id, val) => {
+                const el = document.getElementById(id);
+                if (el) el.innerText = val;
+            };
+
+            safeSet('stTotal', total);
+            safeSet('cntAll', total);
+            safeSet('cntTotalAll', total);
+
+            safeSet('stFavorite', favs);
+            safeSet('cntFav', favs);
+
+            safeSet('stToVisit', toVisit);
+            safeSet('cntVisit', toVisit);
+
+            safeSet('stWhitelist', wl);
+            safeSet('cntWl', wl);
+
+            safeSet('stQualified', qual);
+            safeSet('cntQual', qual);
+
+            safeSet('cntRev', rev);
+            safeSet('cntRej', rej);
+
+            const priced = items.filter(i => i.price_per_m2 > 0);
+            const avg = priced.length > 0 ? priced.reduce((acc, c) => acc + c.price_per_m2, 0) / priced.length : 0;
+            safeSet('stAvgPrice', Math.round(avg).toLocaleString('pl-PL') + ' zł');
+        }
+
+        function setFilter(filterVal, el) {
+            document.querySelectorAll('.kpi-card').forEach(b => b.classList.remove('active'));
+            if (el) {
+                el.classList.add('active');
+            } else {
+                const targetBtn = document.querySelector(`.kpi-card[data-filter="${filterVal}"]`);
+                if (targetBtn) targetBtn.classList.add('active');
+            }
+            currentFilter = filterVal;
+            applyFilters();
+        }
+
+        function resetLiveFilters() {
+            document.getElementById('searchInput').value = '';
+            document.getElementById('filterMaxPrice').value = '';
+            document.getElementById('filterMinArea').value = '';
+            document.getElementById('filterMaxArea').value = '';
+            document.getElementById('filterMinPlot').value = '';
+            document.getElementById('filterMarket').value = 'ALL';
+            document.getElementById('filterBuildingType').value = 'ALL';
+            setFilter('ALL');
+        }
+
+        function applyFilters() {
+            const query = (document.getElementById('searchInput')?.value || '').toLowerCase().trim();
+            const sortMode = document.getElementById('sortSelect')?.value || 'score_desc';
+
+            const categoryVal = document.getElementById('filterCategory')?.value || 'ALL';
+            const profileVal = document.getElementById('filterProfile')?.value || 'ALL';
+            const maxPriceVal = parseFloat(document.getElementById('filterMaxPrice')?.value) || null;
+            const minAreaVal = parseFloat(document.getElementById('filterMinArea')?.value) || null;
+            const maxAreaVal = parseFloat(document.getElementById('filterMaxArea')?.value) || null;
+            const minPlotVal = parseFloat(document.getElementById('filterMinPlot')?.value) || null;
+            const marketVal = document.getElementById('filterMarket')?.value || 'ALL';
+            const buildingTypeVal = document.getElementById('filterBuildingType')?.value || 'ALL';
+            const finishVal = document.getElementById('filterFinish')?.value || 'ALL';
+            const visVal = document.getElementById('filterVis')?.value || 'ALL';
+            const sewerageVal = document.getElementById('filterSewerage')?.value || 'ALL';
+            const heatingVal = document.getElementById('filterHeating')?.value || 'ALL';
+
+            let filtered = allListings.filter(item => {
+                // Preset Status Filter via Integrated KPI Strip
+                if (currentFilter === 'CRM_FAVORITE' && item.user_status !== 'FAVORITE') return false;
+                if (currentFilter === 'CRM_TO_VISIT' && item.user_status !== 'TO_VISIT') return false;
+                if (currentFilter === 'QUALIFIED_WHITELIST' && item.qualification_status !== 'QUALIFIED_WHITELIST') return false;
+                if (currentFilter === 'QUALIFIED' && !item.is_qualified) return false;
+                if (currentFilter === 'NEEDS_REVIEW' && item.qualification_status !== 'NEEDS_REVIEW') return false;
+                if (currentFilter === 'REJECTED' && item.user_status !== 'REJECTED' && !item.qualification_status.startsWith('REJECTED')) return false;
+
+                // Category and Profile filters
+                if (categoryVal !== 'ALL' && item.category !== categoryVal) return false;
+                if (profileVal !== 'ALL' && item.profile_name !== profileVal) return false;
+
+                // Live dynamic inputs
+                if (maxPriceVal && item.price > maxPriceVal) return false;
+                if (minAreaVal && item.area_home < minAreaVal) return false;
+                if (maxAreaVal && item.area_home > maxAreaVal) return false;
+                if (minPlotVal && (item.area_plot || 0) < minPlotVal) return false;
+                if (marketVal !== 'ALL' && item.market !== marketVal) return false;
+                if (buildingTypeVal !== 'ALL' && item.building_type !== buildingTypeVal) return false;
+                if (finishVal !== 'ALL' && item.finish_condition !== finishVal) return false;
+                if (visVal === 'NO_VIS' && item.has_visualisations) return false;
+                if (visVal === 'ONLY_VIS' && !item.has_visualisations) return false;
+                if (sewerageVal !== 'ALL' && item.sewerage !== sewerageVal) return false;
+                if (heatingVal !== 'ALL' && item.heating !== heatingVal) return false;
+
+                // Text query search
+                if (query) {
+                    const haystack = [
+                        item.title, item.location_raw, item.street, item.district, item.city,
+                        item.building_type, item.user_notes, item.sewerage, item.heating,
+                        ...(item.pros || []), ...(item.cons || []),
+                        ...(item.filter_reasons || [])
+                    ].join(" ").toLowerCase();
+                    if (!haystack.includes(query)) return false;
+                }
+                return true;
+            });
+
+            // Sorting
+            if (sortMode === 'score_desc') {
+                filtered.sort((a, b) => b.qualification_score - a.qualification_score);
+            } else if (sortMode === 'price_asc') {
+                filtered.sort((a, b) => a.price - b.price);
+            } else if (sortMode === 'price_desc') {
+                filtered.sort((a, b) => b.price - a.price);
+            } else if (sortMode === 'area_desc') {
+                filtered.sort((a, b) => b.area_home - a.area_home);
+            } else if (sortMode === 'price_m2_asc') {
+                filtered.sort((a, b) => a.price_per_m2 - b.price_per_m2);
+            } else if (sortMode === 'created_desc') {
+                filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            }
+
+            const cntEl = document.getElementById('cntFiltered');
+            if (cntEl) cntEl.innerText = filtered.length;
+
+            renderGrid(filtered);
+            renderMapMarkers(filtered);
+        }
+
+        function resetLiveFilters() {
+            if (document.getElementById('filterCategory')) document.getElementById('filterCategory').value = 'ALL';
+            if (document.getElementById('filterProfile')) document.getElementById('filterProfile').value = 'ALL';
+            if (document.getElementById('filterMaxPrice')) document.getElementById('filterMaxPrice').value = '';
+            if (document.getElementById('filterMinArea')) document.getElementById('filterMinArea').value = '';
+            if (document.getElementById('filterMaxArea')) document.getElementById('filterMaxArea').value = '';
+            if (document.getElementById('filterMinPlot')) document.getElementById('filterMinPlot').value = '';
+            if (document.getElementById('filterMarket')) document.getElementById('filterMarket').value = 'ALL';
+            if (document.getElementById('filterBuildingType')) document.getElementById('filterBuildingType').value = 'ALL';
+            if (document.getElementById('filterFinish')) document.getElementById('filterFinish').value = 'ALL';
+            if (document.getElementById('filterVis')) document.getElementById('filterVis').value = 'ALL';
+            if (document.getElementById('filterSewerage')) document.getElementById('filterSewerage').value = 'ALL';
+            if (document.getElementById('filterHeating')) document.getElementById('filterHeating').value = 'ALL';
+            if (document.getElementById('searchInput')) document.getElementById('searchInput').value = '';
+            applyFilters();
+        }
+
+        function renderMapMarkers(items) {
+            if (!map || !markersGroup) return;
+
+            markersGroup.clearLayers();
+            markersMap = {};
+
+            const validCoordsItems = items.filter(i => i.latitude && i.longitude);
+            const coordCounts = {};
+
+            validCoordsItems.forEach(item => {
+                let pinClass = "pin-blue";
+                const cat = item.category || 'dom';
+                let pinIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏠');
+
+                if (item.user_status === 'FAVORITE') {
+                    pinClass = "pin-gold";
+                    pinIcon = "★";
+                } else if (item.user_status === 'TO_VISIT') {
+                    pinClass = "pin-purple";
+                    pinIcon = "📅";
+                } else if (item.user_status === 'REJECTED' || item.qualification_status.startsWith('REJECTED')) {
+                    pinClass = "pin-gray";
+                    pinIcon = "✕";
+                } else if (item.qualification_status === 'QUALIFIED_WHITELIST') {
+                    pinClass = "pin-green";
+                    pinIcon = "★";
+                } else if (item.qualification_status === 'NEEDS_REVIEW') {
+                    pinClass = "pin-orange";
+                    pinIcon = "🔍";
+                }
+
+                if (!item.is_exact_coords) {
+                    pinClass += " pin-approx";
+                }
+
+                // Small collision jitter for multi-unit complexes
+                const coordKey = `${item.latitude.toFixed(4)},${item.longitude.toFixed(4)}`;
+                coordCounts[coordKey] = (coordCounts[coordKey] || 0) + 1;
+                const offsetMultiplier = (coordCounts[coordKey] - 1);
+                const jitterLat = item.latitude + (offsetMultiplier * 0.00015);
+                const jitterLon = item.longitude + (offsetMultiplier * 0.0002);
+
+                const iconHtml = `<div class="custom-pin ${pinClass}" title="${escapeHtml(item.title)}">${pinIcon}</div>`;
+                const icon = L.divIcon({
+                    html: iconHtml,
+                    className: 'custom-div-icon',
+                    iconSize: [26, 26],
+                    iconAnchor: [13, 13],
+                    popupAnchor: [0, -13]
+                });
+
+                const marker = L.marker([jitterLat, jitterLon], { icon: icon });
+
+                const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=400&q=80";
+                const imgSrc = item.main_image_url || fallbackImg;
+                const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : 'b/d';
+                const precisionText = item.is_exact_coords ? '📍 Dokładna lokalizacja' : '📍 Przybliżona (rejon)';
+                const popupCatIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏡');
+                const specsText = cat === 'dzialka'
+                    ? `Działka: ${plotText}`
+                    : (cat === 'mieszkanie' ? `${item.area_home.toFixed(0)} m² • ${item.rooms ? item.rooms + ' pok. • ' : ''}` : `${item.area_home.toFixed(0)} m² • Działka: ${plotText} • `);
+
+                const popupHtml = `
+                    <div class="popup-card">
+                        <img src="${escapeHtml(imgSrc)}" class="popup-img" onerror="this.src='${fallbackImg}'" onclick="openImgModal('${escapeHtml(imgSrc)}')">
+                        <div class="popup-body">
+                            <div class="popup-price">${Math.round(item.price).toLocaleString('pl-PL')} zł</div>
+                            <div class="popup-title"><a href="${escapeHtml(item.url)}" target="_blank">${escapeHtml(item.title)}</a></div>
+                            <div class="popup-specs">${popupCatIcon} ${specsText}${escapeHtml(item.street || item.district || item.city || '')}</div>
+                            <div style="font-size: 10px; color: ${item.is_exact_coords ? '#34d399' : '#fbbf24'}; margin-bottom: 6px;">${precisionText}</div>
+                            <div class="popup-actions">
+                                <button class="btn btn-sm ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="updateStatus(${item.id}, 'FAVORITE')">★ Ulubione</button>
+                                <button class="btn btn-sm ${item.user_status === 'TO_VISIT' ? 'active-visit' : ''}" onclick="updateStatus(${item.id}, 'TO_VISIT')">📅 Do wizyty</button>
+                                <button class="btn btn-sm" onclick="updateStatus(${item.id}, 'REJECTED')">✕</button>
+                                ${item.geoportal_url ? `<a href="${escapeHtml(item.geoportal_url)}" target="_blank" class="btn btn-sm" style="color:#34d399;text-decoration:none;" title="Geoportal">🗺️ Geoportal</a>` : ''}
+                            </div>
+                        </div>
+                    </div>
+                `;
+
+                marker.bindPopup(popupHtml);
+                marker.on('click', () => {
+                    highlightCard(item.id);
+                });
+
+                markersGroup.addLayer(marker);
+                markersMap[item.id] = marker;
+            });
+
+            if (validCoordsItems.length > 0) {
+                try {
+                    map.fitBounds(markersGroup.getBounds(), { padding: [30, 30], maxZoom: 15 });
+                } catch (e) {}
+            }
+        }
+
+        function highlightCard(id) {
+            const card = document.getElementById('card-' + id);
+            if (card) {
+                card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                card.classList.add('card-highlight');
+                setTimeout(() => { card.classList.remove('card-highlight'); }, 1500);
+            }
+        }
+
+        function locateOnMap(id, lat, lon) {
+            if (!lat || !lon) {
+                showToast("Brak współrzędnych GPS dla tej oferty.");
+                return;
+            }
+            if (currentViewMode === 'grid') {
+                switchViewMode('split');
+            }
+            if (map) {
+                map.flyTo([lat, lon], 15, { duration: 0.8 });
+                const marker = markersMap[id];
+                if (marker) {
+                    setTimeout(() => { marker.openPopup(); }, 700);
+                }
+            }
+        }
+
+        let activeModalGallery = [];
+        let activeModalIndex = 0;
+
+        function previewCardThumb(cardId, src, thumbEl) {
+            const img = document.getElementById('card-img-' + cardId);
+            if (img) img.src = src;
+            if (thumbEl && thumbEl.parentElement) {
+                thumbEl.parentElement.querySelectorAll('.card-thumb').forEach(t => t.classList.remove('active'));
+                thumbEl.classList.add('active');
+            }
+        }
+
+        function openListingGallery(itemId, startIndex) {
+            const item = allListings.find(i => i.id === itemId);
+            if (!item) return;
+            const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80";
+            const gallery = (item.gallery_images && item.gallery_images.length > 0) ? item.gallery_images : [item.main_image_url || fallbackImg];
+            activeModalGallery = gallery;
+            activeModalIndex = Math.max(0, Math.min(startIndex || 0, gallery.length - 1));
+            showModalImage();
+            const m = document.getElementById('imgModal');
+            if (m) m.style.display = 'flex';
+        }
+
+        function openImgModal(src) {
+            activeModalGallery = [src];
+            activeModalIndex = 0;
+            showModalImage();
+            const m = document.getElementById('imgModal');
+            if (m) m.style.display = 'flex';
+        }
+
+        function showModalImage() {
+            const img = document.getElementById('imgModalSrc');
+            const cap = document.getElementById('imgModalCaption');
+            if (!img || activeModalGallery.length === 0) return;
+            img.src = activeModalGallery[activeModalIndex];
+            if (cap) {
+                cap.innerText = `${activeModalIndex + 1} / ${activeModalGallery.length}`;
+            }
+            const prevBtn = document.getElementById('imgModalPrev');
+            const nextBtn = document.getElementById('imgModalNext');
+            if (prevBtn) prevBtn.style.display = activeModalGallery.length > 1 ? 'flex' : 'none';
+            if (nextBtn) nextBtn.style.display = activeModalGallery.length > 1 ? 'flex' : 'none';
+        }
+
+        function navModalGallery(direction) {
+            if (activeModalGallery.length <= 1) return;
+            activeModalIndex = (activeModalIndex + direction + activeModalGallery.length) % activeModalGallery.length;
+            showModalImage();
+        }
+
+        function closeImgModal() {
+            const m = document.getElementById('imgModal');
+            if (m) m.style.display = 'none';
+        }
+
+        function renderGrid(items) {
+            const container = document.getElementById('listingsContainer');
+            if (!container) return;
+
+            if (items.length === 0) {
+                container.innerHTML = '<div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: 13px;">Brak ofert spełniających aktywne kryteria wyszukiwania.</div>';
+                return;
+            }
+
+            const fallbackImg = "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=600&q=80";
+
+            container.innerHTML = items.map(item => {
+                let badgeClass = "badge-rejected";
+                let badgeLabel = "Odrzucona";
+
+                if (item.qualification_status === 'QUALIFIED_WHITELIST') {
+                    badgeClass = "badge-whitelist";
+                    badgeLabel = "Whitelist";
+                } else if (item.is_qualified) {
+                    badgeClass = "badge-qualified";
+                    badgeLabel = "Zakwalifikowana";
+                } else if (item.qualification_status === 'NEEDS_REVIEW') {
+                    badgeClass = "badge-review";
+                    badgeLabel = "Do weryfikacji";
+                }
+
+                let cardCrmClass = "";
+                if (item.user_status === 'FAVORITE') {
+                    cardCrmClass = "is-favorite";
+                } else if (item.user_status === 'TO_VISIT') {
+                    cardCrmClass = "is-tovisit";
+                } else if (item.user_status === 'REJECTED') {
+                    cardCrmClass = "is-rejected";
+                }
+
+                const plotText = item.area_plot ? `${Math.round(item.area_plot)} m²` : 'b/d';
+                const imgSrc = item.main_image_url || fallbackImg;
+
+                const prosHtml = (item.pros || []).slice(0, 2).map(p => `<li>✓ ${escapeHtml(p)}</li>`).join('');
+                const consHtml = (item.cons || []).slice(0, 1).map(c => `<li class="warning">⚠ ${escapeHtml(c)}</li>`).join('');
+
+                const precisionTag = item.is_exact_coords
+                    ? `<span class="loc-precision tag-exact">Dokładna</span>`
+                    : `<span class="loc-precision tag-approx">Rejon</span>`;
+
+                const notesBadge = item.user_notes ? ` (1)` : '';
+
+                const cat = item.category || 'dom';
+                const catIcon = cat === 'mieszkanie' ? '🏢' : (cat === 'dzialka' ? '🌳' : '🏡');
+                const catLabel = cat === 'mieszkanie' ? 'Mieszkanie' : (cat === 'dzialka' ? 'Działka' : 'Dom');
+                const profileBadge = item.profile_name ? `<span style="background:rgba(59,130,246,0.15);color:#60a5fa;padding:1px 5px;border-radius:4px;font-size:10px;font-weight:600;">[${escapeHtml(item.profile_name)}]</span>` : '';
+                const ownerBadge = item.is_private_owner === true ? `<span class="loc-precision tag-exact" style="font-size:9px;">Prywatne</span>` : (item.is_private_owner === false ? `<span class="loc-precision tag-approx" style="font-size:9px;">Biuro/Deweloper</span>` : '');
+
+                // Rejection explanation box if reasons exist and listing is not qualified
+                let rejectionHtml = "";
+                if (item.filter_reasons && item.filter_reasons.length > 0 && !item.is_qualified) {
+                    rejectionHtml = `
+                        <div class="rejection-box">
+                            <strong>Powód odrzucenia:</strong>
+                            ${item.filter_reasons.map(r => `<div>• ${escapeHtml(r)}</div>`).join('')}
+                        </div>
+                    `;
+                }
+
+                // Specification badges
+                const marketText = item.market && item.market !== 'nieokreślony' ? escapeHtml(item.market) : '';
+                const finishText = item.finish_condition && item.finish_condition !== 'nieokreślony' ? escapeHtml(item.finish_condition) : '';
+                const sewText = item.sewerage && item.sewerage !== 'nieznana' ? escapeHtml(item.sewerage) : '';
+                const heatText = item.heating && item.heating !== 'nieznane' ? escapeHtml(item.heating) : '';
+                const fiberBadge = item.has_fiber ? `<span class="spec-sep">·</span><span class="spec-item">🌐 Światłowód</span>` : '';
+                const roadText = item.access_road_type && item.access_road_type !== 'nieznana' ? escapeHtml(item.access_road_type) : '';
+                const yearText = item.year_built ? `${item.year_built} r.` : '';
+                const visBadge = item.has_visualisations ? `<span class="card-badge" style="background:#d97706;color:#fff;left:auto;right:45px;">⚠️ Wizualizacje</span>` : '';
+
+                let specsHtml = '';
+                if (cat === 'mieszkanie') {
+                    specsHtml = `
+                        <span class="spec-item"><strong>${item.area_home.toFixed(1)}</strong> m²</span>
+                        ${item.rooms ? `<span class="spec-sep">·</span><span class="spec-item"><strong>${item.rooms}</strong> pok.</span>` : ''}
+                        ${item.floor !== null && item.floor !== undefined ? `<span class="spec-sep">·</span><span class="spec-item">Piętro <strong>${item.floor}${item.floors_in_building ? '/' + item.floors_in_building : ''}</strong></span>` : ''}
+                        ${marketText ? `<span class="spec-sep">·</span><span class="spec-item">${marketText}</span>` : ''}
+                        ${finishText ? `<span class="spec-sep">·</span><span class="spec-item">${finishText}</span>` : ''}
+                        ${heatText ? `<span class="spec-sep">·</span><span class="spec-item">Ogrzewanie: ${heatText}</span>` : ''}
+                        ${fiberBadge}
+                        ${yearText ? `<span class="spec-sep">·</span><span class="spec-item">${yearText}</span>` : ''}
+                    `;
+                } else if (cat === 'dzialka') {
+                    specsHtml = `
+                        <span class="spec-item">Działka <strong>${plotText}</strong></span>
+                        <span class="spec-sep">·</span>
+                        <span class="spec-item">${escapeHtml(item.building_type || 'Grunt')}</span>
+                        ${roadText ? `<span class="spec-sep">·</span><span class="spec-item">Droga: ${roadText}</span>` : ''}
+                        ${sewText ? `<span class="spec-sep">·</span><span class="spec-item">Media: ${sewText}</span>` : ''}
+                    `;
+                } else {
+                    specsHtml = `
+                        <span class="spec-item"><strong>${item.area_home.toFixed(1)}</strong> m²</span>
+                        <span class="spec-sep">·</span>
+                        <span class="spec-item">Działka <strong>${plotText}</strong></span>
+                        <span class="spec-sep">·</span>
+                        <span class="spec-item">${escapeHtml(item.building_type)}</span>
+                        ${marketText ? `<span class="spec-sep">·</span><span class="spec-item">${marketText}</span>` : ''}
+                        ${finishText ? `<span class="spec-sep">·</span><span class="spec-item">${finishText}</span>` : ''}
+                        ${sewText ? `<span class="spec-sep">·</span><span class="spec-item">Ścieki: ${sewText}</span>` : ''}
+                        ${heatText ? `<span class="spec-sep">·</span><span class="spec-item">Ogrzewanie: ${heatText}</span>` : ''}
+                        ${fiberBadge}
+                        ${roadText ? `<span class="spec-sep">·</span><span class="spec-item">Droga: ${roadText}</span>` : ''}
+                        ${yearText ? `<span class="spec-sep">·</span><span class="spec-item">${yearText}</span>` : ''}
+                    `;
+                }
+
+                const gallery = item.gallery_images || [];
+                const galleryCountBadge = gallery.length > 1
+                    ? `<span class="card-gallery-count">📷 ${gallery.length}</span>`
+                    : '';
+
+                let galleryThumbnailsHtml = '';
+                if (gallery.length > 1) {
+                    const thumbs = gallery.slice(0, 5).map((imgUrl, idx) => `
+                        <img src="${escapeHtml(imgUrl)}" class="card-thumb ${idx === 0 ? 'active' : ''}"
+                             alt="Miniaturka ${idx+1}" loading="lazy"
+                             onmouseenter="previewCardThumb(${item.id}, '${escapeHtml(imgUrl)}', this)"
+                             onclick="event.stopPropagation(); openListingGallery(${item.id}, ${idx})"
+                             onerror="this.style.display='none'">
+                    `).join('');
+                    const moreCount = gallery.length - 5;
+                    const moreHtml = moreCount > 0 ? `<span class="thumb-more" onclick="event.stopPropagation(); openListingGallery(${item.id}, 5)">+${moreCount}</span>` : '';
+                    galleryThumbnailsHtml = `<div class="card-gallery-strip">${thumbs}${moreHtml}</div>`;
+                }
+
+                return `
+                <article class="card ${cardCrmClass}" id="card-${item.id}">
+                    <div class="card-img-wrap" onclick="openListingGallery(${item.id}, 0)">
+                        <img id="card-img-${item.id}" src="${escapeHtml(imgSrc)}" alt="Nieruchomość" loading="lazy" onerror="this.src='${fallbackImg}'">
+                        <span class="card-badge ${badgeClass}">${badgeLabel}</span>
+                        ${visBadge}
+                        ${galleryCountBadge}
+                        <button class="card-fav-btn ${item.user_status === 'FAVORITE' ? 'active' : ''}" onclick="event.stopPropagation(); toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">
+                            ${item.user_status === 'FAVORITE' ? '★' : '☆'}
+                        </button>
+                    </div>
+                    ${galleryThumbnailsHtml}
+                    <div class="card-content">
+                        <div class="card-meta-row">
+                            <span class="meta-source">${catIcon} ${catLabel} · ${escapeHtml(item.portal).toUpperCase()} · #${escapeHtml(item.portal_id)}</span>
+                            ${profileBadge}
+                            ${ownerBadge}
+                            <span class="meta-score">Score: <strong>${Math.round(item.qualification_score)}</strong>/150</span>
+                        </div>
+
+                        <h3 class="card-title">
+                            <a href="${escapeHtml(item.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.title)}</a>
+                        </h3>
+
+                        <div class="card-price-row">
+                            <span class="price-val">${Math.round(item.price).toLocaleString('pl-PL')} zł</span>
+                            <span class="price-m2">· ${Math.round(item.price_per_m2).toLocaleString('pl-PL')} zł/m²</span>
+                        </div>
+
+                        <div class="card-location">
+                            <span>${escapeHtml(item.street || item.district || item.city || item.location_raw || '')}</span>
+                            ${precisionTag}
+                        </div>
+
+                        <!-- Monochromatic High-Density Specifications -->
+                        <div class="card-specs">
+                            ${specsHtml}
+                        </div>
+
+                        ${rejectionHtml}
+
+                        ${(prosHtml || consHtml) ? `<div class="card-features"><ul>${prosHtml}${consHtml}</ul></div>` : ''}
+
+                        <!-- Footer: CRM Toolbar + Actions -->
+                        <div class="card-footer">
+                            <div class="crm-toolbar">
+                                <button class="crm-btn ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">
+                                    ★
+                                </button>
+                                <button class="crm-btn ${item.user_status === 'TO_VISIT' ? 'active-visit' : ''}" onclick="toggleStatus(${item.id}, 'TO_VISIT')" title="Do wizyty">
+                                    📅 Wizyta
+                                </button>
+                                <button class="crm-btn ${item.user_status === 'REJECTED' ? 'active-rej' : ''}" onclick="toggleStatus(${item.id}, 'REJECTED')" title="Odrzuć">
+                                    ${item.user_status === 'REJECTED' ? '↩' : '✕'}
+                                </button>
+                                <button class="crm-btn" onclick="toggleNotes(${item.id})" title="Prywatna notatka">
+                                    📝${notesBadge}
+                                </button>
+                            </div>
+                            <div class="card-links">
+                                <button class="btn-icon" onclick="locateOnMap(${item.id}, ${item.latitude || 'null'}, ${item.longitude || 'null'})" title="Pokaż na mapie">
+                                    📍
+                                </button>
+                                ${item.geoportal_url ? `
+                                <a href="${escapeHtml(item.geoportal_url)}" class="btn-link btn-geoportal-live" target="_blank" rel="noopener noreferrer" title="Działka Katastralna: ${item.parcel_id ? escapeHtml(item.parcel_id) : ''}">
+                                    🗺️ Geoportal
+                                </a>` : (item.latitude && item.longitude ? `
+                                <a href="https://mapy.geoportal.gov.pl/imap/Imgp_2.html?locale=pl&gui=new&session=%7B%22actions%22%3A%5B%7B%22name%22%3A%22locatePoint%22%2C%22params%22%3A%7B%22x%22%3A${item.longitude}%2C%22y%22%3A${item.latitude}%2C%22srid%22%3A4326%7D%7D%5D%7D" class="btn-link btn-geoportal-live" target="_blank" rel="noopener noreferrer" title="Otwórz punkt w Geoportalu">
+                                    🗺️ Geoportal
+                                </a>` : '')}
+                                <a href="${escapeHtml(item.url)}" class="btn-link" target="_blank" rel="noopener noreferrer">
+                                    Otwórz ↗
+                                </a>
+                            </div>
+                        </div>
+
+                        <!-- Private Notes Drawer -->
+                        <div class="notes-drawer" id="notes-${item.id}">
+                            <textarea id="note-txt-${item.id}" placeholder="Prywatne notatki z oględzin, agent, ustalenia...">${escapeHtml(item.user_notes || '')}</textarea>
+                            <div class="notes-footer">
+                                <span class="notes-status-text" id="note-st-${item.id}"></span>
+                                <button class="notes-save-btn" onclick="saveNote(${item.id})">Zapisz</button>
+                            </div>
+                        </div>
+                    </div>
+                </article>
+                `;
+            }).join('');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return String(str).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+        }
+
+        // CRM Actions
+        async function toggleStatus(id, targetStatus) {
+            const item = allListings.find(i => i.id === id);
+            if (!item) return;
+            const newStatus = (item.user_status === targetStatus) ? 'NEW' : targetStatus;
+            await updateStatus(id, newStatus);
+        }
+
+        async function updateStatus(id, newStatus) {
+            try {
+                const res = await fetch(`/api/listings/${id}/status`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: newStatus })
+                });
+                if (res.ok) {
+                    const item = allListings.find(i => i.id === id);
+                    if (item) item.user_status = newStatus;
+                    updateStats(allListings);
+                    applyFilters();
+                    showToast(`Status oferty #${id}: ${newStatus}`);
+                }
+            } catch (err) {
+                console.error("Status update failed:", err);
+                showToast("Błąd zapisu statusu.");
+            }
+        }
+
+        function toggleNotes(id) {
+            const drawer = document.getElementById('notes-' + id);
+            if (drawer) {
+                drawer.style.display = (drawer.style.display === 'block') ? 'none' : 'block';
+            }
+        }
+
+        async function saveNote(id) {
+            const txt = document.getElementById('note-txt-' + id).value;
+            const stLabel = document.getElementById('note-st-' + id);
+            stLabel.innerText = "Zapisywanie...";
+
+            try {
+                const res = await fetch(`/api/listings/${id}/notes`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ notes: txt })
+                });
+                if (res.ok) {
+                    const item = allListings.find(i => i.id === id);
+                    if (item) item.user_notes = txt;
+                    stLabel.innerText = "✓ Zapisano!";
+                    showToast("Notatka zapisana.");
+                    setTimeout(() => { stLabel.innerText = ""; }, 2000);
+                }
+            } catch (err) {
+                stLabel.innerText = "Błąd zapisu";
+                showToast("Nie udało się zapisać notatki.");
+            }
+        }
+
+        async function triggerScrape() {
+            const btn = document.getElementById('btnScrape');
+            const panel = document.getElementById('progressPanel');
+            btn.disabled = true;
+            btn.innerText = "Scrapowanie...";
+            panel.style.display = 'block';
+
+            showToast("Rozpoczęto cykl scrapingu...");
+
+            let pollTimer = setInterval(async () => {
+                try {
+                    const stRes = await fetch('/api/scrape/status');
+                    const st = await stRes.json();
+                    
+                    document.getElementById('progPercent').innerText = st.percentage + '%';
+                    document.getElementById('progBar').style.width = st.percentage + '%';
+                    document.getElementById('progStep').innerText = st.current_step;
+                    document.getElementById('progPortal').innerText = st.current_portal ? `Aktywny: ${st.current_portal}` : 'Przetwarzanie...';
+                    document.getElementById('progScraped').innerText = st.items_scraped;
+                    document.getElementById('progQualified').innerText = st.items_qualified;
+                    document.getElementById('progDups').innerText = st.duplicates_found;
+                    const elapsed = st.elapsed_seconds || 0;
+                    document.getElementById('progElapsed').innerText =
+                        elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
+
+                    if (st.logs && st.logs.length > 0) {
+                        const logsHtml = st.logs.map(l => {
+                            const color = l.level === 'error' ? '#f87171' : (l.level === 'success' ? '#34d399' : '#9da4b2');
+                            return `<div style="color: ${color};">[${l.time}] ${escapeHtml(l.message)}</div>`;
+                        }).join('');
+                        const logBox = document.getElementById('progLogs');
+                        logBox.innerHTML = logsHtml;
+                        logBox.scrollTop = logBox.scrollHeight;
+                    }
+                } catch (e) {
+                    console.error("Error polling status:", e);
+                }
+            }, 600);
+
+            try {
+                const res = await fetch('/api/scrape', { method: 'POST' });
+                const summary = await res.json();
+                showToast(`Scraping zakończony! Nowe: ${summary.new_listings}, Zakwalifikowane: ${summary.qualified}`);
+                await fetchListings();
+            } catch (err) {
+                showToast("Błąd podczas scrapingu: " + err);
+            } finally {
+                clearInterval(pollTimer);
+                btn.disabled = false;
+                btn.innerText = "⚡ Uruchom scraping";
+                setTimeout(() => {
+                    document.getElementById('progPercent').innerText = '100%';
+                    document.getElementById('progBar').style.width = '100%';
+                }, 500);
+            }
+        }
+
+        // Global keyboard shortcut Ctrl+K for search and Arrow keys for gallery modal
+        window.addEventListener('keydown', (e) => {
+            const m = document.getElementById('imgModal');
+            if (m && m.style.display === 'flex') {
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    navModalGallery(-1);
+                    return;
+                } else if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    navModalGallery(1);
+                    return;
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeImgModal();
+                    return;
+                }
+            }
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                const searchInput = document.getElementById('searchInput');
+                if (searchInput) {
+                    searchInput.focus();
+                    searchInput.select();
+                }
+            }
+        });
+
+        window.addEventListener('DOMContentLoaded', async () => {
+            await fetchConfig();
+            const center = activeConfig ? [50.0375, 22.0047] : [50.0375, 22.0047];
+            initLeafletMap(center);
+            fetchListings();
+        });
+
+        setInterval(fetchListings, 45000);
+    </script>
+</body>
+</html>

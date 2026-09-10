@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # Web Dashboard Service (Interactive CRM, Map, Configuration UI)
+  dashboard:
+    build: .
+    container_name: estate_hunter_dashboard
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///app/data/listings.db
+      - TZ=Europe/Warsaw
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./search_config.json:/app/search_config.json
+    command: ["python", "main.py", "dashboard", "--port", "8080", "--no-open"]
+
+  # Automated Background Scraper & Monitoring Daemon
+  scraper:
+    build: .
+    container_name: estate_hunter_scraper
+    restart: unless-stopped
+    depends_on:
+      - dashboard
+    environment:
+      - DATABASE_URL=sqlite+aiosqlite:///app/data/listings.db
+      - TZ=Europe/Warsaw
+    env_file:
+      - .env
+    volumes:
+      - ./data:/app/data
+      - ./search_config.json:/app/search_config.json
+    command: ["python", "main.py", "run"]
