@@ -200,9 +200,9 @@ class Stage1Filter:
             return False, reasons, None
 
         # 2. Budget checks
-        if min_p is not None and min_p > 0 and listing.price < min_p:
+        if (min_p or 0) > 0 and listing.price < min_p:
             reasons.append(f"Cena {listing.price:,.0f} zł mniejsza niż wymagane minimum {min_p:,.0f} zł")
-        if max_p is not None and max_p > 0 and listing.price > max_p:
+        if (max_p or 0) > 0 and listing.price > max_p:
             reasons.append(f"Cena {listing.price:,.0f} zł przekracza budżet {max_p:,.0f} zł")
 
         if listing.price_per_m2 and listing.price_per_m2 > 0:
@@ -239,9 +239,9 @@ class Stage1Filter:
         # 5. Category-specific criteria
         if category == "mieszkanie":
             # Apartment area check
-            if min_area is not None and min_area > 0 and listing.area_home < min_area:
+            if (min_area or 0) > 0 and listing.area_home < min_area:
                 reasons.append(f"Metraż mieszkania {listing.area_home:.1f} m² mniejszy niż wymagane {min_area} m²")
-            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
+            elif (max_area or 0) > 0 and listing.area_home > max_area:
                 reasons.append(f"Metraż mieszkania {listing.area_home:.1f} m² większy niż dopuszczalne {max_area} m²")
 
             # Rooms check
@@ -260,9 +260,9 @@ class Stage1Filter:
 
         elif category == "dom":
             # House area check
-            if min_area is not None and min_area > 0 and listing.area_home < min_area:
+            if (min_area or 0) > 0 and listing.area_home < min_area:
                 reasons.append(f"Metraż domu {listing.area_home:.1f} m² mniejszy niż wymagane {min_area} m²")
-            elif max_area is not None and max_area > 0 and listing.area_home > max_area:
+            elif (max_area or 0) > 0 and listing.area_home > max_area:
                 reasons.append(f"Metraż domu {listing.area_home:.1f} m² większy niż dopuszczalne {max_area} m²")
 
             # Plot area check
