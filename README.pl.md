@@ -119,9 +119,10 @@ cp .env.example .env
 docker compose up -d
 ```
 
-System uruchomi dwa kontenery:
-1. **`estate_hunter_dashboard`**: Live Web Dashboard pod adresem **`http://localhost:8080`**.
-2. **`estate_hunter_scraper`**: ciągły monitoring aktywnych profili wyszukiwania.
+System uruchomi trzy kontenery bez konieczności jakiejkolwiek konfiguracji (zero-config):
+1. **`estate_hunter_db`**: wydajna baza PostgreSQL 16 z automatycznym health checkiem i trwałym wolumenem danych (całkowicie eliminuje błędy blokowania bazy SQLite). W przypadku aktualizacji, dotychczasowe dane z bazy SQLite (`listings.db`) są automatycznie migrowane przy pierwszym uruchomieniu.
+2. **`estate_hunter_dashboard`**: Live Web Dashboard pod adresem **`http://localhost:8080`**.
+3. **`estate_hunter_scraper`**: ciągły background worker monitorujący aktywne profile wyszukiwania.
 
 ### 4. Sprawdź logi
 ```bash

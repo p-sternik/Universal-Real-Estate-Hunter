@@ -2,6 +2,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from src.filters.fingerprint import generate_property_fingerprint
@@ -396,3 +397,57 @@ async def test_repository_spatial_fields(async_session):
     assert loaded.mpzp_zone == "4.MN: tereny zabudowy mieszkaniowej"
     assert loaded.mpzp_status == "OBOWIĄZUJĄCY"
     assert loaded.flood_risk_zone == "BRAK"
+
+
+@pytest.mark.asyncio
+async def test_auto_migrate_sqlite_to_postgres(tmp_path, monkeypatch):
+    import sqlite3
+
+    from src.storage.database import _auto_migrate_sqlite_to_postgres
+
+    # Create dummy source SQLite DB
+    sqlite_file = tmp_path / "test_listings.db"
+    conn = sqlite3.connect(str(sqlite_file))
+    conn.execute("""
+        CREATE TABLE listings (
+            id INTEGER PRIMARY KEY,
+            portal TEXT,
+            portal_id TEXT,
+            url TEXT,
+            property_fingerprint TEXT,
+            title TEXT,
+            price REAL,
+            price_per_m2 REAL,
+            area_home REAL,
+            created_at TEXT
+        )
+    """)
+    conn.execute("""
+        INSERT INTO listings (id, portal, portal_id, url, property_fingerprint, title, price, price_per_m2, area_home, created_at)
+        VALUES (1, 'Otodom', '101', 'https://otodom.pl/101', 'fp101', 'Super Dom', 750000, 7500, 100, '2026-09-11T12:00:00')
+    """)
+    conn.commit()
+    conn.close()
+
+    # Target engine (SQLite acting as target for testing migration logic)
+    target_engine = create_async_engine(f"sqlite+aiosqlite:///{tmp_path}/target.db", echo=False)
+    async with target_engine.begin() as tconn:
+        await tconn.run_sync(Base.metadata.create_all)
+
+    # Monkeypatch candidates to use our temp sqlite file
+    from pathlib import Path
+    monkeypatch.setattr("src.storage.database.Path", lambda p: sqlite_file if "listings.db" in str(p) else Path(p))
+
+    # Run auto migration
+    await _auto_migrate_sqlite_to_postgres(target_engine)
+
+    # Verify target has the listing
+    async with target_engine.connect() as tconn:
+        res = await tconn.execute(text("SELECT id, title, price FROM listings WHERE id = 1"))
+        row = res.fetchone()
+        assert row is not None
+        assert row[1] == "Super Dom"
+        assert row[2] == 750000.0
+
+    await target_engine.dispose()
+

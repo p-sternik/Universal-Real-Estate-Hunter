@@ -2,6 +2,7 @@ import asyncio
 import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
@@ -15,7 +16,13 @@ from sqlalchemy.ext.asyncio import (
 
 from config import settings
 
-from .models import Base
+from .models import (
+    Base,
+    GeocacheModel,
+    ListingModel,
+    PriceHistoryModel,
+    SpatialCacheModel,
+)
 
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
@@ -154,24 +161,29 @@ def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
         db_url = settings.DATABASE_URL
-        connect_args = {}
+        is_sqlite = "sqlite" in db_url
+        engine_kwargs: dict = {
+            "echo": False,
+            "future": True,
+        }
+
         # For sqlite ensure directory exists if path is provided
-        if "sqlite" in db_url:
+        if is_sqlite:
             if db_url.startswith("sqlite+aiosqlite:///"):
                 path = db_url.replace("sqlite+aiosqlite:///", "")
                 verify_and_repair_sqlite_permissions(path)
-            connect_args = {
+            engine_kwargs["connect_args"] = {
                 "timeout": 60.0,
             }
+        else:
+            # PostgreSQL / asyncpg connection pool tuning
+            engine_kwargs["pool_pre_ping"] = True
+            engine_kwargs["pool_size"] = 10
+            engine_kwargs["max_overflow"] = 20
 
-        _engine = create_async_engine(
-            db_url,
-            echo=False,
-            future=True,
-            connect_args=connect_args,
-        )
+        _engine = create_async_engine(db_url, **engine_kwargs)
 
-        if "sqlite" in db_url:
+        if is_sqlite:
 
             @event.listens_for(_engine.sync_engine, "connect")
             def set_sqlite_pragma(dbapi_connection, connection_record):
@@ -374,20 +386,174 @@ async def _migrate_sqlite_columns(conn) -> None:
     await conn.run_sync(_do_migrate)
 
 
+async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
+    """If target DB is PostgreSQL and empty, automatically migrates data from existing SQLite DB if found."""
+    # Find candidate SQLite file locations
+    candidates = [
+        Path("/app/data/listings.db"),
+        Path("data/listings.db"),
+        Path("listings.db"),
+    ]
+    sqlite_path: Path | None = None
+    for cand in candidates:
+        if cand.exists() and cand.is_file() and cand.stat().st_size > 0:
+            sqlite_path = cand.resolve()
+            break
+
+    if not sqlite_path:
+        return
+
+    # Check if target PostgreSQL already has data
+    try:
+        async with pg_engine.connect() as conn:
+            res = await conn.execute(text("SELECT COUNT(*) FROM listings"))
+            count = res.scalar() or 0
+            if count > 0:
+                return  # Target already populated, do not overwrite/duplicate
+    except Exception as e:
+        logger.debug(f"[Database] Could not check target listings count: {e}")
+        return
+
+    logger.info(f"[Database] Wykryto istniejącą bazę SQLite '{sqlite_path}'. Rozpoczynam automatyczną migrację do PostgreSQL...")
+    import sqlite3
+
+    try:
+        sync_conn = sqlite3.connect(str(sqlite_path))
+        sync_conn.row_factory = sqlite3.Row
+
+        # Check existing tables in SQLite
+        tbl_rows = sync_conn.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
+        existing_tables = {row[0] for row in tbl_rows}
+
+        if "listings" not in existing_tables:
+            sync_conn.close()
+            return
+
+        async_session_maker = async_sessionmaker(bind=pg_engine, expire_on_commit=False)
+        async with async_session_maker() as session:
+            # 1. Migrate Listings
+            listings_rows = sync_conn.execute("SELECT * FROM listings").fetchall()
+            listing_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(listings)").fetchall()]
+            listing_models = []
+            for r in listings_rows:
+                row_dict = {k: r[k] for k in listing_col_names}
+                # Sanitize datetime strings to datetime objects if needed
+                for dt_col in ("created_at", "updated_at", "last_scraped_at", "notified_at"):
+                    val = row_dict.get(dt_col)
+                    if isinstance(val, str) and val:
+                        try:
+                            row_dict[dt_col] = datetime.fromisoformat(val)
+                        except Exception:
+                            row_dict[dt_col] = None
+                # Filter row_dict to only keys present in ListingModel table columns
+                valid_cols = {c.name for c in ListingModel.__table__.columns}
+                filtered_dict = {k: v for k, v in row_dict.items() if k in valid_cols}
+                listing_models.append(ListingModel(**filtered_dict))
+
+            if listing_models:
+                session.add_all(listing_models)
+                await session.flush()
+                logger.info(f"[Database] Zmigrowano {len(listing_models)} ogłoszeń do PostgreSQL.")
+
+            # 2. Migrate PriceHistory
+            if "price_history" in existing_tables:
+                ph_rows = sync_conn.execute("SELECT * FROM price_history").fetchall()
+                ph_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(price_history)").fetchall()]
+                valid_ph_cols = {c.name for c in PriceHistoryModel.__table__.columns}
+                ph_models = []
+                for r in ph_rows:
+                    row_dict = {k: r[k] for k in ph_col_names if k in valid_ph_cols}
+                    val = row_dict.get("recorded_at")
+                    if isinstance(val, str) and val:
+                        try:
+                            row_dict["recorded_at"] = datetime.fromisoformat(val)
+                        except Exception:
+                            row_dict["recorded_at"] = datetime.now(UTC)
+                    ph_models.append(PriceHistoryModel(**row_dict))
+                if ph_models:
+                    session.add_all(ph_models)
+                    await session.flush()
+                    logger.info(f"[Database] Zmigrowano {len(ph_models)} wpisów historii cen do PostgreSQL.")
+
+            # 3. Migrate Geocache
+            if "geocache" in existing_tables:
+                geo_rows = sync_conn.execute("SELECT * FROM geocache").fetchall()
+                geo_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(geocache)").fetchall()]
+                valid_geo_cols = {c.name for c in GeocacheModel.__table__.columns}
+                geo_models = []
+                for r in geo_rows:
+                    row_dict = {k: r[k] for k in geo_col_names if k in valid_geo_cols}
+                    val = row_dict.get("cached_at")
+                    if isinstance(val, str) and val:
+                        try:
+                            row_dict["cached_at"] = datetime.fromisoformat(val)
+                        except Exception:
+                            row_dict["cached_at"] = datetime.now(UTC)
+                    geo_models.append(GeocacheModel(**row_dict))
+                if geo_models:
+                    session.add_all(geo_models)
+                    await session.flush()
+                    logger.info(f"[Database] Zmigrowano {len(geo_models)} wpisów geocache do PostgreSQL.")
+
+            # 4. Migrate SpatialCache
+            if "spatial_cache" in existing_tables:
+                sp_rows = sync_conn.execute("SELECT * FROM spatial_cache").fetchall()
+                sp_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(spatial_cache)").fetchall()]
+                valid_sp_cols = {c.name for c in SpatialCacheModel.__table__.columns}
+                sp_models = []
+                for r in sp_rows:
+                    row_dict = {k: r[k] for k in sp_col_names if k in valid_sp_cols}
+                    for dt_c in ("created_at", "expires_at"):
+                        val = row_dict.get(dt_c)
+                        if isinstance(val, str) and val:
+                            try:
+                                row_dict[dt_c] = datetime.fromisoformat(val)
+                            except Exception:
+                                row_dict[dt_c] = None
+                    sp_models.append(SpatialCacheModel(**row_dict))
+                if sp_models:
+                    session.add_all(sp_models)
+                    await session.flush()
+                    logger.info(f"[Database] Zmigrowano {len(sp_models)} wpisów spatial_cache do PostgreSQL.")
+
+            await session.commit()
+
+        # Update PostgreSQL serial sequence for primary keys (if PostgreSQL)
+        if pg_engine.dialect.name == "postgresql":
+            async with pg_engine.begin() as conn:
+                await conn.execute(
+                    text("SELECT setval(pg_get_serial_sequence('listings', 'id'), coalesce(max(id), 1)) FROM listings;")
+                )
+                await conn.execute(
+                    text(
+                        "SELECT setval(pg_get_serial_sequence('price_history', 'id'), coalesce(max(id), 1)) FROM price_history;"
+                    )
+                )
+
+        sync_conn.close()
+        logger.info("[Database] ✅ Automatyczna migracja ze SQLite do PostgreSQL zakończona pomyślnie!")
+    except Exception as err:
+        logger.warning(f"[Database] Błąd podczas automatycznej migracji SQLite -> PostgreSQL: {err}")
+
+
 async def init_db() -> None:
     """Initialize database tables and run lightweight migrations with contention retry."""
     engine = get_engine()
     logger.info("Initializing database tables...")
+    is_sqlite = "sqlite" in settings.DATABASE_URL
     max_retries = 5
     for attempt in range(max_retries):
         try:
             async with engine.begin() as conn:
-                if "sqlite" in settings.DATABASE_URL:
+                if is_sqlite:
                     await conn.execute(text("PRAGMA journal_mode=WAL;"))
                     await conn.execute(text("PRAGMA busy_timeout=60000;"))
                     await conn.execute(text("PRAGMA synchronous=NORMAL;"))
                 await conn.run_sync(Base.metadata.create_all)
-                await _migrate_sqlite_columns(conn)
+                if is_sqlite:
+                    await _migrate_sqlite_columns(conn)
+            if not is_sqlite:
+                await _auto_migrate_sqlite_to_postgres(engine)
             logger.info("Database tables initialized and up-to-date.")
             return
         except Exception as exc:
