@@ -81,6 +81,11 @@ class ScraperPipeline:
                     f"[Pipeline] Found multi-agency/cross-portal duplicate for '{listing.title[:40]}' "
                     f"(matches existing ID {duplicate_model.id} from {duplicate_model.portal})."
                 )
+                global_tracker.add_log(
+                    f"📋 [Duplikat] {listing.title[:30]}: ta sama nieruchomość co #{duplicate_model.id} ({duplicate_model.portal})",
+                    level="info",
+                    category="info",
+                )
                 result["is_duplicate_fingerprint"] = True
 
         # 1.2 Restore stored detail data when detail was skipped or already cached in DB
@@ -239,6 +244,7 @@ class ScraperPipeline:
                         "walkability_pka_dist_m",
                         "walkability_pka_name",
                         "power_lines_risk",
+                        "gesut_networks",
                     ):
                         if (v := geo_audit.get(k)) is not None:
                             setattr(listing, k, v)
@@ -493,8 +499,11 @@ class ScraperPipeline:
                 walk_m = listing.walkability_pka_dist_m
                 walk_min = max(1, round(walk_m / 80))
                 pka_n = listing.walkability_pka_name or "PKA"
+                pka_dest = (
+                    " do centrum" if (listing.city or "").lower() not in ("rzeszów", "rzeszow") else " do Rzeszowa"
+                )
                 filter_result.pros.append(
-                    f"🚆 Stacja kolejowa PKA ({pka_n}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd do Rzeszowa"
+                    f"🚆 Stacja kolejowa PKA ({pka_n}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd{pka_dest}"
                 )
                 filter_result.score = min(100.0, filter_result.score + 5.0)
 
@@ -953,6 +962,9 @@ class ScraperPipeline:
                 ):
                     if (v := geo_audit.get(f)) is not None:
                         setattr(item, f, v)
+
+                if geo_audit.get("gesut_networks"):
+                    item.gesut_networks_data = geo_audit["gesut_networks"]
 
                 item_pros = list(item.pros or [])
                 item_cons = list(item.cons or [])

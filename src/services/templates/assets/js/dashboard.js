@@ -177,17 +177,24 @@
                 localStorage.setItem('hunter_selected_profile_id', profileId);
             } catch(e) {}
 
-            const prof = allProfiles.find(p => p.id === profileId) || allProfiles[0];
-            if (prof) {
+            if (profileId === 'ALL') {
                 const labelEl = document.getElementById('profileDropLabel');
-                if (labelEl) labelEl.innerText = `${prof.name} (${prof.city} +${prof.distance_radius} km)`;
+                if (labelEl) labelEl.innerText = `Wszystkie profile (${allProfiles.length})`;
                 const countEl = document.getElementById('profileDropCount');
-                if (countEl) countEl.innerText = getListingsForActiveProfile().length;
+                if (countEl) countEl.innerText = allListings.length;
+            } else {
+                const prof = allProfiles.find(p => p.id === profileId) || allProfiles[0];
+                if (prof) {
+                    const labelEl = document.getElementById('profileDropLabel');
+                    if (labelEl) labelEl.innerText = `${prof.name} (${prof.city} +${prof.distance_radius} km)`;
+                    const countEl = document.getElementById('profileDropCount');
+                    if (countEl) countEl.innerText = getListingsForActiveProfile().length;
 
-                if (map) {
-                    const profItemsWithCoords = getListingsForActiveProfile().filter(i => i.latitude && i.longitude);
-                    if (profItemsWithCoords.length === 0 && prof.city) {
-                        map.setView(getCityCenter(prof.city), 12);
+                    if (map) {
+                        const profItemsWithCoords = getListingsForActiveProfile().filter(i => i.latitude && i.longitude);
+                        if (profItemsWithCoords.length === 0 && prof.city) {
+                            map.setView(getCityCenter(prof.city), 12);
+                        }
                     }
                 }
             }
@@ -200,8 +207,13 @@
             closeProfileMenu();
             renderProfileTabs();
             applyFilters();
-            if (prof) {
-                showToast(`Widok profilu: ${prof.name}`);
+            if (profileId === 'ALL') {
+                showToast('Widok: Wszystkie profile');
+            } else {
+                const prof = allProfiles.find(p => p.id === profileId);
+                if (prof) {
+                    showToast(`Widok profilu: ${prof.name}`);
+                }
             }
         }
 
@@ -214,10 +226,10 @@
                 return;
             }
 
-            if (!selectedProfileId || !allProfiles.some(p => p.id === selectedProfileId)) {
+            if (!selectedProfileId || (selectedProfileId !== 'ALL' && !allProfiles.some(p => p.id === selectedProfileId))) {
                 try {
                     const saved = localStorage.getItem('hunter_selected_profile_id');
-                    if (saved && allProfiles.some(p => p.id === saved)) {
+                    if (saved && (saved === 'ALL' || allProfiles.some(p => p.id === saved))) {
                         selectedProfileId = saved;
                     } else {
                         selectedProfileId = allProfiles[0].id;
@@ -227,13 +239,32 @@
                 }
             }
 
+            const allCount = allListings.length;
+            const allIsActive = selectedProfileId === 'ALL';
+            const allItem = `
+                <button type="button" class="profile-menu-item ${allIsActive ? 'active' : ''}" onclick="switchActiveProfile('ALL')" title="Wszystkie profile">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="3" y="3" width="7" height="7" rx="1"></rect>
+                        <rect x="14" y="3" width="7" height="7" rx="1"></rect>
+                        <rect x="14" y="14" width="7" height="7" rx="1"></rect>
+                        <rect x="3" y="14" width="7" height="7" rx="1"></rect>
+                    </svg>
+                    <span class="profile-menu-item-meta">
+                        <span class="profile-menu-item-name">Wszystkie profile</span>
+                        <span class="profile-menu-item-sub">Cała baza ofert</span>
+                    </span>
+                    <span class="profile-drop-count num">${allCount}</span>
+                </button>
+            `;
+
             const items = allProfiles.map(p => {
                 const isActive = p.id === selectedProfileId;
+                const isRzeszow = (p.city || '').toLowerCase().includes('rzeszów') || (p.city || '').toLowerCase().includes('rzeszow');
 
                 const count = allListings.filter(item => {
                     if (item.profile_id && item.profile_id === p.id) return true;
                     if (item.profile_name && item.profile_name === p.name) return true;
-                    if ((!item.profile_id || item.profile_id === 'default') && (p.id === 'default' || p.id === allProfiles[0]?.id)) return true;
+                    if (isRzeszow && (!item.profile_id || item.profile_id === 'default') && p.id === 'default') return true;
                     return false;
                 }).length;
 
@@ -261,10 +292,14 @@
                 </div>
             `;
 
-            container.innerHTML = items + footer;
+            container.innerHTML = allItem + items + footer;
         }
 
         function getListingsForActiveProfile() {
+            if (selectedProfileId === 'ALL') {
+                return allListings;
+            }
+
             if (!selectedProfileId) {
                 if (allProfiles.length > 0) {
                     selectedProfileId = allProfiles[0].id;
@@ -274,12 +309,17 @@
             }
 
             const prof = allProfiles.find(p => p.id === selectedProfileId);
-            const profName = prof ? prof.name : null;
+            if (!prof) {
+                return allListings;
+            }
+
+            const profName = prof.name;
+            const isRzeszow = (prof.city || '').toLowerCase().includes('rzeszów') || (prof.city || '').toLowerCase().includes('rzeszow');
 
             return allListings.filter(item => {
                 if (item.profile_id && item.profile_id === selectedProfileId) return true;
                 if (profName && item.profile_name === profName) return true;
-                if ((!item.profile_id || item.profile_id === 'default') && (selectedProfileId === 'default' || selectedProfileId === allProfiles[0]?.id)) {
+                if (isRzeszow && (!item.profile_id || item.profile_id === 'default') && selectedProfileId === 'default') {
                     return true;
                 }
                 return false;
@@ -306,6 +346,9 @@
             if (tabS) tabS.style.display = (tab === 'scrapers') ? 'block' : 'none';
             if (tabSch) tabSch.style.display = (tab === 'scheduler') ? 'block' : 'none';
             if (tabAi) tabAi.style.display = (tab === 'ai') ? 'block' : 'none';
+            if (tab === 'ai' && typeof checkLlmStatusIfEmpty === 'function') {
+                checkLlmStatusIfEmpty();
+            }
         }
 
         function toggleNightModeInputs(enabled) {
@@ -423,7 +466,6 @@
             document.getElementById('cfgMaxYearBuilt').value = p.max_year_built || '';
             document.getElementById('cfgBlacklist').value = (p.blacklist_keywords || []).join(', ');
             document.getElementById('cfgDiscordWebhook').value = p.discord_webhook_url || '';
-            document.getElementById('cfgOtodomPath').value = p.otodom_path || '';
 
             const finishAllowed = p.allowed_finish_conditions || [];
             const finishAll = finishAllowed.includes('all');
@@ -458,6 +500,39 @@
             saveCurrentFormIntoMemory();
             currentProfileId = val;
             loadProfileIntoForm(val);
+        }
+
+        function duplicateCurrentProfile() {
+            saveCurrentFormIntoMemory();
+            const curP = allProfiles.find(x => x.id === currentProfileId) || allProfiles[0];
+            if (!curP) return;
+
+            const newId = "profile_" + Date.now();
+            const cloned = JSON.parse(JSON.stringify(curP));
+            cloned.id = newId;
+
+            // Generate clean copy name: e.g. "Domy Rzeszów (kopia)"
+            let baseName = (curP.name || "Profil").replace(/\s*\(kopia(?:\s+\d+)?\)$/i, '').trim();
+            let copyName = `${baseName} (kopia)`;
+            let counter = 2;
+            while (allProfiles.some(p => (p.name || '').toLowerCase() === copyName.toLowerCase())) {
+                copyName = `${baseName} (kopia ${counter})`;
+                counter++;
+            }
+            cloned.name = copyName;
+
+            allProfiles.push(cloned);
+            currentProfileId = newId;
+            refreshProfileSelect();
+            loadProfileIntoForm(newId);
+            renderProfileTabs();
+            showToast(`Zduplikowano profil "${curP.name}" ➔ "${cloned.name}". Zmień miasto lub parametry i kliknij Zapisz.`);
+
+            const cityInput = document.getElementById('cfgCity');
+            if (cityInput) {
+                cityInput.focus();
+                cityInput.select();
+            }
         }
 
         function createNewProfile() {
@@ -551,7 +626,6 @@
             const blRaw = document.getElementById('cfgBlacklist').value;
             p.blacklist_keywords = blRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
             p.discord_webhook_url = document.getElementById('cfgDiscordWebhook').value.trim() || null;
-            p.otodom_path = document.getElementById('cfgOtodomPath')?.value.trim() || null;
 
             const finishSel = Array.from(document.querySelectorAll('.cfg-finish:checked')).map(cb => cb.value);
             p.allowed_finish_conditions = finishSel.length > 0 ? finishSel : ["all"];
@@ -617,6 +691,19 @@
             if (document.getElementById('cfgLlmAnalysis')) {
                 document.getElementById('cfgLlmAnalysis').checked = !!activeConfig.llm_analysis_enabled;
             }
+            if (document.getElementById('cfgLlmProvider')) {
+                const prov = activeConfig.llm_provider || 'auto';
+                document.getElementById('cfgLlmProvider').value = prov;
+                if (typeof onLlmProviderChange === 'function') onLlmProviderChange(prov);
+            }
+            if (document.getElementById('cfgOllamaModel')) {
+                const olModel = activeConfig.ollama_model || 'llama3.1:8b';
+                document.getElementById('cfgOllamaModel').value = olModel;
+                if (typeof syncOllamaSelectWithInput === 'function') syncOllamaSelectWithInput(olModel);
+            }
+            if (document.getElementById('cfgOpenRouterModel')) {
+                document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
+            }
 
             if (!currentProfileId && allProfiles.length > 0) {
                 currentProfileId = allProfiles[0].id;
@@ -673,7 +760,10 @@
                 profiles: allProfiles,
                 scrapers: scrapersPayload,
                 scheduler: schedulerPayload,
-                llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false
+                llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
+                llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
+                ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b',
+                openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
             };
 
             try {
@@ -859,7 +949,7 @@
 
         function resetLiveFilters() {
             if (document.getElementById('filterCategory')) document.getElementById('filterCategory').value = 'ALL';
-            if (document.getElementById('filterProfile')) document.getElementById('filterProfile').value = 'ALL';
+            if (document.getElementById('filterProfile')) document.getElementById('filterProfile').value = selectedProfileId || 'ALL';
             if (document.getElementById('filterMaxPrice')) document.getElementById('filterMaxPrice').value = '';
             if (document.getElementById('filterMinArea')) document.getElementById('filterMinArea').value = '';
             if (document.getElementById('filterMaxArea')) document.getElementById('filterMaxArea').value = '';
@@ -2311,9 +2401,27 @@
                 verdictSection.style.display = 'none';
             }
 
+            // Update AI audit button state
+            const btnAiAudit = document.getElementById('btnGenerateAiAudit');
+            if (btnAiAudit) {
+                btnAiAudit.innerText = item.ai_summary ? '🔄 Odśwież raport AI' : '🤖 Generuj raport AI';
+                btnAiAudit.disabled = false;
+            }
+
             // Synthesis
             const summaryEl = document.getElementById('aiSummaryContent');
-            summaryEl.innerText = item.ai_summary || 'Brak analizy AI — uruchom synchronizację z włączonym LLM, aby wygenerować syntezę oferty.';
+            if (item.ai_summary) {
+                summaryEl.innerText = item.ai_summary;
+            } else {
+                summaryEl.innerHTML = `
+                    <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-md);border:1px dashed var(--border);">
+                        <span style="color:var(--text-muted);font-size:var(--font-size-xs);">Oferta nie posiada jeszcze wygenerowanego raportu AI.</span>
+                        <button class="btn btn-sm btn-ai-audit" style="align-self:flex-start;" onclick="triggerAiAuditForCurrentItem()">
+                            🤖 Generuj raport AI teraz
+                        </button>
+                    </div>
+                `;
+            }
 
             // Spatial / financial / legal audit
             const spatialSection = document.getElementById('aiSpatialSection');
@@ -2550,6 +2658,325 @@
                 `Argumenty korygujące cenę:\n`;
             const text = heading + args.map((a, i) => `${i + 1}. ${a}`).join('\n');
             navigator.clipboard.writeText(text).then(() => showToast('Argumenty negocjacyjne skopiowane do schowka.'));
+        }
+
+        async function triggerAiAuditForCurrentItem() {
+            if (!currentAiItem) return;
+            const item = currentAiItem;
+            const btn = document.getElementById('btnGenerateAiAudit');
+            const origHtml = btn ? btn.innerHTML : '';
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner-inline"></span> Generowanie…';
+            }
+            const summaryEl = document.getElementById('aiSummaryContent');
+            if (summaryEl) {
+                summaryEl.innerHTML = '<div style="display:flex;align-items:center;gap:8px;color:var(--text-muted);padding:10px 0;"><span class="spinner-inline"></span> Trwa weryfikacja techniczna i prawna opisu przez AI…</div>';
+            }
+            try {
+                const resp = await fetch(`/api/listings/${item.id}/ai-audit`, { method: 'POST' });
+                if (!resp.ok) {
+                    const err = await resp.json().catch(() => ({}));
+                    throw new Error(err.error || `Błąd serwera (${resp.status})`);
+                }
+                const data = await resp.json();
+                Object.assign(item, data);
+                const inList = allListings.find(i => i.id === item.id);
+                if (inList) Object.assign(inList, data);
+                openAiModal(item.id);
+                showToast('Raport AI został pomyślnie wygenerowany!');
+            } catch (err) {
+                showToast('Błąd generowania raportu AI: ' + err.message);
+                if (summaryEl) {
+                    summaryEl.innerHTML = `
+                        <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-md);border:1px dashed var(--border);">
+                            <span style="color:var(--red-text);font-size:var(--font-size-xs);">Nie udało się wygenerować raportu: ${escapeHtml(err.message)}</span>
+                            <button class="btn btn-sm btn-ai-audit" style="align-self:flex-start;" onclick="triggerAiAuditForCurrentItem()">
+                                🔄 Ponów próbę
+                            </button>
+                        </div>
+                    `;
+                }
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerHTML = item.ai_summary ? '🔄 Odśwież raport AI' : '🤖 Generuj raport AI';
+                }
+            }
+        }
+
+        // ========================
+        // LLM Configuration & Diagnostics
+        // ========================
+        let isTestingLlm = false;
+        let lastLlmStatusData = null;
+
+        function onLlmProviderChange(val) {
+            const desc = document.getElementById('llmProviderDesc');
+            if (!desc) return;
+            if (val === 'ollama') {
+                desc.textContent = 'Wymusza użycie lokalnego serwera Ollama na Twoim komputerze (bezpłatnie, 100% prywatności).';
+            } else if (val === 'openrouter') {
+                desc.textContent = 'Wymusza użycie chmurowego OpenRouter (wymaga klucza OPENROUTER_API_KEY w .env).';
+            } else if (val === 'openai') {
+                desc.textContent = 'Wymusza użycie oficjalnego OpenAI API (wymaga klucza OPENAI_API_KEY w .env).';
+            } else {
+                desc.textContent = 'Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalną Ollamę.';
+            }
+        }
+
+        function onOllamaSelectChange(val) {
+            const inp = document.getElementById('cfgOllamaModel');
+            if (!inp) return;
+            if (val !== 'custom') {
+                inp.value = val;
+            } else {
+                inp.focus();
+                inp.select();
+            }
+        }
+
+        function onOllamaInputCustom(val) {
+            const sel = document.getElementById('cfgOllamaModelSelect');
+            if (!sel) return;
+            const v = (val || '').trim();
+            let found = false;
+            for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === v) {
+                    sel.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                sel.value = 'custom';
+            }
+        }
+
+        function syncOllamaSelectWithInput(modelName) {
+            const sel = document.getElementById('cfgOllamaModelSelect');
+            if (!sel) return;
+            const v = (modelName || '').trim();
+            let found = false;
+            for (let i = 0; i < sel.options.length; i++) {
+                if (sel.options[i].value === v) {
+                    sel.selectedIndex = i;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found && v) {
+                sel.value = 'custom';
+            }
+        }
+
+        function setOllamaModelChip(modelName) {
+            const input = document.getElementById('cfgOllamaModel');
+            if (input) {
+                input.value = modelName;
+            }
+            syncOllamaSelectWithInput(modelName);
+        }
+
+        function setOpenRouterModelChip(modelName) {
+            const input = document.getElementById('cfgOpenRouterModel');
+            if (input) {
+                input.value = modelName;
+            }
+        }
+
+        function updateOllamaSelectOptions(installedModels, currentVal) {
+            const sel = document.getElementById('cfgOllamaModelSelect');
+            if (!sel) return;
+            const defaults = ['llama3.1:8b', 'qwen2.5:7b', 'qwen2.5:3b'];
+            const allModels = Array.from(new Set([...(installedModels || []), ...defaults]));
+            const cur = currentVal || document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b';
+            let html = allModels.map(m => {
+                const isInst = (installedModels || []).includes(m);
+                const tag = isInst ? ' (pobrany)' : '';
+                return `<option value="${escapeHtml(m)}">${escapeHtml(m)}${tag}</option>`;
+            }).join('');
+            html += '<option value="custom">Inny / wpisany ręcznie...</option>';
+            sel.innerHTML = html;
+            syncOllamaSelectWithInput(cur);
+        }
+
+        function checkLlmStatusIfEmpty() {
+            if (!lastLlmStatusData && !isTestingLlm) {
+                testLlmConnection(true);
+            }
+        }
+
+        async function testLlmConnection(isAuto = false) {
+            if (isTestingLlm) return;
+            isTestingLlm = true;
+
+            const btn = document.getElementById('btnTestLlm');
+            const label = document.getElementById('btnTestLlmLabel');
+            const container = document.getElementById('llmStatusContainer');
+            const ollamaModelInput = document.getElementById('cfgOllamaModel');
+            const requestedModel = ollamaModelInput ? ollamaModelInput.value.trim() : null;
+            const requestedOpenRouter = document.getElementById('cfgOpenRouterModel')?.value?.trim() || null;
+            const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
+
+            if (btn) btn.disabled = true;
+            if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
+            if (container && !isAuto) {
+                container.innerHTML = '<div class="llm-diag-placeholder"><span class="spinner-inline"></span> Sprawdzanie połączeń z OpenRouter, OpenAI oraz Ollama...</div>';
+            }
+
+            try {
+                const data = await Transport.testLlm({
+                    ollama_model: requestedModel,
+                    openrouter_model: requestedOpenRouter,
+                    llm_provider: requestedProvider
+                });
+                lastLlmStatusData = data;
+                renderLlmStatus(data);
+                if (!isAuto) {
+                    showToast('Zakończono test połączeń AI');
+                }
+            } catch (err) {
+                console.error('Error testing LLM connection:', err);
+                if (container) {
+                    container.innerHTML = `<div class="llm-active-banner status-err"><span>Błąd zapytania testowego: ${escapeHtml(err.message)}</span></div>`;
+                }
+                if (!isAuto) {
+                    showToast('Błąd sprawdzania statusu AI');
+                }
+            } finally {
+                isTestingLlm = false;
+                if (btn) btn.disabled = false;
+                if (label) label.textContent = 'Sprawdź połączenie';
+            }
+        }
+
+        function renderLlmStatus(data) {
+            const container = document.getElementById('llmStatusContainer');
+            if (!container) return;
+
+            const p = data.providers || {};
+            const or = p.openrouter || {};
+            const oa = p.openai || {};
+            const ol = p.ollama || {};
+
+            // Dynamically refresh the Ollama select with detected installed models
+            if (ol.installed_models) {
+                updateOllamaSelectOptions(ol.installed_models, document.getElementById('cfgOllamaModel')?.value?.trim());
+            }
+
+            // Update OpenRouter key notice
+            const orNotice = document.getElementById('openrouterKeyNotice');
+            if (orNotice) {
+                if (or.configured) {
+                    const cred = (or.limit_remaining !== null && or.limit_remaining !== undefined) ? ` · Limit: $${Number(or.limit_remaining).toFixed(2)}` : '';
+                    orNotice.innerHTML = `<span style="color:var(--green,#10b981);">✓ Klucz OPENROUTER_API_KEY jest aktywny (<code>${escapeHtml(or.key_masked)}</code>)${cred}</span>`;
+                } else {
+                    orNotice.innerHTML = '<span style="color:var(--text-muted);">ℹ️ Brak klucza OPENROUTER_API_KEY w pliku .env (opcjonalny do chmurowych modeli)</span>';
+                }
+            }
+
+            let bannerHtml = '';
+            if (data.has_working_provider && data.active_provider) {
+                bannerHtml = `
+                    <div class="llm-active-banner status-ok">
+                        <span>🟢 <strong>Aktywny dostawca:</strong> ${escapeHtml(data.active_provider.label || data.active_provider.name)}</span>
+                        <span style="font-size:11px;opacity:0.9;">Gotowy do analiz</span>
+                    </div>
+                `;
+            } else {
+                bannerHtml = `
+                    <div class="llm-active-banner status-err">
+                        <span>🔴 <strong>Brak gotowego dostawcy AI:</strong> Skonfigurowany dostawca nie odpowiada</span>
+                        <span style="font-size:11px;opacity:0.9;">Sprawdź klucz API lub uruchom Ollama</span>
+                    </div>
+                `;
+            }
+
+            function getStatusBadge(status) {
+                if (status === 'ok') return '<span class="llm-provider-badge ok">Działa</span>';
+                if (status === 'model_missing') return '<span class="llm-provider-badge warn">Brak modelu</span>';
+                if (status === 'error' || status === 'unreachable') return '<span class="llm-provider-badge err">Błąd</span>';
+                return '<span class="llm-provider-badge neutral">Nieaktywny</span>';
+            }
+
+            function getDotClass(status) {
+                if (status === 'ok') return 'ok';
+                if (status === 'model_missing') return 'warn';
+                if (status === 'error' || status === 'unreachable') return 'err';
+                return 'neutral';
+            }
+
+            const orRow = `
+                <div class="llm-provider-row">
+                    <div class="llm-provider-main">
+                        <div class="llm-provider-title-row">
+                            <span class="llm-dot ${getDotClass(or.status)}"></span>
+                            <span class="llm-provider-name">OpenRouter</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(or.model || 'domyślny')})</span>
+                            ${getStatusBadge(or.status)}
+                        </div>
+                        <div class="llm-provider-msg">
+                            Klucz: <code>${escapeHtml(or.key_masked || 'Brak')}</code> · ${escapeHtml(or.message || '')}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            const oaRow = `
+                <div class="llm-provider-row">
+                    <div class="llm-provider-main">
+                        <div class="llm-provider-title-row">
+                            <span class="llm-dot ${getDotClass(oa.status)}"></span>
+                            <span class="llm-provider-name">OpenAI</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(oa.model || 'gpt-4o-mini')})</span>
+                            ${getStatusBadge(oa.status)}
+                        </div>
+                        <div class="llm-provider-msg">
+                            Klucz: <code>${escapeHtml(oa.key_masked || 'Brak')}</code> · ${escapeHtml(oa.message || '')}
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            let installedChips = '';
+            if (ol.installed_models && ol.installed_models.length > 0) {
+                installedChips = `
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                        Pobrane modele lokalne (kliknij, aby wybrać do konfiguracji):
+                        <div class="llm-models-tags">
+                            ${ol.installed_models.map(m => `<span class="llm-model-tag" onclick="setOllamaModelChip('${escapeHtml(m)}')">${escapeHtml(m)}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+
+            const olRow = `
+                <div class="llm-provider-row" style="flex-direction:column;align-items:stretch;">
+                    <div style="display:flex;justify-content:space-between;align-items:center;">
+                        <div class="llm-provider-title-row">
+                            <span class="llm-dot ${getDotClass(ol.status)}"></span>
+                            <span class="llm-provider-name">Ollama (lokalny)</span>
+                            <span style="color:var(--text-muted);font-size:11px;">(${escapeHtml(ol.model || 'llama3.1:8b')})</span>
+                            ${getStatusBadge(ol.status)}
+                        </div>
+                        <span style="font-size:11px;color:var(--text-muted);">${escapeHtml(ol.url || 'http://localhost:11434')}</span>
+                    </div>
+                    <div class="llm-provider-msg" style="margin-top:4px;">
+                        ${escapeHtml(ol.message || '')}
+                    </div>
+                    ${installedChips}
+                </div>
+            `;
+
+            container.innerHTML = `
+                ${bannerHtml}
+                <div class="llm-provider-list">
+                    ${orRow}
+                    ${oaRow}
+                    ${olRow}
+                </div>
+            `;
         }
 
         // ========================

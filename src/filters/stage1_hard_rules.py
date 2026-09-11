@@ -59,11 +59,16 @@ class Stage1Filter:
         self.min_floor = min_floor if min_floor is not None else getattr(cfg, "min_floor", None)
         self.max_floor = max_floor if max_floor is not None else getattr(cfg, "max_floor", None)
         self.blacklist = blacklist if blacklist is not None else (getattr(cfg, "blacklist_keywords", None) or [])
-        self.whitelist_areas = (
-            whitelist_areas
-            if whitelist_areas is not None
-            else (getattr(cfg, "whitelist_areas", None) or settings.WHITELIST_AREAS)
-        )
+        cfg_city = (getattr(cfg, "city", None) or "").strip().lower()
+        is_rzeszow = cfg_city in ("rzeszów", "rzeszow")
+        if whitelist_areas is not None:
+            self.whitelist_areas = whitelist_areas
+        elif getattr(cfg, "whitelist_areas", None) is not None:
+            self.whitelist_areas = cfg.whitelist_areas
+        elif is_rzeszow:
+            self.whitelist_areas = settings.WHITELIST_AREAS
+        else:
+            self.whitelist_areas = []
         self.category = getattr(cfg, "category", "dom")
         self.owner_type = getattr(cfg, "owner_type", "all")
         self.market_type = getattr(cfg, "market_type", "all")
@@ -195,7 +200,14 @@ class Stage1Filter:
                 category = cat_val
 
         bl_words = getattr(p, "blacklist_keywords", self.blacklist) if p else self.blacklist
-        wl_areas = getattr(p, "whitelist_areas", self.whitelist_areas) if p else self.whitelist_areas
+        p_city = (getattr(p, "city", None) or "").strip().lower() if p else ""
+        is_p_rzeszow = p_city in ("rzeszów", "rzeszow")
+        if p and getattr(p, "whitelist_areas", None) is not None:
+            wl_areas = p.whitelist_areas
+        elif p and not is_p_rzeszow:
+            wl_areas = []
+        else:
+            wl_areas = self.whitelist_areas
         min_year = getattr(p, "min_year_built", self.min_year_built) if p else self.min_year_built
         max_year = getattr(p, "max_year_built", self.max_year_built) if p else self.max_year_built
         bt_allowed = getattr(p, "building_types", self.building_types) if p else self.building_types

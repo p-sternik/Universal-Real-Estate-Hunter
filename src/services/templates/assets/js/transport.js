@@ -106,6 +106,18 @@
 
                 async priceHistory(listingId) {
                     return await ensureOk('/api/listings/' + listingId + '/price-history');
+                },
+
+                async getLlmStatus() {
+                    return await ensureOk('/api/llm/status');
+                },
+
+                async testLlm(payload) {
+                    return await ensureOk('/api/llm/test', jsonOptions('POST', payload || {}));
+                },
+
+                async generateAiAudit(listingId) {
+                    return await ensureOk('/api/listings/' + encodeURIComponent(listingId) + '/ai-audit', jsonOptions('POST', {}));
                 }
             };
         })();

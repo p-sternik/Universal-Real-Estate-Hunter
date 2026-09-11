@@ -1085,6 +1085,20 @@ class GeoportalService:
         """
         from src.services.market_analyzer import PKA_STATIONS, haversine_km
 
+        dist_to_rzeszow = haversine_km(lat, lon, 50.0375, 22.0047)
+        if dist_to_rzeszow > 60.0:
+            return {
+                "pka_name": None,
+                "nearest_station": None,
+                "pka_dist_m": None,
+                "distance_m": None,
+                "pka_dist_km": None,
+                "is_near_pka": False,
+                "walk_min": None,
+                "walk_time_min": None,
+                "description": "Lokalizacja poza obszarem Podkarpackiej Kolei Aglomeracyjnej (PKA).",
+            }
+
         pka_distances = [(name, haversine_km(lat, lon, plat, plon)) for name, plat, plon in PKA_STATIONS]
         pka_distances.sort(key=lambda x: x[1])
         nearest_pka_name, nearest_pka_dist_km = pka_distances[0]

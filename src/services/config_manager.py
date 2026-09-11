@@ -441,11 +441,23 @@ class SearchConfig(BaseModel):
     scrapers: ScrapersSettings = Field(default_factory=ScrapersSettings)
     scheduler: SchedulerSettings = Field(default_factory=SchedulerSettings)
     llm_analysis_enabled: bool = Field(default_factory=lambda: settings.USE_LLM_ANALYSIS)
+    llm_provider: str = Field(default="auto")
+    ollama_model: str = Field(default_factory=lambda: settings.OLLAMA_MODEL)
+    openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
 
     def __getattr__(self, item: str) -> Any:
         # Transparent proxy to active/first profile for backward compatibility
         if (
-            item not in ("profiles", "scrapers", "scheduler", "llm_analysis_enabled")
+            item
+            not in (
+                "profiles",
+                "scrapers",
+                "scheduler",
+                "llm_analysis_enabled",
+                "llm_provider",
+                "ollama_model",
+                "openrouter_model",
+            )
             and hasattr(self, "profiles")
             and self.profiles
         ):
@@ -597,10 +609,27 @@ class ConfigManager:
             current_dict["scheduler"] = updates["scheduler"]
         if "llm_analysis_enabled" in updates:
             current_dict["llm_analysis_enabled"] = bool(updates["llm_analysis_enabled"])
+        if "llm_provider" in updates and updates["llm_provider"]:
+            current_dict["llm_provider"] = str(updates["llm_provider"]).strip().lower()
+        if "ollama_model" in updates and updates["ollama_model"]:
+            current_dict["ollama_model"] = str(updates["ollama_model"]).strip()
+        if "openrouter_model" in updates and updates["openrouter_model"]:
+            current_dict["openrouter_model"] = str(updates["openrouter_model"]).strip()
 
         # Support updating first/active profile directly if flat keys were provided
         flat_keys = {
-            k: v for k, v in updates.items() if k not in ("profiles", "scrapers", "scheduler", "llm_analysis_enabled")
+            k: v
+            for k, v in updates.items()
+            if k
+            not in (
+                "profiles",
+                "scrapers",
+                "scheduler",
+                "llm_analysis_enabled",
+                "llm_provider",
+                "ollama_model",
+                "openrouter_model",
+            )
         }
         if flat_keys and current_dict.get("profiles"):
             current_dict["profiles"][0].update(flat_keys)

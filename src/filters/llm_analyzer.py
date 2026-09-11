@@ -1,7 +1,10 @@
 import asyncio
 import json
+import os
+import re
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -76,15 +79,342 @@ class LLMAnalyzer:
     verdict, questions for the agent, and contact extraction.
     """
 
-    def __init__(self, enabled: bool | None = None):
-        self.enabled = settings.USE_LLM_ANALYSIS if enabled is None else enabled
+    def __init__(
+        self,
+        enabled: bool | None = None,
+        ollama_model: str | None = None,
+        openrouter_model: str | None = None,
+        llm_provider: str | None = None,
+    ):
+        cfg = None
+        try:
+            from src.services.config_manager import config_manager
+
+            cfg = config_manager.get_config()
+        except Exception:
+            pass
+
+        if enabled is not None:
+            self.enabled = enabled
+        elif cfg and hasattr(cfg, "llm_analysis_enabled"):
+            self.enabled = bool(cfg.llm_analysis_enabled)
+        else:
+            self.enabled = settings.USE_LLM_ANALYSIS
+
         self.openrouter_key = settings.OPENROUTER_API_KEY
-        self.openrouter_model = settings.OPENROUTER_MODEL
+        self.openrouter_model = (
+            openrouter_model or (getattr(cfg, "openrouter_model", None) if cfg else None) or settings.OPENROUTER_MODEL
+        )
         self.openai_key = settings.OPENAI_API_KEY
         self.openai_model = settings.OPENAI_MODEL
         self.openai_base_url = settings.OPENAI_BASE_URL
-        self.ollama_url = settings.OLLAMA_BASE_URL
-        self.ollama_model = settings.OLLAMA_MODEL
+        raw_ollama_url = (getattr(cfg, "ollama_url", None) if cfg else None) or settings.OLLAMA_BASE_URL
+        self.ollama_url = self._resolve_default_ollama_url(raw_ollama_url)
+        self.ollama_model = (
+            ollama_model or (getattr(cfg, "ollama_model", None) if cfg else None) or settings.OLLAMA_MODEL
+        )
+        self.llm_provider = (
+            (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
+        )
+
+    @classmethod
+    def _is_running_in_docker(cls) -> bool:
+        return Path("/.dockerenv").exists() or bool(os.environ.get("DOCKER_CONTAINER"))
+
+    @classmethod
+    def _resolve_default_ollama_url(cls, url: str | None) -> str:
+        base = (url or "http://localhost:11434").rstrip("/")
+        if cls._is_running_in_docker() and ("localhost" in base or "127.0.0.1" in base):
+            return re.sub(r"localhost|127\.0\.0\.1", "host.docker.internal", base)
+        return base
+
+    @staticmethod
+    def _mask_key(key: str | None) -> str:
+        if not key:
+            return "Brak"
+        if len(key) <= 8:
+            return "***"
+        return f"{key[:6]}...{key[-4:]}"
+
+    async def test_openrouter(self) -> dict[str, Any]:
+        if not self.openrouter_key:
+            return {
+                "name": "OpenRouter",
+                "configured": False,
+                "status": "not_configured",
+                "model": self.openrouter_model,
+                "key_masked": "Brak",
+                "message": "Brak klucza OPENROUTER_API_KEY w konfiguracji (.env).",
+            }
+        t0 = time.perf_counter()
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.get(
+                    "https://openrouter.ai/api/v1/auth/key",
+                    headers={"Authorization": f"Bearer {self.openrouter_key}"},
+                )
+                latency_ms = round((time.perf_counter() - t0) * 1000)
+                if res.status_code == 200:
+                    data = res.json().get("data", {})
+                    limit_remaining = data.get("limit_remaining")
+                    usage = data.get("usage", 0.0)
+                    credit_str = f", limit: ${limit_remaining:.2f}" if limit_remaining is not None else ""
+                    return {
+                        "name": "OpenRouter",
+                        "configured": True,
+                        "status": "ok",
+                        "model": self.openrouter_model,
+                        "key_masked": self._mask_key(self.openrouter_key),
+                        "latency_ms": latency_ms,
+                        "limit_remaining": limit_remaining,
+                        "usage": usage,
+                        "message": f"Połączono pomyślnie ({latency_ms} ms{credit_str}).",
+                    }
+                return {
+                    "name": "OpenRouter",
+                    "configured": True,
+                    "status": "error",
+                    "model": self.openrouter_model,
+                    "key_masked": self._mask_key(self.openrouter_key),
+                    "latency_ms": latency_ms,
+                    "message": f"Błąd autoryzacji ({res.status_code}): {res.text[:100]}",
+                }
+        except Exception as e:
+            latency_ms = round((time.perf_counter() - t0) * 1000)
+            return {
+                "name": "OpenRouter",
+                "configured": True,
+                "status": "error",
+                "model": self.openrouter_model,
+                "key_masked": self._mask_key(self.openrouter_key),
+                "latency_ms": latency_ms,
+                "message": f"Błąd połączenia: {e}",
+            }
+
+    async def test_openai(self) -> dict[str, Any]:
+        if not self.openai_key:
+            return {
+                "name": "OpenAI",
+                "configured": False,
+                "status": "not_configured",
+                "model": self.openai_model,
+                "key_masked": "Brak",
+                "message": "Brak klucza OPENAI_API_KEY w konfiguracji (.env).",
+            }
+        t0 = time.perf_counter()
+        base_url = (self.openai_base_url or "https://api.openai.com/v1").rstrip("/")
+        try:
+            async with httpx.AsyncClient(timeout=8.0) as client:
+                res = await client.get(
+                    f"{base_url}/models",
+                    headers={"Authorization": f"Bearer {self.openai_key}"},
+                )
+                latency_ms = round((time.perf_counter() - t0) * 1000)
+                if res.status_code == 200:
+                    return {
+                        "name": "OpenAI",
+                        "configured": True,
+                        "status": "ok",
+                        "model": self.openai_model,
+                        "base_url": base_url,
+                        "key_masked": self._mask_key(self.openai_key),
+                        "latency_ms": latency_ms,
+                        "message": f"Połączono pomyślnie ({latency_ms} ms).",
+                    }
+                return {
+                    "name": "OpenAI",
+                    "configured": True,
+                    "status": "error",
+                    "model": self.openai_model,
+                    "base_url": base_url,
+                    "key_masked": self._mask_key(self.openai_key),
+                    "latency_ms": latency_ms,
+                    "message": f"Błąd OpenAI ({res.status_code}): {res.text[:100]}",
+                }
+        except Exception as e:
+            latency_ms = round((time.perf_counter() - t0) * 1000)
+            return {
+                "name": "OpenAI",
+                "configured": True,
+                "status": "error",
+                "model": self.openai_model,
+                "base_url": base_url,
+                "key_masked": self._mask_key(self.openai_key),
+                "latency_ms": latency_ms,
+                "message": f"Błąd połączenia: {e}",
+            }
+
+    async def test_ollama(self) -> dict[str, Any]:
+        urls_to_try = [self.ollama_url]
+        if "localhost" in self.ollama_url or "127.0.0.1" in self.ollama_url:
+            alt = re.sub(r"localhost|127\.0\.0\.1", "host.docker.internal", self.ollama_url)
+            if alt not in urls_to_try:
+                urls_to_try.append(alt)
+        elif "host.docker.internal" in self.ollama_url:
+            alt = self.ollama_url.replace("host.docker.internal", "localhost")
+            if alt not in urls_to_try:
+                urls_to_try.append(alt)
+
+        last_error_msg = ""
+        last_url = self.ollama_url
+        for target_url in urls_to_try:
+            url = target_url.rstrip("/")
+            last_url = url
+            t0 = time.perf_counter()
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    res = await client.get(f"{url}/api/tags")
+                    if res.status_code != 200:
+                        last_error_msg = f"Serwer Ollama zwrócił kod błędu {res.status_code}."
+                        continue
+
+                    # Successfully connected! Remember this working URL
+                    self.ollama_url = url
+
+                    data = res.json()
+                    models_list = [str(m.get("name")) for m in data.get("models", []) if m.get("name")]
+                    target_model = self.ollama_model
+
+                    # Check if target model or model without tag (e.g. llama3.1 vs llama3.1:8b) is installed
+                    model_found = any(
+                        target_model == m
+                        or target_model == m.split(":")[0]
+                        or m == target_model.split(":")[0]
+                        or m.startswith(target_model.split(":")[0] + ":")
+                        for m in models_list
+                    )
+
+                    if not model_found:
+                        models_str = ", ".join(models_list) if models_list else "brak zainstalowanych modeli"
+                        return {
+                            "name": "Ollama (lokalny)",
+                            "configured": True,
+                            "url": url,
+                            "status": "model_missing",
+                            "model": target_model,
+                            "installed_models": models_list,
+                            "message": (
+                                f"Serwer Ollama działa, ale model '{target_model}' nie jest pobrany. "
+                                f"Zainstalowane: {models_str}. Uruchom: ollama pull {target_model}"
+                            ),
+                        }
+
+                    # Model is installed, let's verify response latency
+                    t_gen = time.perf_counter()
+                    try:
+                        gen_res = await client.post(
+                            f"{url}/api/generate",
+                            json={
+                                "model": target_model,
+                                "prompt": "ping",
+                                "stream": False,
+                                "options": {"num_predict": 1},
+                            },
+                            timeout=15.0,
+                        )
+                        gen_ms = round((time.perf_counter() - t_gen) * 1000)
+                        if gen_res.status_code == 200:
+                            return {
+                                "name": "Ollama (lokalny)",
+                                "configured": True,
+                                "url": url,
+                                "status": "ok",
+                                "model": target_model,
+                                "installed_models": models_list,
+                                "latency_ms": gen_ms,
+                                "message": f"Działa poprawnie (model '{target_model}' gotowy, opóźnienie: {gen_ms} ms).",
+                            }
+                    except Exception:
+                        pass
+
+                    latency_ms = round((time.perf_counter() - t0) * 1000)
+                    return {
+                        "name": "Ollama (lokalny)",
+                        "configured": True,
+                        "url": url,
+                        "status": "ok",
+                        "model": target_model,
+                        "installed_models": models_list,
+                        "latency_ms": latency_ms,
+                        "message": f"Serwer Ollama działa, model '{target_model}' jest dostępny.",
+                    }
+            except Exception as e:
+                last_error_msg = str(e)
+
+        in_docker = self._is_running_in_docker()
+        docker_hint = (
+            " (Wykryto środowisko Docker: połączenie z hostem Windows wymaga adresu http://host.docker.internal:11434)"
+            if in_docker
+            else ""
+        )
+        return {
+            "name": "Ollama (lokalny)",
+            "configured": True,
+            "url": last_url,
+            "status": "unreachable",
+            "model": self.ollama_model,
+            "message": f"Nie można połączyć się z serwerem Ollama pod {last_url} ({last_error_msg}).{docker_hint} Upewnij się, że usługa działa.",
+        }
+
+    async def test_connection(self) -> dict[str, Any]:
+        openrouter_res, openai_res, ollama_res = await asyncio.gather(
+            self.test_openrouter(),
+            self.test_openai(),
+            self.test_ollama(),
+        )
+
+        providers_map = {
+            "openrouter": {
+                "id": "openrouter",
+                "name": "OpenRouter",
+                "model": self.openrouter_model,
+                "label": f"OpenRouter ({self.openrouter_model})",
+                "status": openrouter_res.get("status"),
+            },
+            "openai": {
+                "id": "openai",
+                "name": "OpenAI",
+                "model": self.openai_model,
+                "label": f"OpenAI ({self.openai_model})",
+                "status": openai_res.get("status"),
+            },
+            "ollama": {
+                "id": "ollama",
+                "name": "Ollama (lokalny)",
+                "model": self.ollama_model,
+                "label": f"Ollama ({self.ollama_model})",
+                "status": ollama_res.get("status"),
+            },
+        }
+
+        active_provider = None
+        pref = self.llm_provider
+        if pref == "ollama":
+            if ollama_res.get("status") == "ok":
+                active_provider = providers_map["ollama"]
+        elif pref == "openrouter":
+            if openrouter_res.get("status") == "ok":
+                active_provider = providers_map["openrouter"]
+        elif pref == "openai":
+            if openai_res.get("status") == "ok":
+                active_provider = providers_map["openai"]
+        else:  # "auto"
+            for p_id in ("openrouter", "openai", "ollama"):
+                if providers_map[p_id]["status"] == "ok":
+                    active_provider = providers_map[p_id]
+                    break
+
+        return {
+            "enabled": bool(self.enabled),
+            "configured_provider": self.llm_provider,
+            "has_working_provider": active_provider is not None,
+            "active_provider": active_provider,
+            "providers": {
+                "openrouter": openrouter_res,
+                "openai": openai_res,
+                "ollama": ollama_res,
+            },
+        }
 
     @staticmethod
     def _parse_json(content: str) -> dict[str, Any] | None:
@@ -112,6 +442,132 @@ class LLMAnalyzer:
         if len(desc) <= head + tail + 10:
             return desc
         return f"{desc[:head]}\n[...]\n{desc[-tail:]}"
+
+    async def _call_openrouter(self, prompt: str, listing: ListingSchema) -> dict[str, Any] | None:
+        if not self.openrouter_key:
+            return None
+        try:
+            from openai import AsyncOpenAI
+
+            logger.info(f"[LLMAnalyzer] Zapytanie do OpenRouter ({self.openrouter_model}) dla: '{listing.title[:35]}'")
+            client = AsyncOpenAI(
+                api_key=self.openrouter_key,
+                base_url="https://openrouter.ai/api/v1",
+                timeout=15.0,
+                default_headers={
+                    "HTTP-Referer": "https://github.com/p-sternik/Universal-Real-Estate-Hunter",
+                    "X-Title": "Universal Real Estate Hunter",
+                },
+            )
+            response = await _chat_completion_with_retry(
+                client,
+                model=self.openrouter_model,
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+            )
+            content = response.choices[0].message.content or "{}"
+            result = self._parse_json(content)
+            if result:
+                logger.info(
+                    f"[LLMAnalyzer] OpenRouter: pomyślnie przeanalizowano '{listing.title[:35]}' "
+                    f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                )
+                return result
+        except Exception as e:
+            logger.warning(f"[LLMAnalyzer] OpenRouter error: {e}")
+        return None
+
+    async def _call_openai(self, prompt: str, listing: ListingSchema) -> dict[str, Any] | None:
+        if not self.openai_key:
+            return None
+        try:
+            from openai import AsyncOpenAI
+
+            logger.info(f"[LLMAnalyzer] Zapytanie do OpenAI ({self.openai_model}) dla: '{listing.title[:35]}'")
+            client = AsyncOpenAI(
+                api_key=self.openai_key,
+                base_url=self.openai_base_url,
+                timeout=15.0,
+            )
+            response = await _chat_completion_with_retry(
+                client,
+                model=self.openai_model,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "system", "content": _SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt},
+                ],
+                temperature=0.1,
+            )
+            content = response.choices[0].message.content or "{}"
+            result = self._parse_json(content)
+            if result:
+                logger.info(
+                    f"[LLMAnalyzer] OpenAI: pomyślnie przeanalizowano '{listing.title[:35]}' "
+                    f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                )
+                return result
+        except Exception as e:
+            logger.warning(f"[LLMAnalyzer] OpenAI error: {e}")
+        return None
+
+    async def _call_ollama(self, prompt: str, listing: ListingSchema) -> dict[str, Any] | None:
+        urls_to_try = [self.ollama_url]
+        if "localhost" in self.ollama_url or "127.0.0.1" in self.ollama_url:
+            alt = re.sub(r"localhost|127\.0\.0\.1", "host.docker.internal", self.ollama_url)
+            if alt not in urls_to_try:
+                urls_to_try.append(alt)
+        elif "host.docker.internal" in self.ollama_url:
+            alt = self.ollama_url.replace("host.docker.internal", "localhost")
+            if alt not in urls_to_try:
+                urls_to_try.append(alt)
+
+        timeout = httpx.Timeout(180.0, connect=10.0)
+        for candidate_url in urls_to_try:
+            url = candidate_url.rstrip("/")
+            try:
+                logger.info(
+                    f"[LLMAnalyzer] Zapytanie do Ollama ({self.ollama_model} @ {url}) dla: '{listing.title[:35]}'"
+                )
+                async with httpx.AsyncClient(timeout=timeout) as http_client:
+                    res = await http_client.post(
+                        f"{url}/api/generate",
+                        json={
+                            "model": self.ollama_model,
+                            "prompt": prompt,
+                            "system": _SYSTEM_PROMPT,
+                            "format": "json",
+                            "stream": False,
+                            "options": {
+                                "temperature": 0,
+                                "num_ctx": 8192,
+                            },
+                        },
+                    )
+                    if res.status_code == 200:
+                        payload = res.json()
+                        result = self._parse_json(payload.get("response", "{}"))
+                        if result:
+                            self.ollama_url = url
+                            logger.info(
+                                f"[LLMAnalyzer] Ollama: pomyślnie przeanalizowano '{listing.title[:35]}' "
+                                f"(stan: {result.get('finish_condition')}, warty: {result.get('worth_interest')})"
+                            )
+                            return result
+            except httpx.TimeoutException:
+                logger.warning(
+                    f"[LLMAnalyzer] Ollama ({url}) timeout: Przekroczono limit czasu 180s generowania odpowiedzi przez lokalny model. "
+                    f"Model '{self.ollama_model}' potrzebuje więcej czasu na wykonanie analizy."
+                )
+                break
+            except Exception as e:
+                err_type = type(e).__name__
+                err_msg = f"{err_type}: {e}".rstrip(": ")
+                logger.warning(f"[LLMAnalyzer] Ollama ({url}) error: {err_msg}")
+        return None
 
     async def analyze_description(self, listing: ListingSchema) -> dict[str, Any] | None:
         if not self.enabled:
@@ -237,81 +693,29 @@ Return valid JSON with exactly this schema:
   "cons": [string]
 }}"""
 
-        # 1. Try OpenRouter if key is present
-        if self.openrouter_key:
-            try:
-                from openai import AsyncOpenAI
+        # Execute providers based on preference
+        providers_to_try: list[str] = []
+        if self.llm_provider == "ollama":
+            providers_to_try = ["ollama"]
+        elif self.llm_provider == "openrouter":
+            providers_to_try = ["openrouter"]
+        elif self.llm_provider == "openai":
+            providers_to_try = ["openai"]
+        else:  # "auto" or anything else
+            providers_to_try = ["openrouter", "openai", "ollama"]
 
-                client = AsyncOpenAI(
-                    api_key=self.openrouter_key,
-                    base_url="https://openrouter.ai/api/v1",
-                    timeout=15.0,
-                    default_headers={
-                        "HTTP-Referer": "https://github.com/p-sternik/Universal-Real-Estate-Hunter",
-                        "X-Title": "Universal Real Estate Hunter",
-                    },
-                )
-                response = await _chat_completion_with_retry(
-                    client,
-                    model=self.openrouter_model,
-                    messages=[
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.1,
-                )
-                content = response.choices[0].message.content or "{}"
-                result = self._parse_json(content)
-                if result:
-                    return result
-            except Exception as e:
-                logger.warning(f"[LLMAnalyzer] OpenRouter error: {e}. Falling back to OpenAI or Ollama.")
-
-        # 2. Try OpenAI if key is present
-        if self.openai_key:
-            try:
-                from openai import AsyncOpenAI
-
-                client = AsyncOpenAI(
-                    api_key=self.openai_key,
-                    base_url=self.openai_base_url,
-                    timeout=15.0,
-                )
-                response = await _chat_completion_with_retry(
-                    client,
-                    model=self.openai_model,
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "system", "content": _SYSTEM_PROMPT},
-                        {"role": "user", "content": prompt},
-                    ],
-                    temperature=0.1,
-                )
-                content = response.choices[0].message.content or "{}"
-                result = self._parse_json(content)
-                if result:
-                    return result
-            except Exception as e:
-                logger.warning(f"[LLMAnalyzer] OpenAI error: {e}. Falling back to Ollama or regex.")
-
-        # 3. Try Ollama if running
-        try:
-            async with httpx.AsyncClient(timeout=15.0) as http_client:
-                res = await http_client.post(
-                    f"{self.ollama_url}/api/generate",
-                    json={
-                        "model": self.ollama_model,
-                        "prompt": prompt,
-                        "system": _SYSTEM_PROMPT,
-                        "format": "json",
-                        "stream": False,
-                        "options": {"temperature": 0},
-                    },
-                )
-                if res.status_code == 200:
-                    payload = res.json()
-                    return self._parse_json(payload.get("response", "{}"))
-        except Exception as e:
-            logger.debug(f"[LLMAnalyzer] Ollama unavailable: {e}")
+        for p in providers_to_try:
+            if p == "openrouter":
+                res = await self._call_openrouter(prompt, listing)
+                if res:
+                    return res
+            elif p == "openai":
+                res = await self._call_openai(prompt, listing)
+                if res:
+                    return res
+            elif p == "ollama":
+                res = await self._call_ollama(prompt, listing)
+                if res:
+                    return res
 
         return None

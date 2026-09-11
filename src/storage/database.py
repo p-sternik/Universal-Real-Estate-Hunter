@@ -1,4 +1,5 @@
 import asyncio
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -71,6 +72,63 @@ async def safe_commit(session: AsyncSession, max_retries: int = 7, initial_backo
                     raise
 
 
+def verify_and_repair_sqlite_permissions(db_path_str: str) -> None:
+    """
+    Proactively checks and heals SQLite directory/file permissions.
+    If the directory or file is read-only (e.g. Docker host bind-mount permission mismatch),
+    attempts automatic chmod healing or outputs an actionable diagnostic message.
+    """
+    p_db = Path(db_path_str).resolve()
+    directory = p_db.parent
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        logger.error(f"[Database] Nie można utworzyć katalogu bazy '{directory}': {e}")
+        return
+
+    # Proactive write test to confirm WAL/SHM file creation is allowed
+    test_file = directory / f".write_test_{os.getpid()}"
+    can_write = False
+    try:
+        test_file.write_text("ok", encoding="utf-8")
+        test_file.unlink(missing_ok=True)
+        can_write = True
+    except (PermissionError, OSError):
+        try:
+            directory.chmod(0o777)
+            test_file.write_text("ok", encoding="utf-8")
+            test_file.unlink(missing_ok=True)
+            can_write = True
+        except Exception:
+            pass
+
+    if not can_write:
+        logger.critical(
+            f"[Database] 🚨 BŁĄD UPRAWNIEŃ: Katalog '{directory}' nie zezwala na zapis dla tego procesu!\n"
+            f"SQLite nie będzie mógł zapisać bazy danych ani utworzyć plików WAL/SHM (attempt to write a readonly database).\n"
+            f"Rozwiązanie na maszynie hosta:\n"
+            f"  sudo chmod -R 777 {directory}"
+        )
+
+    if p_db.exists():
+        try:
+            with p_db.open("r+b"):
+                pass
+        except (PermissionError, OSError):
+            try:
+                p_db.chmod(0o666)
+            except Exception:
+                logger.error(f"[Database] Plik bazy '{p_db}' jest tylko do odczytu. Rozwiązanie: sudo chmod 666 {p_db}")
+
+    for ext in ("-wal", "-shm"):
+        p_aux = Path(f"{db_path_str}{ext}")
+        if p_aux.exists():
+            try:
+                p_aux.chmod(0o666)
+            except Exception:
+                pass
+
+
 def get_engine() -> AsyncEngine:
     global _engine
     if _engine is None:
@@ -80,22 +138,7 @@ def get_engine() -> AsyncEngine:
         if "sqlite" in db_url:
             if db_url.startswith("sqlite+aiosqlite:///"):
                 path = db_url.replace("sqlite+aiosqlite:///", "")
-                p_db = Path(path)
-                if p_db.parent:
-                    p_db.parent.mkdir(parents=True, exist_ok=True)
-                    try:
-                        p_db.parent.chmod(0o777)
-                    except Exception:
-                        pass
-                try:
-                    if p_db.exists():
-                        p_db.chmod(0o666)
-                    for ext in ("-wal", "-shm"):
-                        p_aux = Path(f"{path}{ext}")
-                        if p_aux.exists():
-                            p_aux.chmod(0o666)
-                except Exception:
-                    pass
+                verify_and_repair_sqlite_permissions(path)
             connect_args = {
                 "timeout": 60.0,
             }
@@ -112,10 +155,21 @@ def get_engine() -> AsyncEngine:
             @event.listens_for(_engine.sync_engine, "connect")
             def set_sqlite_pragma(dbapi_connection, connection_record):
                 cursor = dbapi_connection.cursor()
-                cursor.execute("PRAGMA journal_mode=WAL")
-                cursor.execute("PRAGMA busy_timeout=60000")
-                cursor.execute("PRAGMA synchronous=NORMAL")
-                cursor.close()
+                try:
+                    cursor.execute("PRAGMA busy_timeout=60000")
+                    cursor.execute("PRAGMA synchronous=NORMAL")
+                    cursor.execute("PRAGMA journal_mode=WAL")
+                    row = cursor.fetchone()
+                    mode = str(row[0]).upper() if row else ""
+                    if mode != "WAL":
+                        logger.warning(
+                            f"[Database] WAL journal mode unsupported by filesystem ({mode}), falling back to TRUNCATE."
+                        )
+                        cursor.execute("PRAGMA journal_mode=TRUNCATE")
+                except Exception as e:
+                    logger.warning(f"[Database] SQLite pragma warning: {e}")
+                finally:
+                    cursor.close()
 
     return _engine
 

@@ -1,5 +1,5 @@
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
@@ -158,6 +158,8 @@ async def test_live_dashboard_listings_includes_gunb_and_gesut():
         data = await resp.json()
         item = next((x for x in data if x.get("portal_id") == "geo-gunb-test-1"), None)
         assert item is not None
+        assert item["is_new_cycle"] is True
+        assert item["is_updated_cycle"] is False
         assert "identifyParcel=181609_2.0001.2643/7" in item["geoportal_url"]
         assert item["parcel_id"] == "181609_2.0001.2643/7"
         assert "land_audit" in item
@@ -168,6 +170,136 @@ async def test_live_dashboard_listings_includes_gunb_and_gesut():
         assert "risk_shield" in item["land_audit"]
         assert "gesut_audit" in item["land_audit"]
         assert item["land_audit"]["tco_audit"]["total_acquisition_cost"] >= 350_000
+
+
+@pytest.mark.asyncio
+async def test_live_dashboard_generate_ai_audit_endpoint():
+    await init_db()
+    async with get_session() as session:
+        repo = ListingRepository(session)
+        listing = ListingSchema(
+            id="ai-audit-test-1",
+            portal="Otodom",
+            title="Dom do audytu AI",
+            url="https://otodom.pl/oferta/ai-audit-test-1",
+            price=600_000,
+            price_per_m2=6_000.0,
+            area_home=100.0,
+            location_raw="Rzeszów",
+            raw_description="Dom wykończony pod klucz z umeblowaną kuchnią. Do zrobienia taras. Tel: 500600700.",
+        )
+        filt = FilterResult(
+            is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True
+        )
+        model, _, _ = await repo.save_or_update(listing, filt)
+        model.ai_summary = None
+        model.ai_verdict = None
+        await session.commit()
+        listing_id = model.id
+
+    mock_insights = {
+        "summary": "Wykończony dom 100m² w Rzeszowie za 600 tys. zł.",
+        "verdict": "Tak — 6 000 zł/m² to atrakcyjna oferta.",
+        "worth_interest": True,
+        "questions_for_agent": ["Czy taras wymaga pozwolenia?", "Kiedy odebrano budynek?"],
+        "contact_phone": "500600700",
+        "contact_person": "Jan Kowalski",
+        "finish_condition": "pod_klucz",
+        "has_visualisations": False,
+        "pros": ["Wykończona kuchnia"],
+        "cons": ["Do zrobienia taras"],
+    }
+
+    server = LiveDashboardServer(port=8092)
+    with patch("src.filters.llm_analyzer.LLMAnalyzer.analyze_description", new_callable=AsyncMock) as mock_ai:
+        mock_ai.return_value = mock_insights
+        async with TestClient(TestServer(server.app)) as client:
+            resp = await client.post(f"/api/listings/{listing_id}/ai-audit")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["id"] == listing_id
+            assert data["ai_summary"] == mock_insights["summary"]
+            assert data["ai_verdict"] == mock_insights["verdict"]
+            assert data["worth_interest"] is True
+            assert len(data["ai_questions"]) == 2
+            assert data["contact_phone"] == "500600700"
+            assert data["finish_condition"] == "do zamieszkania"
+
+            # Check 404 for nonexistent id
+            resp_404 = await client.post("/api/listings/999999/ai-audit")
+            assert resp_404.status == 404
+
+            # Check 502 when AI fails to respond
+            mock_ai.return_value = None
+            resp_502 = await client.post(f"/api/listings/{listing_id}/ai-audit")
+            assert resp_502.status == 502
+
+
+@pytest.mark.asyncio
+async def test_live_dashboard_llm_status_and_test_endpoints():
+    """Verify /api/llm/status and /api/llm/test diagnostic endpoints and scenarios."""
+    server = LiveDashboardServer(port=8093)
+    mock_diag = {
+        "enabled": True,
+        "has_working_provider": True,
+        "active_provider": {
+            "id": "ollama",
+            "name": "Ollama (lokalny)",
+            "model": "llama3.1:8b",
+            "label": "Ollama (llama3.1:8b)",
+        },
+        "providers": {
+            "openrouter": {"status": "not_configured", "configured": False},
+            "openai": {"status": "not_configured", "configured": False},
+            "ollama": {
+                "status": "ok",
+                "configured": True,
+                "model": "llama3.1:8b",
+                "installed_models": ["llama3.1:8b"],
+                "latency_ms": 120,
+            },
+        },
+    }
+
+    with patch("src.filters.llm_analyzer.LLMAnalyzer.test_connection", new_callable=AsyncMock) as mock_test:
+        mock_test.return_value = mock_diag
+        async with TestClient(TestServer(server.app)) as client:
+            resp = await client.get("/api/llm/status")
+            assert resp.status == 200
+            data = await resp.json()
+            assert data["enabled"] is True
+            assert data["has_working_provider"] is True
+            assert data["active_provider"]["id"] == "ollama"
+            assert data["providers"]["ollama"]["status"] == "ok"
+
+            # Test POST /api/llm/test with custom model
+            resp_post = await client.post("/api/llm/test", json={"ollama_model": "qwen2.5:3b"})
+            assert resp_post.status == 200
+            data_post = await resp_post.json()
+            assert data_post["has_working_provider"] is True
+
+
+@pytest.mark.asyncio
+async def test_llm_analyzer_test_connection_ollama_states():
+    """Verify test_ollama returns appropriate status for missing model and unreachable server."""
+    from src.filters.llm_analyzer import LLMAnalyzer
+
+    analyzer = LLMAnalyzer(enabled=True, ollama_model="nonexistent:model")
+
+    # 1. Unreachable server
+    with patch("httpx.AsyncClient.get", side_effect=Exception("Connection refused")):
+        res = await analyzer.test_ollama()
+        assert res["status"] == "unreachable"
+
+    # 2. Server ok, but model missing
+    mock_tags_resp = MagicMock(status_code=200)
+    mock_tags_resp.json.return_value = {"models": [{"name": "llama3.1:8b"}]}
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock) as mock_get:
+        mock_get.return_value = mock_tags_resp
+        res = await analyzer.test_ollama()
+        assert res["status"] == "model_missing"
+        assert "llama3.1:8b" in res["installed_models"]
 
 
 @pytest.mark.asyncio
@@ -311,3 +443,112 @@ def test_shared_status_and_cancellation_lifecycle(tmp_path, monkeypatch):
     assert payload is not None
     assert payload["percentage"] == 42
     assert payload["is_running"] is True
+
+
+def test_verify_and_repair_sqlite_permissions(tmp_path):
+    """Verify verify_and_repair_sqlite_permissions creates dir and confirms write ability."""
+    from src.storage.database import verify_and_repair_sqlite_permissions
+
+    db_file = tmp_path / "sub" / "test.db"
+    verify_and_repair_sqlite_permissions(str(db_file))
+    assert (tmp_path / "sub").exists()
+    assert (tmp_path / "sub").is_dir()
+
+
+@pytest.mark.asyncio
+async def test_llm_provider_selection_logic():
+    """Verify that test_connection selects the active provider according to llm_provider preference."""
+    from src.filters.llm_analyzer import LLMAnalyzer
+
+    analyzer = LLMAnalyzer(enabled=True, llm_provider="ollama", ollama_model="llama3.1:8b")
+
+    mock_openrouter = {"status": "ok", "configured": True, "model": "gemini"}
+    mock_openai = {"status": "ok", "configured": True, "model": "gpt-4o-mini"}
+    mock_ollama = {"status": "ok", "configured": True, "model": "llama3.1:8b"}
+
+    with (
+        patch.object(analyzer, "test_openrouter", new_callable=AsyncMock) as m_or,
+        patch.object(analyzer, "test_openai", new_callable=AsyncMock) as m_oa,
+        patch.object(analyzer, "test_ollama", new_callable=AsyncMock) as m_ol,
+    ):
+        m_or.return_value = mock_openrouter
+        m_oa.return_value = mock_openai
+        m_ol.return_value = mock_ollama
+
+        # 1. Preferred is ollama -> active_provider must be ollama even if openrouter is ok
+        res = await analyzer.test_connection()
+        assert res["active_provider"]["id"] == "ollama"
+        assert res["configured_provider"] == "ollama"
+
+        # 2. Preferred is openrouter
+        analyzer.llm_provider = "openrouter"
+        res2 = await analyzer.test_connection()
+        assert res2["active_provider"]["id"] == "openrouter"
+
+        # 3. Preferred is auto -> default order: openrouter -> openai -> ollama
+        analyzer.llm_provider = "auto"
+        res3 = await analyzer.test_connection()
+        assert res3["active_provider"]["id"] == "openrouter"
+
+        # 4. Auto with openrouter down -> falls back to openai
+        m_or.return_value = {"status": "error"}
+        res4 = await analyzer.test_connection()
+        assert res4["active_provider"]["id"] == "openai"
+
+
+@pytest.mark.asyncio
+async def test_llm_provider_analyze_routing():
+    """Verify that analyze_description routes only to the chosen provider when not 'auto'."""
+    from src.filters.llm_analyzer import LLMAnalyzer
+
+    analyzer = LLMAnalyzer(enabled=True, llm_provider="ollama", ollama_model="llama3.1:8b")
+    analyzer.openrouter_key = "test-key"
+
+    listing = ListingSchema(
+        id="test-routing-1",
+        portal="Otodom",
+        title="Dom w Rzeszowie",
+        url="https://otodom.pl/1",
+        price=500_000,
+        price_per_m2=5_000.0,
+        area_home=100.0,
+        location_raw="Rzeszów",
+        raw_description="Dom pod klucz.",
+    )
+
+    with (
+        patch.object(analyzer, "_call_openrouter", new_callable=AsyncMock) as m_or,
+        patch.object(analyzer, "_call_ollama", new_callable=AsyncMock) as m_ol,
+    ):
+        m_ol.return_value = {"summary": "Zbadano przez Ollama"}
+        res = await analyzer.analyze_description(listing)
+
+        assert res == {"summary": "Zbadano przez Ollama"}
+        assert m_ol.called
+        assert not m_or.called  # OpenRouter must not be called when provider is strictly ollama
+
+
+def test_config_manager_llm_settings_roundtrip():
+    """Verify SearchConfig accepts and persists llm_provider, ollama_model, and openrouter_model."""
+    from src.services.config_manager import SearchConfig, config_manager
+
+    cfg = SearchConfig(
+        llm_provider="ollama",
+        ollama_model="qwen2.5:7b",
+        openrouter_model="deepseek/deepseek-chat",
+    )
+    assert cfg.llm_provider == "ollama"
+    assert cfg.ollama_model == "qwen2.5:7b"
+    assert cfg.openrouter_model == "deepseek/deepseek-chat"
+
+    # Test update_config
+    updated = config_manager.update_config(
+        {
+            "llm_provider": "openrouter",
+            "ollama_model": "llama3.1:8b",
+            "openrouter_model": "google/gemini-2.5-flash-lite:nitro",
+        }
+    )
+    assert updated.llm_provider == "openrouter"
+    assert updated.ollama_model == "llama3.1:8b"
+    assert updated.openrouter_model == "google/gemini-2.5-flash-lite:nitro"

@@ -410,6 +410,13 @@
                             <label style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;">Profil:</label>
                             <select id="cfgProfileSelect" onchange="onProfileSelectChange(this.value)" style="flex:1;background:var(--input);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-primary);padding:6px 9px;font-size:12px;"></select>
                         </div>
+                        <button type="button" class="btn btn-sm" onclick="duplicateCurrentProfile()" title="Duplikuj bieżący profil" style="display:inline-flex;align-items:center;gap:4px;">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            Duplikuj
+                        </button>
                         <button type="button" class="btn btn-sm" onclick="createNewProfile()">+ Nowy profil</button>
                         <button type="button" class="btn btn-sm btn-danger" id="btnDeleteProfile" onclick="deleteCurrentProfile()" title="Usuń profil">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -455,14 +462,6 @@
                             <span class="chip" onclick="setCfgCity('Gdańsk')">Gdańsk</span>
                             <span class="chip" onclick="setCfgCity('Łańcut')">Łańcut</span>
                         </div>
-                    </div>
-
-                    <div class="config-field" style="margin-bottom:12px;">
-                        <label for="cfgOtodomPath" style="display:flex;justify-content:space-between;align-items:center;">
-                            <span>Ścieżka Otodom (opcjonalna):</span>
-                            <span style="font-weight:normal;color:var(--text-muted);font-size:11px;">pozostaw puste dla auto</span>
-                        </label>
-                        <input type="text" id="cfgOtodomPath" placeholder="Domyślnie auto (lub np. mazowieckie/siedlce/siedlce/siedlce)">
                     </div>
 
                     <div class="config-row2">
@@ -783,15 +782,86 @@
                         </label>
                         <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
                             Generuje syntezę, pytania do agenta i dane kontaktowe dla każdego ogłoszenia.<br>
-                            Wymaga klucza API w <code>.env</code>: <code>OPENROUTER_API_KEY</code>, <code>OPENAI_API_KEY</code>
-                            lub lokalnego Ollama.
+                            Wspiera dostawców w łańcuchu: <code>OpenRouter</code> &rarr; <code>OpenAI</code> &rarr; <code>Ollama (lokalny)</code>.
                         </div>
                     </div>
 
-                    <div class="hint-box">
-                        Analiza uzupełnia się automatycznie przy kolejnym cyklu scrapingu — również dla ofert
-                        zapisanych wcześniej (jednorazowy backfill). Oferty z niezmienionym opisem i istniejącą
-                        analizą nie są ponownie wysyłane do LLM (oszczędność kosztów).
+                    <div class="config-field" style="margin-top:14px;">
+                        <label for="cfgLlmProvider">Aktywny dostawca AI (LLM):</label>
+                        <select id="cfgLlmProvider" onchange="onLlmProviderChange(this.value)">
+                            <option value="auto">Automatyczny (OpenRouter ➔ OpenAI ➔ Ollama)</option>
+                            <option value="ollama">Ollama (lokalny na Twoim komputerze)</option>
+                            <option value="openrouter">OpenRouter (chmura)</option>
+                            <option value="openai">OpenAI (chmura)</option>
+                        </select>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="llmProviderDesc">
+                            Tryb automatyczny najpierw sprawdza OpenRouter, potem OpenAI, a na końcu lokalną Ollamę.
+                        </div>
+                    </div>
+
+                    <div class="config-field" style="margin-top:14px;">
+                        <label for="cfgOllamaModelSelect">Model dla lokalnego Ollama:</label>
+                        <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
+                            <select id="cfgOllamaModelSelect" style="flex:1;" onchange="onOllamaSelectChange(this.value)">
+                                <option value="llama3.1:8b">llama3.1:8b (zalecany, 4.9 GB)</option>
+                                <option value="qwen2.5:7b">qwen2.5:7b (szybki)</option>
+                                <option value="qwen2.5:3b">qwen2.5:3b (bardzo lekki)</option>
+                                <option value="custom">Inny / wpisany ręcznie...</option>
+                            </select>
+                        </div>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="text" id="cfgOllamaModel" placeholder="llama3.1:8b" style="flex:1;" oninput="onOllamaInputCustom(this.value)">
+                            <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('llama3.1:8b')">llama3.1:8b</button>
+                            <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:7b')">qwen2.5:7b</button>
+                            <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:3b')">qwen2.5:3b</button>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                            Wybierz z listy wykrytych modeli lub wpisz dowolny model pobrany przez <code>ollama pull</code>.
+                        </div>
+                    </div>
+
+                    <div class="config-field" id="openrouterModelField" style="margin-top:14px;">
+                        <label for="cfgOpenRouterModel">Model dla OpenRouter (chmura):</label>
+                        <div style="display:flex;gap:8px;align-items:center;">
+                            <input type="text" id="cfgOpenRouterModel" placeholder="google/gemini-2.5-flash-lite:nitro" style="flex:1;">
+                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('google/gemini-2.5-flash-lite:nitro')">gemini-flash-lite</button>
+                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('meta-llama/llama-3.3-70b-instruct:free')">llama-3.3-70b:free</button>
+                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('deepseek/deepseek-chat')">deepseek-chat</button>
+                        </div>
+                        <div id="openrouterKeyNotice" style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                            Wpisz identyfikator modelu z OpenRouter. Dostępne gdy w .env skonfigurowano OPENROUTER_API_KEY.
+                        </div>
+                    </div>
+
+                    <!-- Diagnostyka połączenia LLM -->
+                    <div class="llm-diag-section">
+                        <div class="llm-diag-header">
+                            <div>
+                                <span class="llm-diag-title">Stan połączenia i konfiguracji AI</span>
+                                <span class="llm-diag-subtitle">Weryfikuje klucze API, dostępność modeli i opóźnienia</span>
+                            </div>
+                            <button type="button" class="btn btn-sm" id="btnTestLlm" onclick="testLlmConnection()">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M10 2v7.31"></path>
+                                    <path d="M14 9.3V2"></path>
+                                    <path d="M8.5 2h7"></path>
+                                    <path d="M14 9.3a6.5 6.5 0 1 1-4 0"></path>
+                                    <path d="M5.52 16h12.96"></path>
+                                </svg>
+                                <span id="btnTestLlmLabel">Sprawdź połączenie</span>
+                            </button>
+                        </div>
+
+                        <div id="llmStatusContainer" class="llm-status-container">
+                            <div class="llm-diag-placeholder">
+                                Kliknij „Sprawdź połączenie”, aby przetestować OpenRouter, OpenAI oraz lokalną Ollama.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="hint-box" style="margin-top:12px;">
+                        <strong>Łańcuch awaryjny (fallback):</strong> OpenRouter &rarr; OpenAI &rarr; Ollama (lokalnie) &rarr; Reguły regex.<br>
+                        Oferty z niezmienionym opisem i istniejącą analizą nie są ponownie wysyłane do LLM (oszczędność kosztów).
                     </div>
                 </div>
             </div>
@@ -835,12 +905,17 @@
                     <h2>Raport audytu nieruchomości</h2>
                     <span class="drawer-sub" id="aiModalTitle"></span>
                 </div>
-                <button class="btn btn-ghost btn-sm" onclick="closeAiModal(null)" aria-label="Zamknij raport">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M18 6 6 18"></path>
-                        <path d="m6 6 12 12"></path>
-                    </svg>
-                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button id="btnGenerateAiAudit" class="btn btn-sm btn-ai-audit" onclick="triggerAiAuditForCurrentItem()" title="Wygeneruj lub odśwież analizę AI dla tej oferty">
+                        🤖 Generuj raport AI
+                    </button>
+                    <button class="btn btn-ghost btn-sm" onclick="closeAiModal(null)" aria-label="Zamknij raport">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M18 6 6 18"></path>
+                            <path d="m6 6 12 12"></path>
+                        </svg>
+                    </button>
+                </div>
             </div>
 
             <div class="drawer-body">

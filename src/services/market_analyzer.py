@@ -563,28 +563,55 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
     flat = float(lat)
     flon = float(lon)
 
-    # 1. Distance to City Center (Rynek Rzeszów)
-    dist_center = haversine_km(flat, flon, RZESZOW_CENTER[0], RZESZOW_CENTER[1])
+    # 1. Resolve Target City Center
+    from src.services.config_manager import CITY_CENTROIDS, slugify_city
+
+    city_center_coords = RZESZOW_CENTER
+    city_display = city or "Rzeszów"
+
+    city_slug = slugify_city(city) if city else ""
+    if city_slug in CITY_CENTROIDS:
+        city_center_coords = CITY_CENTROIDS[city_slug]
+        city_display = city
+    else:
+        combined_loc = f"{city} {district} {_prop(listing, 'location_raw', '')}"
+        for c_slug, coords in CITY_CENTROIDS.items():
+            if c_slug in slugify_city(combined_loc):
+                city_center_coords = coords
+                city_display = c_slug.capitalize()
+                break
+
+    dist_center = haversine_km(flat, flon, city_center_coords[0], city_center_coords[1])
     commute_min = max(5, round(dist_center * 1.5 + 4))
 
-    # 2. Nearest PKA Station
-    pka_distances = [(name, haversine_km(flat, flon, plat, plon)) for name, plat, plon in PKA_STATIONS]
-    pka_distances.sort(key=lambda x: x[1])
-    nearest_pka_name, nearest_pka_dist = pka_distances[0]
+    dist_to_rzeszow = haversine_km(flat, flon, RZESZOW_CENTER[0], RZESZOW_CENTER[1])
+    is_podkarpacie = dist_to_rzeszow <= 60.0
 
-    # 3. Nearest Expressway Hub (A4 / S19)
-    hub_distances = [(name, haversine_km(flat, flon, hlat, hlon)) for name, hlat, hlon in EXPRESSWAY_HUBS]
-    hub_distances.sort(key=lambda x: x[1])
-    nearest_hub_name, nearest_hub_dist = hub_distances[0]
+    nearest_pka_name: str | None = None
+    nearest_pka_dist: float | None = None
+    nearest_hub_name: str | None = None
+    nearest_hub_dist: float | None = None
+
+    if is_podkarpacie:
+        # 2. Nearest PKA Station
+        pka_distances = [(name, haversine_km(flat, flon, plat, plon)) for name, plat, plon in PKA_STATIONS]
+        pka_distances.sort(key=lambda x: x[1])
+        nearest_pka_name, nearest_pka_dist = pka_distances[0]
+
+        # 3. Nearest Expressway Hub (A4 / S19)
+        hub_distances = [(name, haversine_km(flat, flon, hlat, hlon)) for name, hlat, hlon in EXPRESSWAY_HUBS]
+        hub_distances.sort(key=lambda x: x[1])
+        nearest_hub_name, nearest_hub_dist = hub_distances[0]
 
     findings: list[dict[str, str]] = []
 
     # Center
+    center_label = f"Centrum ({city_display})" if city_display else "Centrum"
     if dist_center <= 5.0:
         findings.append(
             {
                 "badge": "🏙️ Blisko Centrum",
-                "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
                 "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
                 "severity": "success",
             }
@@ -593,8 +620,8 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
         findings.append(
             {
                 "badge": "🚗 Strefa Podmiejska",
-                "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Standardowy czas dojazdu w aglomeracji rzeszowskiej. Dogodne połączenie drogowe.",
+                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
+                "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe.",
                 "severity": "info",
             }
         )
@@ -602,77 +629,90 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
         findings.append(
             {
                 "badge": "⏱️ Dłuższy Dojazd",
-                "title": f"Centrum Rzeszowa: {dist_center:.1f} km (~{commute_min} min)",
+                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
                 "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
                 "severity": "warning",
             }
         )
 
-    # PKA
-    if nearest_pka_dist <= 1.5:
-        findings.append(
-            {
-                "badge": "🚆 Kolej Aglomeracyjna PKA < 1.5 km",
-                "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-                "desc": "Dojście pieszo lub rowerem do stacji PKA! Szybki transport do centrum w 10–12 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
-                "severity": "success",
-            }
-        )
-    elif nearest_pka_dist <= 3.5:
-        findings.append(
-            {
-                "badge": "🚆 Stacja PKA w Zasięgu Auta (Park & Ride)",
-                "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-                "desc": "Dojazd autem 3–5 min do stacji PKA. Możliwość korzystania z pociągu aglomeracyjnego.",
-                "severity": "info",
-            }
-        )
-    else:
-        findings.append(
-            {
-                "badge": "🚌 Brak Bliskiej Kolei",
-                "title": f"Najbliższa stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
-                "desc": "Brak bezpośredniego dostępu do PKA. Komunikacja oparta w 100% na transporcie kołowym (autobusy / auto).",
-                "severity": "info",
-            }
-        )
+    # PKA (only for Podkarpacie region)
+    if is_podkarpacie and nearest_pka_dist is not None and nearest_pka_name is not None:
+        if nearest_pka_dist <= 1.5:
+            findings.append(
+                {
+                    "badge": "🚆 Kolej Aglomeracyjna PKA < 1.5 km",
+                    "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+                    "desc": "Dojście pieszo lub rowerem do stacji PKA! Szybki transport do centrum w 10–12 min bez stania w korkach. Kluczowy atut podnoszący wartość nieruchomości.",
+                    "severity": "success",
+                }
+            )
+        elif nearest_pka_dist <= 3.5:
+            findings.append(
+                {
+                    "badge": "🚆 Stacja PKA w Zasięgu Auta (Park & Ride)",
+                    "title": f"Stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+                    "desc": "Dojazd autem 3–5 min do stacji PKA. Możliwość korzystania z pociągu aglomeracyjnego.",
+                    "severity": "info",
+                }
+            )
+        else:
+            findings.append(
+                {
+                    "badge": "🚌 Brak Bliskiej Kolei",
+                    "title": f"Najbliższa stacja: {nearest_pka_name} ({nearest_pka_dist:.1f} km)",
+                    "desc": "Brak bezpośredniego dostępu do PKA. Komunikacja oparta w 100% na transporcie kołowym (autobusy / auto).",
+                    "severity": "info",
+                }
+            )
 
-    # Expressway
-    if nearest_hub_dist < 0.45:
-        findings.append(
-            {
-                "badge": "⚠️ Bliskość Węzła Szybkich Dróg (<450m)",
-                "title": f"{nearest_hub_name} ({nearest_hub_dist * 1000:.0f} m)",
-                "desc": "Bardzo bliskie sąsiedztwo trasy szybkiego ruchu. Ryzyko uciążliwego hałasu komunikacyjnego i spalin.",
-                "severity": "warning",
-            }
-        )
-    elif nearest_hub_dist <= 5.0:
-        findings.append(
-            {
-                "badge": "🛣️ Wygodny Wylot na A4 / S19",
-                "title": f"{nearest_hub_name} ({nearest_hub_dist:.1f} km)",
-                "desc": "Szybki wjazd na obwodnicę i autostradę w kilka minut bez wjeżdżania do zatłoczonego centrum.",
-                "severity": "success",
-            }
-        )
+    # Expressway (only for Podkarpacie region)
+    if is_podkarpacie and nearest_hub_dist is not None and nearest_hub_name is not None:
+        if nearest_hub_dist < 0.45:
+            findings.append(
+                {
+                    "badge": "⚠️ Bliskość Węzła Szybkich Dróg (<450m)",
+                    "title": f"{nearest_hub_name} ({nearest_hub_dist * 1000:.0f} m)",
+                    "desc": "Bardzo bliskie sąsiedztwo trasy szybkiego ruchu. Ryzyko uciążliwego hałasu komunikacyjnego i spalin.",
+                    "severity": "warning",
+                }
+            )
+        elif nearest_hub_dist <= 5.0:
+            findings.append(
+                {
+                    "badge": "🛣️ Wygodny Wylot na A4 / S19",
+                    "title": f"{nearest_hub_name} ({nearest_hub_dist:.1f} km)",
+                    "desc": "Szybki wjazd na obwodnicę i autostradę w kilka minut bez wjeżdżania do zatłoczonego centrum.",
+                    "severity": "success",
+                }
+            )
 
-    if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
-        commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
-        commute_sev = "success"
-    elif dist_center <= 14.0 or nearest_pka_dist <= 2.5:
-        commute_verdict = "DOBRA KOMUNIKACJA AGLOMERACYJNA"
-        commute_sev = "info"
+    if is_podkarpacie and nearest_pka_dist is not None:
+        if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
+            commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
+            commute_sev = "success"
+        elif dist_center <= 14.0 or nearest_pka_dist <= 2.5:
+            commute_verdict = "DOBRA KOMUNIKACJA AGLOMERACYJNA"
+            commute_sev = "info"
+        else:
+            commute_verdict = "LOKALIZACJA WYMAGAJĄCA SAMOCHODU"
+            commute_sev = "warning"
     else:
-        commute_verdict = "LOKALIZACJA WYMAGAJĄCA SAMOCHODU"
-        commute_sev = "warning"
+        if dist_center <= 6.0:
+            commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
+            commute_sev = "success"
+        elif dist_center <= 15.0:
+            commute_verdict = "DOBRA KOMUNIKACJA AGLOMERACYJNA"
+            commute_sev = "info"
+        else:
+            commute_verdict = "LOKALIZACJA WYMAGAJĄCA SAMOCHODU"
+            commute_sev = "warning"
 
     return {
         "has_coords": True,
         "dist_center_km": dist_center,
         "commute_time_min": commute_min,
-        "nearest_pka": {"name": nearest_pka_name, "distance_km": nearest_pka_dist},
-        "nearest_expressway": {"name": nearest_hub_name, "distance_km": nearest_hub_dist},
+        "nearest_pka": {"name": nearest_pka_name, "distance_km": nearest_pka_dist} if nearest_pka_name else None,
+        "nearest_expressway": {"name": nearest_hub_name, "distance_km": nearest_hub_dist} if nearest_hub_name else None,
         "verdict": commute_verdict,
         "severity": commute_sev,
         "findings": findings,

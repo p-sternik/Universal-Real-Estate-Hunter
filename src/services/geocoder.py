@@ -1,4 +1,5 @@
 import asyncio
+import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -142,8 +143,13 @@ class NominatimGeocoder:
         location_raw: str | None,
     ) -> tuple[float, float] | None:
         haystack = f"{street or ''} {district or ''} {city or ''} {location_raw or ''}".lower()
+        from src.services.config_manager import CITY_CENTROIDS
+
+        for c_name, coords in CITY_CENTROIDS.items():
+            if re.search(rf"\b{re.escape(c_name)}\b", haystack):
+                return coords
         for key, coords in RZESZOW_DISTRICT_CENTROIDS.items():
-            if key in haystack:
+            if re.search(rf"\b{re.escape(key)}\b", haystack):
                 return coords
         return None
 
@@ -160,12 +166,16 @@ class NominatimGeocoder:
         Returns is_exact=True if resolved via street-level Nominatim,
         or is_exact=False if resolved via district/city fallback.
         """
-        city_name = (city or "Rzeszów").strip()
+        city_name = (city or "").strip()
+        if not city_name and location_raw:
+            tokens = [t.strip() for t in location_raw.split(",") if t.strip()]
+            if tokens:
+                city_name = tokens[0]
 
         # 1. Try Street + City on Nominatim
         if street:
             clean_street = street.replace("ul.", "").replace("ulica", "").strip()
-            query = f"{clean_street}, {city_name}, Polska"
+            query = f"{clean_street}, {city_name}, Polska" if city_name else f"{clean_street}, Polska"
             query_key = f"street:{query}".lower()
 
             cached = await self.get_cached(session, query_key)
@@ -181,8 +191,13 @@ class NominatimGeocoder:
                 return (lat, lon, True)
 
         # 2. Try District + City on Nominatim
-        if district:
-            query = f"{district}, {city_name}, Polska"
+        if district or city_name:
+            target_area = district or city_name
+            query = (
+                f"{target_area}, {city_name}, Polska"
+                if district and city_name and district != city_name
+                else f"{target_area}, Polska"
+            )
             query_key = f"district:{query}".lower()
 
             cached = await self.get_cached(session, query_key)
@@ -198,7 +213,7 @@ class NominatimGeocoder:
                 return (lat, lon, False)
 
         # 3. Try Instant Offline Centroid Fallback
-        fallback = self._find_district_fallback(street, district, city, location_raw)
+        fallback = self._find_district_fallback(street, district, city_name, location_raw)
         if fallback:
             return (fallback[0], fallback[1], False)
 

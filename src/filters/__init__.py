@@ -2,6 +2,8 @@ import re
 import time
 from typing import Any
 
+from loguru import logger
+
 from src.models.enums import (
     BuildingType,
     FinishCondition,
@@ -150,6 +152,7 @@ class QualificationEngine:
         if not skip_llm:
             from src.services.progress import global_tracker
 
+            logger.info(f"🤖 [AI Audit] Weryfikacja LLM dla: '{listing.title[:45]}'")
             global_tracker.add_log(
                 f"🤖 [AI Audit] Weryfikacja LLM dla: {listing.title[:32]}...",
                 level="info",
@@ -159,7 +162,12 @@ class QualificationEngine:
             llm_insights = await self.llm.analyze_description(listing)
             t_llm_sec = time.perf_counter() - t_llm_start
             if llm_insights:
-                v_tag = llm_insights.get("worth_interest") or "zakończono"
+                v_tag = (
+                    "warty uwagi"
+                    if llm_insights.get("worth_interest") is True
+                    else ("nie warty" if llm_insights.get("worth_interest") is False else "zakończono")
+                )
+                logger.info(f"🤖 [AI Audit] Gotowe dla: '{listing.title[:45]}' ({t_llm_sec:.1f}s, werdykt: {v_tag})")
                 global_tracker.add_log(
                     f"🤖 [AI Audit] Gotowe dla {listing.title[:28]} ({t_llm_sec:.1f}s, werdykt: {v_tag})",
                     level="info",

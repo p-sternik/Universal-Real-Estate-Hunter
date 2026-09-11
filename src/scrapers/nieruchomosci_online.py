@@ -271,7 +271,11 @@ class NieruchomosciOnlineScraper(BaseScraper):
             if not url:
                 return None
             if not url.startswith("http"):
-                url = f"https://rzeszow.nieruchomosci-online.pl{url}"
+                from src.services.config_manager import slugify_city
+
+                profile_city = getattr(self.profile, "city", None) or "Rzeszów"
+                city_slug = slugify_city(profile_city)
+                url = f"https://{city_slug}.nieruchomosci-online.pl{url}"
 
             # Portal ID
             id_match = re.search(r"/(\d+)\.html", url)
@@ -320,7 +324,8 @@ class NieruchomosciOnlineScraper(BaseScraper):
 
             # Location
             prov_p = tile.select_one("p.province")
-            location_raw = prov_p.get_text(" ", strip=True).replace("\xa0", " ") if prov_p else "Rzeszów"
+            default_city = getattr(self.profile, "city", None) or "Rzeszów"
+            location_raw = prov_p.get_text(" ", strip=True).replace("\xa0", " ") if prov_p else default_city
 
             # Image
             img_tag = tile.select_one("img")
@@ -478,6 +483,9 @@ class NieruchomosciOnlineScraper(BaseScraper):
         listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
+            if self.is_cancelled:
+                logger.info(f"[{self.name}] Przerwano pobieranie stron - wykryto żądanie zatrzymania.")
+                break
             join_char = "&" if "?" in base_url else "?"
             url = base_url if page == 1 else f"{base_url}{join_char}p={page}"
             logger.info(f"[{self.name}] Fetching page {page}: {url}")

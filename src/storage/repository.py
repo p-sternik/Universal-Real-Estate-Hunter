@@ -33,6 +33,11 @@ class ListingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
 
+    async def get_by_id(self, listing_id: int) -> ListingModel | None:
+        stmt = select(ListingModel).where(ListingModel.id == listing_id)
+        res = await self.session.execute(stmt)
+        return res.scalars().first()
+
     async def get_by_portal_id(self, portal: str, portal_id: str) -> ListingModel | None:
         stmt = select(ListingModel).where(
             ListingModel.portal == portal,
@@ -281,7 +286,7 @@ class ListingRepository:
             qualification_status=filter_result.status.value,
             qualification_score=filter_result.score,
             created_at=listing.created_at,
-            updated_at=datetime.now(UTC),
+            updated_at=listing.created_at,
             last_scraped_at=datetime.now(UTC),
         )
         new_model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
@@ -396,6 +401,8 @@ class ListingRepository:
         if profile_name:
             conditions.append(ListingModel.profile_name == profile_name)
         conditions.append(ListingModel.profile_name == profile_id)
+        if profile_id == "default":
+            conditions.append(ListingModel.profile_id.is_(None))
 
         stmt = select(ListingModel.id).where(or_(*conditions))
         res = await self.session.execute(stmt)

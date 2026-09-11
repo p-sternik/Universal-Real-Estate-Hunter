@@ -2077,3 +2077,171 @@
             .config-card { max-width: 100%; border-radius: var(--r-lg) var(--r-lg) 0 0; }
             .config-body { max-height: 70vh; }
         }
+
+        @keyframes spin { 100% { transform: rotate(360deg); } }
+        .spinner-inline {
+            display: inline-block;
+            width: 13px;
+            height: 13px;
+            border: 2px solid rgba(255, 255, 255, 0.25);
+            border-top-color: currentColor;
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            vertical-align: middle;
+            margin-right: 4px;
+        }
+        .btn-ai-audit {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.15), rgba(139, 92, 246, 0.15));
+            border: 1px solid rgba(139, 92, 246, 0.4);
+            color: var(--violet-text, #a78bfa);
+            font-weight: 500;
+            transition: all 0.18s ease;
+        }
+        .btn-ai-audit:hover:not(:disabled) {
+            background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(139, 92, 246, 0.25));
+            border-color: rgba(139, 92, 246, 0.7);
+            color: #fff;
+        }
+
+        /* LLM Diagnostics Panel */
+        .llm-diag-section {
+            margin-top: 14px;
+            padding: 14px;
+            background: rgba(0, 0, 0, 0.2);
+            border: 1px solid var(--border);
+            border-radius: var(--r-md);
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .llm-diag-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .llm-diag-title {
+            font-size: var(--font-size-sm);
+            font-weight: 600;
+            color: var(--text-primary);
+            display: block;
+        }
+        .llm-diag-subtitle {
+            font-size: 11px;
+            color: var(--text-muted);
+            display: block;
+            margin-top: 2px;
+        }
+        .llm-status-container {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .llm-diag-placeholder {
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+            font-style: italic;
+            padding: 8px 0;
+        }
+        .llm-active-banner {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 9px 12px;
+            border-radius: var(--r-sm);
+            font-size: var(--font-size-xs);
+            font-weight: 500;
+        }
+        .llm-active-banner.status-ok {
+            background: rgba(16, 185, 129, 0.12);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #10b981;
+        }
+        .llm-active-banner.status-warn {
+            background: rgba(245, 158, 11, 0.12);
+            border: 1px solid rgba(245, 158, 11, 0.3);
+            color: #f59e0b;
+        }
+        .llm-active-banner.status-err {
+            background: rgba(239, 68, 68, 0.12);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #ef4444;
+        }
+        .llm-provider-list {
+            display: flex;
+            flex-direction: column;
+            gap: 6px;
+        }
+        .llm-provider-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 9px 12px;
+            background: var(--input);
+            border: 1px solid var(--border);
+            border-radius: var(--r-sm);
+            font-size: var(--font-size-xs);
+        }
+        .llm-provider-main {
+            display: flex;
+            flex-direction: column;
+            gap: 3px;
+            flex: 1;
+        }
+        .llm-provider-title-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .llm-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+        .llm-dot.ok { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
+        .llm-dot.warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }
+        .llm-dot.err { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.6); }
+        .llm-dot.neutral { background: #6b7280; }
+        .llm-provider-name {
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .llm-provider-badge {
+            font-size: 10px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .llm-provider-badge.ok { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+        .llm-provider-badge.warn { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .llm-provider-badge.err { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .llm-provider-badge.neutral { background: rgba(107, 114, 128, 0.2); color: #9ca3af; }
+        .llm-provider-msg {
+            font-size: 11px;
+            color: var(--text-muted);
+        }
+        .llm-models-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+            margin-top: 4px;
+        }
+        .llm-model-tag {
+            font-size: 10px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            padding: 2px 6px;
+            border-radius: var(--r-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+        .llm-model-tag:hover {
+            border-color: var(--blue, #3b82f6);
+            color: var(--text-primary);
+        }

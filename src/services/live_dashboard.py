@@ -103,6 +103,7 @@ class LiveDashboardServer:
         self.app.router.add_get("/api/listings/{id}/price-history", self.handle_get_price_history)
         self.app.router.add_patch("/api/listings/{id}/status", self.handle_update_status)
         self.app.router.add_patch("/api/listings/{id}/notes", self.handle_update_notes)
+        self.app.router.add_post("/api/listings/{id}/ai-audit", self.handle_generate_ai_audit)
         self.app.router.add_post("/api/geocode/backfill", self.handle_backfill_coords)
         self.app.router.add_get("/api/scrape/status", self.handle_scrape_status)
         self.app.router.add_post("/api/scrape", self.handle_trigger_scrape)
@@ -115,6 +116,8 @@ class LiveDashboardServer:
         self.app.router.add_post("/api/scrapers", self.handle_update_scrapers)
         self.app.router.add_get("/api/scheduler", self.handle_get_scheduler)
         self.app.router.add_post("/api/scheduler", self.handle_update_scheduler)
+        self.app.router.add_get("/api/llm/status", self.handle_get_llm_status)
+        self.app.router.add_post("/api/llm/test", self.handle_test_llm_connection)
         self.app.router.add_post("/api/data/reset", self.handle_reset_data)
 
     async def handle_get_config(self, request: web.Request) -> web.Response:
@@ -201,6 +204,48 @@ class LiveDashboardServer:
         saved = config_manager.update_scheduler(data)
         logger.info(f"[LiveDashboard] Zaktualizowano konfigurację harmonogramu: {saved.model_dump()}")
         return web.json_response(saved.model_dump())
+
+    async def handle_get_llm_status(self, request: web.Request) -> web.Response:
+        from src.filters.llm_analyzer import LLMAnalyzer
+
+        cfg = config_manager.get_config()
+        analyzer = LLMAnalyzer(
+            enabled=cfg.llm_analysis_enabled,
+            ollama_model=getattr(cfg, "ollama_model", None),
+            openrouter_model=getattr(cfg, "openrouter_model", None),
+            llm_provider=getattr(cfg, "llm_provider", None),
+        )
+        res = await analyzer.test_connection()
+        return web.json_response(res)
+
+    async def handle_test_llm_connection(self, request: web.Request) -> web.Response:
+        from src.filters.llm_analyzer import LLMAnalyzer
+
+        cfg = config_manager.get_config()
+        ollama_model = None
+        openrouter_model = None
+        llm_provider = None
+        if request.can_read_body and (request.content_length or 0) > 0:
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    if body.get("ollama_model"):
+                        ollama_model = str(body["ollama_model"]).strip()
+                    if body.get("openrouter_model"):
+                        openrouter_model = str(body["openrouter_model"]).strip()
+                    if body.get("llm_provider"):
+                        llm_provider = str(body["llm_provider"]).strip()
+            except Exception:
+                pass
+
+        analyzer = LLMAnalyzer(
+            enabled=cfg.llm_analysis_enabled,
+            ollama_model=ollama_model or getattr(cfg, "ollama_model", None),
+            openrouter_model=openrouter_model or getattr(cfg, "openrouter_model", None),
+            llm_provider=llm_provider or getattr(cfg, "llm_provider", None),
+        )
+        res = await analyzer.test_connection()
+        return web.json_response(res)
 
     async def handle_reset_data(self, request: web.Request) -> web.Response:
         data: dict[str, Any] = {}
@@ -304,8 +349,11 @@ class LiveDashboardServer:
                 if matched_prof:
                     conds.append(ListingModel.profile_id == matched_prof.id)
                     conds.append(ListingModel.profile_name == matched_prof.name)
-                # If checking default profile, also match records where profile_id is None
-                if prof_filter == "default" or (matched_prof and matched_prof.id == "default"):
+                # If checking default profile, only match legacy records where profile_id is None if profile is Rzeszów
+                is_rzeszow = (
+                    matched_prof.city.lower() in ("rzeszów", "rzeszow") if matched_prof else (prof_filter == "default")
+                )
+                if is_rzeszow and (prof_filter == "default" or (matched_prof and matched_prof.id == "default")):
                     conds.append(ListingModel.profile_id.is_(None))
                 stmt = stmt.where(or_(*conds))
 
@@ -354,14 +402,17 @@ class LiveDashboardServer:
                 )
 
                 is_updated_cycle = bool(
-                    len(ph) >= 2
-                    or (
-                        updated_utc
-                        and created_utc
-                        and (updated_utc - created_utc).total_seconds() > 300
-                        and (
-                            (max_scraped_at is not None and (max_scraped_at - updated_utc).total_seconds() <= 10800)
-                            or (now_utc - updated_utc).total_seconds() <= 86400
+                    not is_new_cycle
+                    and (
+                        len(ph) >= 2
+                        or (
+                            updated_utc
+                            and created_utc
+                            and (updated_utc - created_utc).total_seconds() > 300
+                            and (
+                                (max_scraped_at is not None and (max_scraped_at - updated_utc).total_seconds() <= 10800)
+                                or (now_utc - updated_utc).total_seconds() <= 86400
+                            )
                         )
                     )
                 )
@@ -516,6 +567,201 @@ class LiveDashboardServer:
             logger.info(f"[LiveDashboard] Listing #{listing_id} notes updated.")
             return web.json_response({"success": True, "id": listing_id, "user_notes": notes})
 
+    async def handle_generate_ai_audit(self, request: web.Request) -> web.Response:
+        try:
+            listing_id = int(request.match_info["id"])
+        except (KeyError, ValueError):
+            return web.json_response({"error": "Nieprawidłowy identyfikator oferty"}, status=400)
+
+        async with get_session() as session:
+            repo = ListingRepository(session)
+            item = await repo.get_by_id(listing_id)
+            if not item:
+                return web.json_response({"error": "Nie znaleziono oferty w bazie danych"}, status=404)
+
+            if not item.raw_description or not item.raw_description.strip():
+                return web.json_response({"error": "Oferta nie posiada opisu do analizy przez AI"}, status=400)
+
+            from src.filters.llm_analyzer import LLMAnalyzer
+            from src.models.enums import (
+                BuildingType,
+                FinishCondition,
+                HeatingType,
+                MarketType,
+                PropertyCategory,
+                RoadType,
+                SegmentSubtype,
+                SewerageType,
+            )
+            from src.models.listing import ListingSchema
+
+            coords = (
+                (item.latitude, item.longitude) if item.latitude is not None and item.longitude is not None else None
+            )
+
+            finish_map = {
+                "do zamieszkania": FinishCondition.DO_ZAMIESZKANIA,
+                "pod_klucz": FinishCondition.DO_ZAMIESZKANIA,
+                "do wykończenia": FinishCondition.DO_WYKONCZENIA,
+                "do_wykonczenia": FinishCondition.DO_WYKONCZENIA,
+                "deweloperski": FinishCondition.DEWELOPERSKI,
+                "do remontu": FinishCondition.DO_REMONTU,
+                "do_remontu": FinishCondition.DO_REMONTU,
+                "surowy zamknięty": FinishCondition.SUROWY_ZAMKNIETY,
+                "surowy_zamkniety": FinishCondition.SUROWY_ZAMKNIETY,
+                "surowy otwarty": FinishCondition.SUROWY_OTWARTY,
+                "surowy_otwarty": FinishCondition.SUROWY_OTWARTY,
+            }
+            finish_condition_enum = finish_map.get(
+                str(item.finish_condition or "").lower(), FinishCondition.NIEOKRESLONY
+            )
+
+            try:
+                prop_category = PropertyCategory(item.category)
+            except (ValueError, TypeError):
+                prop_category = PropertyCategory.DOM
+
+            try:
+                market_type = MarketType(item.market)
+            except (ValueError, TypeError):
+                market_type = MarketType.NIEOKRESLONY
+
+            try:
+                b_type = BuildingType(item.building_type)
+            except (ValueError, TypeError):
+                b_type = BuildingType.INNY
+
+            try:
+                s_subtype = SegmentSubtype(item.segment_subtype)
+            except (ValueError, TypeError):
+                s_subtype = SegmentSubtype.NIEOKRESLONY
+
+            try:
+                road_type = RoadType(item.access_road_type)
+            except (ValueError, TypeError):
+                road_type = RoadType.NIEZNANA
+
+            try:
+                sewerage_type = SewerageType(item.sewerage)
+            except (ValueError, TypeError):
+                sewerage_type = SewerageType.NIEZNANA
+
+            try:
+                heating_type = HeatingType(item.heating)
+            except (ValueError, TypeError):
+                heating_type = HeatingType.NIEZNANE
+
+            schema = ListingSchema(
+                id=str(item.portal_id or item.id),
+                portal=item.portal,
+                title=item.title,
+                url=item.url,
+                price=item.price,
+                price_per_m2=item.price_per_m2,
+                area_home=item.area_home,
+                area_plot=item.area_plot,
+                category=prop_category,
+                rooms=item.rooms,
+                floor=item.floor,
+                floors_in_building=item.floors_in_building,
+                is_private_owner=item.is_private_owner,
+                building_type=b_type,
+                segment_subtype=s_subtype,
+                location_raw=item.location_raw or "",
+                street=item.street,
+                district=item.district,
+                city=item.city,
+                coordinates=coords,
+                access_road_type=road_type,
+                market=market_type,
+                finish_condition=finish_condition_enum,
+                has_visualisations=bool(item.has_visualisations),
+                sewerage=sewerage_type,
+                heating=heating_type,
+                has_fiber=bool(item.has_fiber),
+                year_built=item.year_built,
+                raw_description=item.raw_description,
+                main_image_url=item.main_image_url,
+                parcel_id=item.parcel_id,
+                cadastral_area=item.cadastral_area,
+                geoportal_url=item.geoportal_url,
+                mpzp_zone=item.mpzp_zone,
+                mpzp_status=item.mpzp_status,
+                flood_risk_zone=item.flood_risk_zone,
+            )
+
+            analyzer = LLMAnalyzer(enabled=True)
+            logger.info(f"[LiveDashboard] Generowanie audytu AI na żądanie dla #{item.id} '{item.title[:35]}'")
+            insights = await analyzer.analyze_description(schema)
+            if not insights:
+                return web.json_response(
+                    {
+                        "error": "Model AI nie zwrócił odpowiedzi. Sprawdź klucz API (np. OPENROUTER_API_KEY) lub Ollama."
+                    },
+                    status=502,
+                )
+
+            item.ai_summary = insights.get("summary")
+            item.ai_verdict = insights.get("verdict")
+            item.worth_interest = insights.get("worth_interest")
+            q_list = insights.get("questions_for_agent") or []
+            item._ai_questions = json.dumps(q_list, ensure_ascii=False)
+
+            if insights.get("contact_phone") and not item.contact_phone:
+                item.contact_phone = str(insights.get("contact_phone"))
+            if insights.get("contact_person") and not item.contact_person:
+                item.contact_person = str(insights.get("contact_person"))
+
+            finish_raw = str(insights.get("finish_condition") or "").lower()
+            if finish_raw in finish_map:
+                item.finish_condition = finish_map[finish_raw].value
+
+            if insights.get("has_visualisations") is not None:
+                item.has_visualisations = bool(insights.get("has_visualisations"))
+
+            item_pros = list(item.pros or [])
+            for p in insights.get("pros") or []:
+                llm_p = f"[LLM] {p}" if not p.startswith("[LLM]") else p
+                if llm_p not in item_pros:
+                    item_pros.append(llm_p)
+            item.pros = item_pros
+
+            item_cons = list(item.cons or [])
+            for c in insights.get("cons") or []:
+                llm_c = f"[LLM] {c}" if not c.startswith("[LLM]") else c
+                if llm_c not in item_cons:
+                    item_cons.append(llm_c)
+            for c in insights.get("hidden_costs") or []:
+                cost_c = f"⚠️ [Ukryty koszt] {c}"
+                if cost_c not in item_cons:
+                    item_cons.append(cost_c)
+            for r in insights.get("legal_risks") or []:
+                risk_c = f"⚖️ [Ryzyko prawne] {r}"
+                if risk_c not in item_cons:
+                    item_cons.append(risk_c)
+            item.cons = item_cons
+
+            item.updated_at = datetime.now(UTC)
+            await safe_commit(session)
+
+            logger.info(f"[LiveDashboard] Pomyślnie zapisano audyt AI dla #{item.id}")
+
+            return web.json_response(
+                {
+                    "id": item.id,
+                    "ai_summary": item.ai_summary,
+                    "ai_verdict": item.ai_verdict,
+                    "worth_interest": item.worth_interest,
+                    "ai_questions": q_list,
+                    "contact_phone": item.contact_phone,
+                    "contact_person": item.contact_person,
+                    "finish_condition": item.finish_condition,
+                    "has_visualisations": item.has_visualisations,
+                    "pros": item.pros,
+                    "cons": item.cons,
+                }
+            )
+
     async def handle_backfill_coords(self, request: web.Request) -> web.Response:
         from src.services.geocoder import backfill_missing_coordinates
         from src.services.pipeline import ScraperPipeline
@@ -598,6 +844,8 @@ class LiveDashboardServer:
             )
 
         global_tracker.request_cancel()
+        if self._active_scrape_task and not self._active_scrape_task.done():
+            self._active_scrape_task.cancel()
         return web.json_response({"status": "cancelling", "message": "Zażądano zatrzymania scrapingu."})
 
     async def run(self, auto_open: bool = True):

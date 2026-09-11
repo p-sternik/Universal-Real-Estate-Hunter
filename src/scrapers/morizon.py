@@ -248,7 +248,8 @@ class MorizonScraper(BaseScraper):
 
             # Location & Street
             loc_el = card.select_one('[data-cy="propertyCardLocation"]') or card.select_one(".property-card__location")
-            location_raw = loc_el.get_text(" ", strip=True) if loc_el else "Rzeszów"
+            default_city = getattr(self.profile, "city", None) or "Rzeszów"
+            location_raw = loc_el.get_text(" ", strip=True) if loc_el else default_city
 
             street = None
             district = None
@@ -391,6 +392,9 @@ class MorizonScraper(BaseScraper):
         listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
+            if self.is_cancelled:
+                logger.info(f"[{self.name}] Przerwano pobieranie stron - wykryto żądanie zatrzymania.")
+                break
             join_char = "&" if "?" in base_url else "?"
             url = base_url if page == 1 else f"{base_url}{join_char}page={page}"
             logger.info(f"[{self.name}] Fetching page {page}: {url}")

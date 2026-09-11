@@ -232,7 +232,8 @@ class OLXScraper(BaseScraper):
 
             # Location
             location_obj = ad.get("location", {})
-            city_name = location_obj.get("cityName", "Rzeszów")
+            default_city = getattr(self.profile, "city", None) or "Rzeszów"
+            city_name = location_obj.get("cityName", default_city)
             district_name = location_obj.get("districtName")
             location_raw = f"{city_name}, {district_name}" if district_name else city_name
 
@@ -411,6 +412,9 @@ class OLXScraper(BaseScraper):
         listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
+            if self.is_cancelled:
+                logger.info(f"[{self.name}] Przerwano pobieranie stron - wykryto żądanie zatrzymania.")
+                break
             join_char = "&" if "?" in base_url else "?"
             url = f"{base_url}{join_char}page={page}"
             logger.info(f"[{self.name}] Fetching page {page}: {url}")
@@ -428,6 +432,8 @@ class OLXScraper(BaseScraper):
                     page=page, total_pages=self.max_pages, items_done=len(ads), items_total=len(ads)
                 )
                 for ad in ads:
+                    if self.is_cancelled:
+                        break
                     parsed = await self.parse_ad(ad)
                     if parsed:
                         listings.append(parsed)
@@ -466,7 +472,8 @@ class OLXScraper(BaseScraper):
 
                         # Extract area from title or subtitle
                         desc_p = card.select_one('span[data-testid="location-date"]')
-                        loc_txt = desc_p.get_text(strip=True) if desc_p else "Rzeszów"
+                        fallback_city = getattr(self.profile, "city", None) or "Rzeszów"
+                        loc_txt = desc_p.get_text(strip=True) if desc_p else fallback_city
 
                         fp = generate_property_fingerprint(
                             price=price_val,

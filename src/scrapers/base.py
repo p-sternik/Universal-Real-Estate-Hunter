@@ -58,6 +58,15 @@ class BaseScraper(ABC):
         """Effective politeness delay including adaptive throttle multiplier."""
         return base_delay * self._throttle_multiplier
 
+    @property
+    def is_cancelled(self) -> bool:
+        try:
+            from src.services.progress import global_tracker
+
+            return global_tracker.is_cancelled()
+        except Exception:
+            return False
+
     async def _emit_progress(self, **kwargs) -> None:
         """Report live progress to the tracker callback if configured."""
         if not self.progress_cb:

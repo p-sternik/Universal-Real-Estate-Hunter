@@ -12,6 +12,9 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:////app/data/listings.db
       - SEARCH_CONFIG_PATH=/app/data/search_config.json
       - TZ=Europe/Warsaw
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false
@@ -37,6 +40,9 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:////app/data/listings.db
       - SEARCH_CONFIG_PATH=/app/data/search_config.json
       - TZ=Europe/Warsaw
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     env_file:
       - path: .env
         required: false

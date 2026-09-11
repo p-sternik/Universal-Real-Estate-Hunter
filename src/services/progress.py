@@ -94,7 +94,7 @@ class ProgressTracker:
     2. Web dashboard real-time API (/api/scrape/status)
     """
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.is_running = False
         self.current_portal = ""
         self.current_step = "Bezczynny"
@@ -111,16 +111,16 @@ class ProgressTracker:
         self._task_id: Any | None = None
         self._session_started_at: datetime | None = None
         self._total_steps = 1
-        self._portal_base_pct = 0
-        self._portal_share = 85
+        self._portal_base_pct: float = 0.0
+        self._portal_share: float = 85.0
 
-    def _sync_shared_status(self):
+    def _sync_shared_status(self) -> None:
         try:
             write_shared_status(self.get_status_payload())
         except Exception:
             pass
 
-    def start_session(self, total_portals: int = 3):
+    def start_session(self, total_portals: int = 3) -> None:
         clear_shared_cancellation()
         self.is_running = True
         self.cancel_requested = False
@@ -186,7 +186,7 @@ class ProgressTracker:
         frac = (page - 1) / self.total_pages
         if phase == "detail" and items_total > 0:
             frac += (items_done / items_total) / self.total_pages
-        self.percentage = min(95, self._portal_base_pct + int(frac * self._portal_share))
+        self.percentage = int(min(95, self._portal_base_pct + int(frac * self._portal_share)))
 
         if phase == "detail":
             self.current_step = (
@@ -200,10 +200,10 @@ class ProgressTracker:
         self._refresh_rich()
         self._sync_shared_status()
 
-    def update_processing(self, done: int, total: int):
+    def update_processing(self, done: int, total: int) -> None:
         """Progress during qualification/analysis of scraped listings."""
         self.current_step = f"Analiza ofert ({self.current_portal}): {done}/{total}..."
-        self.percentage = min(95, self._portal_base_pct + int(self._portal_share))
+        self.percentage = int(min(95, self._portal_base_pct + int(self._portal_share)))
         self._refresh_rich()
         self._sync_shared_status()
 
@@ -236,6 +236,7 @@ class ProgressTracker:
         self.logs.append(entry)
         if len(self.logs) > 300:
             self.logs.pop(0)
+        self._sync_shared_status()
 
     def request_cancel(self):
         """Signals cooperative cancellation of the running scrape cycle."""

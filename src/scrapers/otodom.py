@@ -260,7 +260,8 @@ class OtodomScraper(BaseScraper):
 
             reverse_geocoding = (location_obj.get("reverseGeocoding") or {}).get("locations", [])
             geo_parts = [loc.get("name") for loc in reverse_geocoding if loc.get("name")]
-            location_raw = ", ".join(geo_parts) or f"{city_name or 'Rzeszów'}, {district_name or ''}".strip(", ")
+            fallback_city = getattr(self.profile, "city", None) or "Rzeszów"
+            location_raw = ", ".join(geo_parts) or f"{city_name or fallback_city}, {district_name or ''}".strip(", ")
 
             # Images
             images = item.get("images", [])
@@ -399,14 +400,8 @@ class OtodomScraper(BaseScraper):
             if (not price_per_m2 or price_per_m2 <= 0) and price > 0 and area_home > 0:
                 price_per_m2 = round(price / area_home, 2)
 
-            # Date created
-            date_created_str = item.get("dateCreated")
+            # Date created (first discovered/scraped)
             created_at = datetime.now(UTC)
-            if date_created_str:
-                try:
-                    created_at = datetime.fromisoformat(date_created_str.replace("Z", "+00:00"))
-                except Exception:
-                    pass
 
             # Rooms extraction
             rooms = None
@@ -536,6 +531,9 @@ class OtodomScraper(BaseScraper):
         all_listings: list[ListingSchema] = []
 
         for page in range(1, self.max_pages + 1):
+            if self.is_cancelled:
+                logger.info(f"[{self.name}] Przerwano pobieranie stron - wykryto żądanie zatrzymania.")
+                break
             join_char = "&" if "?" in base_url else "?"
             url = f"{base_url}{join_char}page={page}"
             logger.info(f"[{self.name}] Fetching search page {page}/{self.max_pages}: {url}")
@@ -579,6 +577,9 @@ class OtodomScraper(BaseScraper):
                 results = []
                 done = 0
                 for coro in asyncio.as_completed(tasks):
+                    if self.is_cancelled:
+                        logger.info(f"[{self.name}] Przerwano pobieranie szczegółów - wykryto żądanie zatrzymania.")
+                        break
                     results.append(await coro)
                     done += 1
                     if done % 3 == 0 or done == len(tasks):
