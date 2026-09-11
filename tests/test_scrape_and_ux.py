@@ -13,27 +13,36 @@ from src.storage import ListingRepository, get_session, init_db
 
 
 @pytest.mark.asyncio
-async def test_global_tracker_cancellation_flow():
-    global_tracker.start_session(total_portals=2)
-    assert global_tracker.is_running is True
-    assert global_tracker.is_cancelled() is False
+async def test_global_tracker_cancellation_flow(monkeypatch, tmp_path):
+    status_file = str(tmp_path / "status.json")
+    cancel_file = str(tmp_path / ".cancel")
+    monkeypatch.setattr("src.services.progress.get_shared_status_file", lambda: status_file)
+    monkeypatch.setattr("src.services.progress.get_shared_cancel_file", lambda: cancel_file)
 
-    global_tracker.request_cancel()
-    assert global_tracker.is_cancelled() is True
-    assert global_tracker.cancel_requested is True
+    global_tracker.reset()
+    try:
+        global_tracker.start_session(total_portals=2)
+        assert global_tracker.is_running is True
+        assert global_tracker.is_cancelled() is False
 
-    payload = global_tracker.get_status_payload()
-    assert payload["is_running"] is True
-    assert payload["cancel_requested"] is True
-    assert any("🛑" in l["message"] for l in payload["logs"])
+        global_tracker.request_cancel()
+        assert global_tracker.is_cancelled() is True
+        assert global_tracker.cancel_requested is True
 
-    global_tracker.cancel_session()
-    assert global_tracker.is_running is False
-    assert global_tracker.is_cancelled() is False
+        payload = global_tracker.get_status_payload()
+        assert payload["is_running"] is True
+        assert payload["cancel_requested"] is True
+        assert any("🛑" in l["message"] for l in payload["logs"])
 
-    final_payload = global_tracker.get_status_payload()
-    assert final_payload["is_running"] is False
-    assert "Zatrzymano" in final_payload["current_step"]
+        global_tracker.cancel_session()
+        assert global_tracker.is_running is False
+        assert global_tracker.is_cancelled() is False
+
+        final_payload = global_tracker.get_status_payload()
+        assert final_payload["is_running"] is False
+        assert "Zatrzymano" in final_payload["current_step"]
+    finally:
+        global_tracker.reset()
 
 
 @pytest.mark.asyncio
@@ -70,7 +79,13 @@ async def test_pipeline_run_cycle_cooperative_cancellation():
 
 
 @pytest.mark.asyncio
-async def test_live_dashboard_scrape_endpoints_and_cancellation():
+async def test_live_dashboard_scrape_endpoints_and_cancellation(monkeypatch, tmp_path):
+    status_file = str(tmp_path / "status.json")
+    cancel_file = str(tmp_path / ".cancel")
+    monkeypatch.setattr("src.services.progress.get_shared_status_file", lambda: status_file)
+    monkeypatch.setattr("src.services.progress.get_shared_cancel_file", lambda: cancel_file)
+    global_tracker.reset()
+
     await init_db()
     server = LiveDashboardServer(port=8089)
 
@@ -122,6 +137,7 @@ async def test_live_dashboard_scrape_endpoints_and_cancellation():
             after_cancel_st = await client.get("/api/scrape/status")
             after_data = await after_cancel_st.json()
             assert after_data["is_running"] is False
+    global_tracker.reset()
 
 
 @pytest.mark.asyncio
@@ -303,9 +319,16 @@ async def test_llm_analyzer_test_connection_ollama_states():
 
 
 @pytest.mark.asyncio
-async def test_global_tracker_logging_categories_and_retention():
+async def test_global_tracker_logging_categories_and_retention(monkeypatch, tmp_path):
     """Verify log categorization, retention, and payload formatting."""
-    tracker = global_tracker
+    status_file = str(tmp_path / "status.json")
+    cancel_file = str(tmp_path / ".cancel")
+    monkeypatch.setattr("src.services.progress.get_shared_status_file", lambda: status_file)
+    monkeypatch.setattr("src.services.progress.get_shared_cancel_file", lambda: cancel_file)
+
+    from src.services.progress import ProgressTracker
+
+    tracker = ProgressTracker()
     tracker.start_session(total_portals=1)
 
     tracker.add_log("📍 [Geokoder] Słocina: (50.04, 22.01) [precyzyjny punkt]", level="info", category="geo")

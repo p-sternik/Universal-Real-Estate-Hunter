@@ -414,7 +414,9 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
         logger.debug(f"[Database] Could not check target listings count: {e}")
         return
 
-    logger.info(f"[Database] Wykryto istniejącą bazę SQLite '{sqlite_path}'. Rozpoczynam automatyczną migrację do PostgreSQL...")
+    logger.info(
+        f"[Database] Wykryto istniejącą bazę SQLite '{sqlite_path}'. Rozpoczynam automatyczną migrację do PostgreSQL..."
+    )
     import sqlite3
 
     try:
@@ -431,6 +433,7 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
 
         async_session_maker = async_sessionmaker(bind=pg_engine, expire_on_commit=False)
         async with async_session_maker() as session:
+
             def _load_records(model_cls, table_name: str, dt_cols: tuple[str, ...]):
                 if table_name not in existing_tables:
                     return []

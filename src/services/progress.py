@@ -18,7 +18,7 @@ def get_shared_status_file() -> str:
     if "sqlite" in db_url and db_url.startswith("sqlite+aiosqlite:///"):
         path = db_url.replace("sqlite+aiosqlite:///", "")
         p = Path(path)
-        if p.parent:
+        if p.parent and str(p.parent) not in (".", ""):
             return str(p.parent / "scrape_status.json")
     return str(Path("data") / "scrape_status.json")
 
@@ -30,7 +30,7 @@ def get_shared_cancel_file() -> str:
     if "sqlite" in db_url and db_url.startswith("sqlite+aiosqlite:///"):
         path = db_url.replace("sqlite+aiosqlite:///", "")
         p = Path(path)
-        if p.parent:
+        if p.parent and str(p.parent) not in (".", ""):
             return str(p.parent / ".scrape_cancel")
     return str(Path("data") / ".scrape_cancel")
 
@@ -114,6 +114,25 @@ class ProgressTracker:
         # sequential listing analysis 60-95, wrap-up 95-100.
         self._parallel_total = 1
         self._parallel_done = 0
+
+    def reset(self) -> None:
+        """Resets tracker to idle state with empty logs."""
+        self.is_running = False
+        self.current_portal = ""
+        self.current_step = "Bezczynny"
+        self.current_page = 0
+        self.total_pages = 0
+        self.items_scraped = 0
+        self.items_qualified = 0
+        self.duplicates_found = 0
+        self.percentage = 0
+        self.cancel_requested = False
+        self.logs = []
+        self._session_started_at = None
+        self._parallel_total = 1
+        self._parallel_done = 0
+        self._rich_progress = None
+        self._task_id = None
 
     def _sync_shared_status(self) -> None:
         try:

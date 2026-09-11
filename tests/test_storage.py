@@ -436,6 +436,7 @@ async def test_auto_migrate_sqlite_to_postgres(tmp_path, monkeypatch):
 
     # Monkeypatch candidates to use our temp sqlite file
     from pathlib import Path
+
     monkeypatch.setattr("src.storage.database.Path", lambda p: sqlite_file if "listings.db" in str(p) else Path(p))
 
     # Run auto migration
@@ -450,4 +451,3 @@ async def test_auto_migrate_sqlite_to_postgres(tmp_path, monkeypatch):
         assert row[2] == 750000.0
 
     await target_engine.dispose()
-
