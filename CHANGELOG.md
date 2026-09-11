@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.9.3 (2026-09-11)
+
+### Bug Fixes
+
+- **dashboard**: Remove card height constraint in split view
+  ([`3c3b872`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3c3b872819970d53f8cc65be64de1e33be65dca2))
+
+
 ## v1.9.2 (2026-09-11)
 
 ### Bug Fixes
