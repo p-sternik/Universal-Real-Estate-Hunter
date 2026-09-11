@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.8.0 (2026-09-11)
+
+### Features
+
+- Refactor settings modal for mobile RWD, bottom sheet layout, and touch ergonomics
+  ([`9c0dd7a`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/9c0dd7aa4e113a205a7abc44032e123c5136bfaa))
+
+
 ## v1.7.0 (2026-09-11)
 
 ### Features
