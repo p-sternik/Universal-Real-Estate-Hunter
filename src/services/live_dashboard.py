@@ -16,7 +16,7 @@ from sqlalchemy.orm import selectinload
 from src.services.config_manager import config_manager
 from src.services.market_analyzer import analyze_land_and_utilities, analyze_negotiation, resolve_local_median
 from src.services.pipeline import ScraperPipeline
-from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session, safe_commit
+from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session, init_db, safe_commit
 
 MIN_COMPRESS_SIZE = 1024
 COMPRESSIBLE_CT = ("application/javascript", "application/json", "text/css", "text/html", "text/plain")
@@ -863,6 +863,7 @@ class LiveDashboardServer:
         return web.json_response({"status": "cancelling", "message": "Zażądano zatrzymania scrapingu."})
 
     async def run(self, auto_open: bool = True):
+        await init_db()
         runner = web.AppRunner(self.app)
         await runner.setup()
         site = web.TCPSite(runner, self.host, self.port)

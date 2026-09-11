@@ -4,6 +4,7 @@ from loguru import logger
 
 from src.services.config_manager import config_manager
 from src.services.pipeline import ScraperPipeline
+from src.storage import init_db
 
 
 class SchedulerRunner:
@@ -62,6 +63,7 @@ class SchedulerRunner:
         self._shutdown_event.set()
 
     async def start(self):
+        await init_db()
         self.running = True
 
         while self.running:
