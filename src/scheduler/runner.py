@@ -13,9 +13,15 @@ class SchedulerRunner:
     and runtime configuration changes from the web dashboard.
     """
 
-    def __init__(self, interval_minutes: int | None = None, profile: str | None = None):
+    def __init__(
+        self,
+        interval_minutes: int | None = None,
+        profile: str | None = None,
+        idle_poll_seconds: float = 15.0,
+    ):
         self._cli_interval = interval_minutes
         self.target_profile = profile
+        self.idle_poll_seconds = idle_poll_seconds
         self.pipeline = ScraperPipeline()
         self.running = False
         self._shutdown_event = asyncio.Event()
@@ -57,30 +63,43 @@ class SchedulerRunner:
 
     async def start(self):
         self.running = True
-        if not self.is_enabled():
-            logger.info("[Scheduler] Harmonogram wyłączony w konfiguracji — pomijam cykle.")
-            self.running = False
-            return
-        init_interval = self.get_effective_interval()
-        logger.info(f"[Scheduler] Uruchomiono harmonogram zadań. Aktualny interwał: {init_interval} minut.")
-
-        # Natychmiastowy pierwszy cykl
-        await self._job_wrapper()
 
         while self.running:
             if not self.is_enabled():
-                logger.info("[Scheduler] Harmonogram wyłączony w trakcie pracy — kończę.")
-                break
-            interval = self.get_effective_interval()
-            logger.info(f"[Scheduler] Oczekiwanie na następny cykl: {interval} minut...")
-            try:
-                await asyncio.wait_for(
-                    self._shutdown_event.wait(),
-                    timeout=interval * 60,
+                logger.info(
+                    "[Scheduler] Harmonogram wyłączony w konfiguracji — daemon wstrzymuje cykle "
+                    "(oczekiwanie na włączenie w panelu lub sygnał zatrzymania)..."
                 )
-                break
-            except TimeoutError:
-                if self.running:
-                    await self._job_wrapper()
+                while self.running and not self.is_enabled():
+                    try:
+                        await asyncio.wait_for(self._shutdown_event.wait(), timeout=self.idle_poll_seconds)
+                        self.running = False
+                        break
+                    except TimeoutError:
+                        pass
+                if not self.running:
+                    break
+                logger.info("[Scheduler] Wykryto włączenie harmonogramu — rozpoczynam cykle scrapowania.")
+
+            init_interval = self.get_effective_interval()
+            logger.info(f"[Scheduler] Uruchomiono harmonogram zadań. Aktualny interwał: {init_interval} minut.")
+
+            # Natychmiastowy pierwszy cykl po uruchomieniu / włączeniu
+            await self._job_wrapper()
+
+            # Pętla cykliczna
+            while self.running and self.is_enabled():
+                interval = self.get_effective_interval()
+                logger.info(f"[Scheduler] Oczekiwanie na następny cykl: {interval} minut...")
+                try:
+                    await asyncio.wait_for(
+                        self._shutdown_event.wait(),
+                        timeout=interval * 60,
+                    )
+                    self.running = False
+                    break
+                except TimeoutError:
+                    if self.running and self.is_enabled():
+                        await self._job_wrapper()
 
         logger.info("[Scheduler] Harmonogram zadań zakończył pracę pomyślnie.")

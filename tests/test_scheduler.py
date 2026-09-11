@@ -27,17 +27,41 @@ def test_scheduler_long_intervals_accepted():
 
 
 def test_scheduler_runner_disabled_runs_no_cycles(monkeypatch):
+    import asyncio
     from unittest.mock import AsyncMock
 
     from src.scheduler.runner import SchedulerRunner
 
-    runner = SchedulerRunner()
+    runner = SchedulerRunner(idle_poll_seconds=0.01)
     runner.pipeline.run_cycle = AsyncMock()
     monkeypatch.setattr(runner, "is_enabled", lambda: False)
-    import asyncio
 
+    # Signal stop so idle loop terminates immediately
+    runner.stop()
     asyncio.run(runner.start())
     runner.pipeline.run_cycle.assert_not_awaited()
+    assert runner.running is False
+
+
+def test_scheduler_runner_disabled_resumes_when_enabled(monkeypatch):
+    import asyncio
+    from unittest.mock import AsyncMock
+
+    from src.scheduler.runner import SchedulerRunner
+
+    runner = SchedulerRunner(idle_poll_seconds=0.01)
+    runner.pipeline.run_cycle = AsyncMock(side_effect=lambda **kw: runner.stop())
+
+    states = [False, True]
+
+    def mock_enabled():
+        if states:
+            return states.pop(0)
+        return True
+
+    monkeypatch.setattr(runner, "is_enabled", mock_enabled)
+    asyncio.run(runner.start())
+    runner.pipeline.run_cycle.assert_awaited_once()
     assert runner.running is False
 
 
