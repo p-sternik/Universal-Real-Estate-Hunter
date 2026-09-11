@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.9.1 (2026-09-11)
+
+### Bug Fixes
+
+- **logs**: Separate rejected and error log filters without duplication
+  ([`e98d503`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/e98d503b7ffcf6e8cc9ab84a374ab09ed8e2d070))
+
+
 ## v1.9.0 (2026-09-11)
 
 ### Bug Fixes
