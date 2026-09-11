@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.8.1 (2026-09-11)
+
+### Bug Fixes
+
+- **scheduler**: Prevent daemon exit and docker restart-loop when scheduler is disabled
+  ([`afbf890`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/afbf89049091b8c0e67c63f535112c8922c8ed88))
+
+
 ## v1.8.0 (2026-09-11)
 
 ### Features
