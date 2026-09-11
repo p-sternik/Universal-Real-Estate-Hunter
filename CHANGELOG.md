@@ -6,6 +6,15 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.9.2 (2026-09-11)
+
+### Bug Fixes
+
+- **docker,progress**: Optimize image size, remove dead deps, and fix multi-process scrape status
+  sync
+  ([`24690f2`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/24690f2eda28b68b033304683ba6777488d057c8))
+
+
 ## v1.9.1 (2026-09-11)
 
 ### Bug Fixes
