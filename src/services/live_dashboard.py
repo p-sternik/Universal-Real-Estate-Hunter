@@ -212,6 +212,8 @@ class LiveDashboardServer:
         analyzer = LLMAnalyzer(
             enabled=cfg.llm_analysis_enabled,
             ollama_model=getattr(cfg, "ollama_model", None),
+            ollama_base_url=getattr(cfg, "ollama_base_url", None),
+            ollama_timeout_seconds=getattr(cfg, "ollama_timeout_seconds", None),
             openrouter_model=getattr(cfg, "openrouter_model", None),
             llm_provider=getattr(cfg, "llm_provider", None),
         )
@@ -223,6 +225,8 @@ class LiveDashboardServer:
 
         cfg = config_manager.get_config()
         ollama_model = None
+        ollama_base_url = None
+        ollama_timeout_seconds = None
         openrouter_model = None
         llm_provider = None
         if request.can_read_body and (request.content_length or 0) > 0:
@@ -231,6 +235,13 @@ class LiveDashboardServer:
                 if isinstance(body, dict):
                     if body.get("ollama_model"):
                         ollama_model = str(body["ollama_model"]).strip()
+                    if body.get("ollama_base_url"):
+                        ollama_base_url = str(body["ollama_base_url"]).strip().rstrip("/")
+                    if body.get("ollama_timeout_seconds"):
+                        try:
+                            ollama_timeout_seconds = max(10.0, float(body["ollama_timeout_seconds"]))
+                        except (TypeError, ValueError):
+                            pass
                     if body.get("openrouter_model"):
                         openrouter_model = str(body["openrouter_model"]).strip()
                     if body.get("llm_provider"):
@@ -241,6 +252,8 @@ class LiveDashboardServer:
         analyzer = LLMAnalyzer(
             enabled=cfg.llm_analysis_enabled,
             ollama_model=ollama_model or getattr(cfg, "ollama_model", None),
+            ollama_base_url=ollama_base_url or getattr(cfg, "ollama_base_url", None),
+            ollama_timeout_seconds=ollama_timeout_seconds or getattr(cfg, "ollama_timeout_seconds", None),
             openrouter_model=openrouter_model or getattr(cfg, "openrouter_model", None),
             llm_provider=llm_provider or getattr(cfg, "llm_provider", None),
         )

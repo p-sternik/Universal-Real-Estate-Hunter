@@ -2,7 +2,6 @@ import asyncio
 
 from loguru import logger
 
-from config import settings
 from src.services.config_manager import config_manager
 from src.services.pipeline import ScraperPipeline
 
@@ -21,6 +20,16 @@ class SchedulerRunner:
         self.running = False
         self._shutdown_event = asyncio.Event()
 
+    def is_enabled(self) -> bool:
+        """Dashboard master switch; an explicit CLI interval always means 'run'."""
+        if self._cli_interval is not None and self._cli_interval > 0:
+            return True
+        try:
+            return bool(config_manager.get_config().scheduler.enabled)
+        except Exception as e:
+            logger.debug(f"[Scheduler] Could not read scheduler switch: {e}")
+            return True
+
     def get_effective_interval(self) -> int:
         """Returns the effective interval in minutes, respecting CLI override and night mode."""
         if self._cli_interval is not None and self._cli_interval > 0:
@@ -30,7 +39,7 @@ class SchedulerRunner:
             return cfg.scheduler.get_current_interval_minutes()
         except Exception as e:
             logger.debug(f"[Scheduler] Could not read scheduler config: {e}")
-            return settings.CHECK_INTERVAL_MINUTES
+            return 20
 
     async def _job_wrapper(self):
         try:
@@ -48,6 +57,10 @@ class SchedulerRunner:
 
     async def start(self):
         self.running = True
+        if not self.is_enabled():
+            logger.info("[Scheduler] Harmonogram wyłączony w konfiguracji — pomijam cykle.")
+            self.running = False
+            return
         init_interval = self.get_effective_interval()
         logger.info(f"[Scheduler] Uruchomiono harmonogram zadań. Aktualny interwał: {init_interval} minut.")
 
@@ -55,6 +68,9 @@ class SchedulerRunner:
         await self._job_wrapper()
 
         while self.running:
+            if not self.is_enabled():
+                logger.info("[Scheduler] Harmonogram wyłączony w trakcie pracy — kończę.")
+                break
             interval = self.get_effective_interval()
             logger.info(f"[Scheduler] Oczekiwanie na następny cykl: {interval} minut...")
             try:

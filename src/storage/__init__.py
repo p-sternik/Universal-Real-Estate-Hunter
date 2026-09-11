@@ -8,9 +8,10 @@ from .database import (
     verify_and_repair_sqlite_permissions,
 )
 from .models import Base, GeocacheModel, ListingModel, PriceHistoryModel, SpatialCacheModel
-from .repository import ListingRepository
+from .repository import ListingRepository, clear_medians_cache
 
 __all__ = [
+    "clear_medians_cache",
     "Base",
     "ListingModel",
     "PriceHistoryModel",

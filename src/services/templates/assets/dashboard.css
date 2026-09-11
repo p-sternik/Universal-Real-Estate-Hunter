@@ -101,11 +101,17 @@
             line-height: var(--line-height-normal);
             -webkit-font-smoothing: antialiased;
             -moz-osx-font-smoothing: grayscale;
+            overflow-x: hidden;
+        }
+
+        html, body { max-width: 100%; overflow-x: clip; }
+        @supports not (overflow: clip) {
+            html, body { overflow-x: hidden; }
         }
 
         a { color: inherit; text-decoration: none; }
 
-        img { display: block; }
+        img { display: block; max-width: 100%; }
 
         button { font-family: inherit; }
 
@@ -148,7 +154,10 @@
             border-bottom: 1px solid var(--border);
         }
 
-        .topbar-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+        .topbar { min-width: 0; overflow: hidden; }
+        .topbar > * { min-width: 0; }
+
+        .topbar-brand { display: flex; align-items: center; gap: 10px; min-width: 0; flex: none; }
 
         .brand-logo {
             width: 30px; height: 30px;
@@ -165,7 +174,15 @@
 
         .brand-title-row { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 
-        .brand-title { font-size: var(--font-size-base); font-weight: var(--font-weight-semibold); letter-spacing: -0.01em; }
+        .brand-title {
+            font-size: var(--font-size-base);
+            font-weight: var(--font-weight-semibold);
+            letter-spacing: -0.01em;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            max-width: 320px;
+        }
 
         .brand-subtitle {
             font-size: var(--font-size-xs);
@@ -226,7 +243,19 @@
         .profile-drop-btn:hover { border-color: var(--border-hover); color: var(--text-primary); }
         .profile-drop-btn svg { flex: none; color: var(--text-muted); }
 
-        .profile-drop-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .profile-drop-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            min-width: 0;
+            max-width: 220px;
+        }
+
+        /* Secondary header actions: never shrink, condense to icons on mobile */
+        .topbar-icon-btn { flex: none; flex-shrink: 0; }
+        .topbar-sync-btn { flex: none; flex-shrink: 0; }
+        .topbar-sync-btn .spinner-inline { margin-right: 0; }
+        .topbar-sync-btn.is-running { pointer-events: none; }
 
         .profile-drop-count {
             flex: none;
@@ -512,6 +541,22 @@
         }
         .sort-wrap select:focus { outline: none; border-color: var(--border-active); }
 
+        /* --- Toolbar controls: filters + sort share one flex row on mobile --- */
+        .toolbar-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: none;
+            min-width: 0;
+        }
+        .toolbar-controls .filters-btn { flex: none; }
+        .toolbar-controls .sort-wrap { flex: none; min-width: 0; }
+
+        /* Hide Ctrl+K hint on touch devices without a physical keyboard */
+        @media (pointer: coarse) {
+            .kbd-badge { display: none; }
+        }
+
         /* ==========================================================================
            3. SCRAPE PROGRESS STRIP
            ========================================================================== */
@@ -583,6 +628,9 @@
             color: var(--text-muted);
             cursor: pointer;
             transition: all 0.15s ease;
+            flex: none;
+            flex-shrink: 0;
+            white-space: nowrap;
         }
         .log-filter-btn:hover {
             color: var(--text-primary);
@@ -613,9 +661,12 @@
 
         .progress-collapse-btn { padding: 2px 6px; }
         .progress-collapse-btn svg { display: block; transition: transform 0.15s ease; }
+        .progress-strip-row { cursor: pointer; min-height: 40px; border-radius: var(--r-sm); }
         .progress-strip.collapsed .prog-metrics,
         .progress-strip.collapsed .prog-logs-header,
         .progress-strip.collapsed .prog-logs { display: none; }
+        .progress-strip.collapsed { padding-top: 6px; padding-bottom: 6px; }
+        .progress-strip.collapsed .prog-bar-track { margin-bottom: 0; }
         .progress-strip.collapsed #progressCollapseIcon { transform: rotate(180deg); }
 
         .log-row { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); }
@@ -684,8 +735,13 @@
             flex: 1 1 auto;
             display: flex;
             align-items: stretch;
+            flex-wrap: nowrap;
             overflow-x: auto;
+            overflow-y: hidden;
             scrollbar-width: none;
+            -ms-overflow-style: none;
+            -webkit-overflow-scrolling: touch;
+            min-width: 0;
         }
         .pipeline::-webkit-scrollbar { display: none; }
 
@@ -702,6 +758,8 @@
             font-weight: var(--font-weight-medium);
             cursor: pointer;
             white-space: nowrap;
+            flex: none;
+            flex-shrink: 0;
             transition: background 0.15s ease, color 0.15s ease;
         }
         .pipe-item:hover { background: var(--surface-2); color: var(--text-secondary); }
@@ -780,8 +838,6 @@
         .mode-split #mapWrapper {
             position: sticky;
             top: 62px;
-            height: calc(100vh - 78px);
-            min-height: 420px;
             border-radius: var(--r-lg);
             overflow: hidden;
             border: 1px solid var(--border);
@@ -789,8 +845,6 @@
         .mode-split .listings-column {
             display: flex;
             flex-direction: column;
-            height: calc(100vh - 78px);
-            min-height: 420px;
             overflow: hidden;
         }
         .mode-split .results-count { flex-shrink: 0; }
@@ -823,6 +877,61 @@
         .mode-map .listings-container { display: none !important; }
 
         #map { width: 100%; height: 100%; background: var(--input); }
+
+        /* ==========================================================================
+           5b. SPLIT/MAP VIEWPORT FIT (desktop ≥1280px) — app fills exactly 100dvh,
+           no page-level vertical scroll. Grid mode and smaller screens keep page scroll.
+           ========================================================================== */
+        @media (min-width: 1280px) {
+            body.mode-split, body.mode-map {
+                height: 100vh;
+                height: 100dvh;
+                overflow: hidden;
+                display: flex;
+                flex-direction: column;
+            }
+            body.mode-split .topbar, body.mode-map .topbar,
+            body.mode-split .toolbar, body.mode-map .toolbar,
+            body.mode-split .kpi-bar, body.mode-map .kpi-bar,
+            body.mode-split .progress-strip, body.mode-map .progress-strip {
+                flex-shrink: 0;
+            }
+            body.mode-split .container, body.mode-map .container {
+                flex: 1 1 auto;
+                min-height: 0;
+                width: 100%;
+                display: flex;
+                flex-direction: column;
+                padding-bottom: 12px;
+            }
+            body.mode-split #appWorkspace, body.mode-map #appWorkspace {
+                flex: 1 1 auto;
+                min-height: 0;
+            }
+            body.mode-split #appWorkspace {
+                grid-template-columns: minmax(0, 46%) minmax(0, 1fr);
+                align-items: stretch;
+            }
+            body.mode-split #mapWrapper {
+                position: static;
+                height: 100%;
+                min-height: 0;
+            }
+            body.mode-split .listings-column {
+                height: 100%;
+                min-height: 0;
+            }
+            body.mode-map #mapWrapper {
+                height: 100%;
+                min-height: 0;
+            }
+            body.mode-split #map, body.mode-map #map,
+            body.mode-split .leaflet-container, body.mode-map .leaflet-container {
+                width: 100%;
+                height: 100%;
+                min-height: 0;
+            }
+        }
 
         /* Dark cartographic tiles */
         .leaflet-tile-pane { filter: brightness(0.8) invert(1) contrast(1.12) hue-rotate(200deg) saturate(0.35); }
@@ -900,9 +1009,10 @@
             position: fixed;
             right: 16px;
             bottom: 16px;
-            z-index: 35;
+            z-index: 50;
             display: none;
             width: 48px; height: 48px;
+            min-width: 48px; min-height: 48px;
             border-radius: 50%;
             background: var(--surface);
             border: 1px solid var(--border-strong);
@@ -1014,6 +1124,7 @@
         .card-badge.badge-new { color: var(--green-text); border-color: var(--green-border); }
         .card-badge.badge-updated { color: var(--violet-text); border-color: var(--violet-border); }
         .card-badge.badge-checked { color: var(--slate-text); border-color: var(--slate-border); }
+        .card-badge.badge-ai { color: #fff; background: rgba(124, 58, 237, 0.55); border-color: var(--violet-border); }
 
         .card-fav-btn {
             pointer-events: auto;
@@ -1403,33 +1514,41 @@
         .img-modal-btn.next { right: 22px; }
 
         /* ==========================================================================
-           8. CONFIG MODAL
+           8. CONFIG MODAL (Settings)
            ========================================================================== */
         #configModal {
             position: fixed;
             inset: 0;
             width: 100vw;
             height: 100vh;
-            background: var(--overlay);
-            backdrop-filter: blur(3px);
-            -webkit-backdrop-filter: blur(3px);
+            height: 100dvh;
+            background: rgba(0, 0, 0, 0.75);
+            backdrop-filter: blur(8px);
+            -webkit-backdrop-filter: blur(8px);
             display: none;
-            align-items: flex-start;
+            align-items: center;
             justify-content: center;
-            z-index: 95; /* above Leaflet controls (1000) trapped in isolated #mapWrapper */
-            padding: 40px 16px;
-            overflow-y: auto;
+            z-index: 100;
+            padding: 24px 16px;
+            overflow: hidden;
         }
         #configModal.open { display: flex; }
+        body.config-open { overflow: hidden !important; }
 
         .config-card {
             width: 100%;
             max-width: 860px;
-            background: var(--surface);
+            max-height: calc(100vh - 48px);
+            max-height: calc(100dvh - 48px);
+            height: auto;
+            background: #11141c;
             border: 1px solid var(--border-strong);
             border-radius: var(--r-lg);
-            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.55);
+            box-shadow: 0 24px 64px rgba(0, 0, 0, 0.75);
+            display: flex;
+            flex-direction: column;
             overflow: hidden;
+            position: relative;
         }
 
         .config-header {
@@ -1437,19 +1556,49 @@
             align-items: flex-start;
             justify-content: space-between;
             gap: 12px;
-            padding: 14px 18px;
+            padding: 14px 20px;
             border-bottom: 1px solid var(--border);
+            flex-shrink: 0;
+            background: #11141c;
         }
-        .config-title { font-size: var(--font-size-lg); font-weight: var(--font-weight-semibold); }
-        .config-subtitle { font-size: var(--font-size-xs); color: var(--text-muted); margin-top: 2px; }
+        .config-title {
+            font-size: var(--font-size-lg);
+            font-weight: var(--font-weight-semibold);
+            color: var(--text-primary);
+        }
+        .config-subtitle {
+            font-size: var(--font-size-xs);
+            color: var(--text-muted);
+            margin-top: 2px;
+        }
+        .config-close-btn {
+            width: 32px;
+            height: 32px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+        }
 
+        /* 2. Top Tabs with Horizontal Scroll & Edge Mask */
         .config-tabs {
             display: flex;
-            gap: 2px;
-            padding: 0 18px;
+            flex-wrap: nowrap;
+            gap: 4px;
+            padding: 0 16px;
             border-bottom: 1px solid var(--border);
             overflow-x: auto;
+            overflow-y: hidden;
+            white-space: nowrap;
+            scrollbar-width: none;
+            -ms-overflow-style: none;
+            -webkit-overflow-scrolling: touch;
+            flex-shrink: 0;
+            background: #11141c;
+            mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
+            -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
         }
+        .config-tabs::-webkit-scrollbar { display: none; }
         .config-tab-btn {
             background: transparent;
             border: none;
@@ -1457,15 +1606,84 @@
             color: var(--text-muted);
             font-size: var(--font-size-sm);
             font-weight: var(--font-weight-medium);
-            padding: 9px 12px;
+            padding: 11px 14px;
             cursor: pointer;
             white-space: nowrap;
+            flex-shrink: 0;
+            min-height: 44px;
+            transition: color 0.15s ease, border-color 0.15s ease;
         }
         .config-tab-btn:hover { color: var(--text-secondary); }
-        .config-tab-btn.active { color: var(--text-primary); border-bottom-color: var(--blue); font-weight: 600; }
+        .config-tab-btn.active {
+            color: var(--text-primary);
+            border-bottom-color: var(--blue);
+            font-weight: var(--font-weight-semibold);
+        }
 
-        .config-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; max-height: 62vh; overflow-y: auto; }
+        /* 3. Form Body */
+        .config-body {
+            padding: 18px 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            flex: 1 1 auto;
+            min-height: 0;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            background: #0d1017;
+        }
 
+        /* Profile Selector: Desktop Layout */
+        .config-profile-bar {
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border);
+        }
+        .config-profile-select-wrap {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex: 1;
+            min-width: 0;
+        }
+        .config-profile-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--text-muted);
+            white-space: nowrap;
+        }
+        .config-profile-select {
+            flex: 1;
+            min-width: 0;
+            background: var(--input);
+            border: 1px solid var(--border);
+            border-radius: var(--r-sm);
+            color: var(--text-primary);
+            padding: 7px 10px;
+            font-size: 13px;
+        }
+        .config-profile-actions {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            flex-shrink: 0;
+        }
+        .config-profile-btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
+        .config-profile-delete {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* Rows & Fields */
         .config-row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
         .config-field { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
@@ -1479,7 +1697,7 @@
             border: 1px solid var(--border);
             border-radius: var(--r-sm);
             color: var(--text-primary);
-            padding: 6px 9px;
+            padding: 7px 10px;
             font-size: var(--font-size-sm);
             line-height: var(--line-height-snug);
             width: 100%;
@@ -1489,14 +1707,14 @@
         .config-field textarea { resize: vertical; }
         .config-field select { cursor: pointer; }
 
-        .check-item { display: inline-flex; align-items: center; gap: 7px; font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer; }
+        .check-item { display: inline-flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer; }
         .check-item input { width: auto; accent-color: var(--blue); }
         .checkbox-group { display: flex; flex-wrap: wrap; gap: 8px 16px; }
 
-        .city-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+        .city-chips { display: flex; flex-wrap: wrap; gap: 6px; }
         .chip {
             font-size: var(--font-size-2xs);
-            padding: 2px 8px;
+            padding: 3px 9px;
             border-radius: 999px;
             background: var(--surface-2);
             border: 1px solid var(--border);
@@ -1510,7 +1728,7 @@
             align-items: center;
             justify-content: space-between;
             gap: 12px;
-            padding: 8px 0;
+            padding: 10px 0;
             border-bottom: 1px solid var(--border);
         }
         .portal-row:last-child { border-bottom: none; }
@@ -1528,6 +1746,21 @@
             outline: none;
         }
         .portal-pages input:focus { border-color: var(--border-active); }
+
+        .config-input-chips-group {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        .config-chips-input {
+            flex: 1;
+            min-width: 0;
+        }
+        .config-chips-btns {
+            display: flex;
+            gap: 6px;
+            align-items: center;
+        }
 
         .hint-box {
             font-size: var(--font-size-xs);
@@ -1547,15 +1780,41 @@
             border-radius: var(--r-xs);
         }
 
+        /* 4. Action Buttons Footer: Desktop Layout */
         .config-actions {
             display: flex;
             align-items: center;
-            gap: 8px;
-            padding: 12px 18px;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 14px 20px;
             border-top: 1px solid var(--border);
-            flex-wrap: wrap;
+            flex-shrink: 0;
+            position: sticky;
+            bottom: 0;
+            background: #11141c;
+            z-index: 10;
         }
-        .config-actions .spacer { flex: 1; }
+        .config-actions-danger {
+            display: flex;
+            align-items: center;
+        }
+        .config-actions-main {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .config-actions-secondary {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .btn-save-sync, .btn-save-cfg, .btn-cancel, .btn-reset-db {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            white-space: nowrap;
+        }
 
         /* ==========================================================================
            9. DUE DILIGENCE DRAWER (slide-over, right side)
@@ -2011,22 +2270,298 @@
             .nego-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
         }
 
+        /* --- Icon-only brand on very small screens (< 640px) --- */
+        @media (max-width: 639px) {
+            .brand-title { display: none; }
+            .brand-meta { min-width: 0; }
+            .brand-title-row { gap: 0; }
+            .topbar-brand { gap: 8px; }
+            .profile-drop-btn { max-width: 140px; }
+            .profile-drop-label { max-width: 140px; }
+
+            /* ==========================================================================
+               SETTINGS MODAL RWD (< 640px Mobile)
+               ========================================================================== */
+            #configModal {
+                padding: 0;
+                align-items: flex-end;
+                backdrop-filter: blur(8px);
+                -webkit-backdrop-filter: blur(8px);
+                background: rgba(0, 0, 0, 0.75);
+            }
+
+            .config-card {
+                max-width: 100%;
+                width: 100%;
+                height: 92vh;
+                height: 92dvh;
+                max-height: 92dvh;
+                border-radius: 16px 16px 0 0;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+                background: #11141c;
+                box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.85);
+            }
+
+            .config-header {
+                padding: 12px 14px;
+                background: #11141c;
+            }
+            .config-title {
+                font-size: 15px;
+                line-height: 1.3;
+            }
+            .config-subtitle {
+                font-size: 11px;
+            }
+            .config-close-btn {
+                width: 44px;
+                min-width: 44px;
+                height: 44px;
+                min-height: 44px;
+            }
+
+            /* 2. Top Tabs: horizontal scroll with edge mask & WCAG touch target */
+            .config-tabs {
+                padding: 0 10px;
+                background: #11141c;
+                mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
+            }
+            .config-tab-btn {
+                padding: 10px 14px;
+                min-height: 44px;
+                font-size: 13px;
+                flex-shrink: 0;
+            }
+
+            /* Form Body: scrollable middle area with solid background */
+            .config-body {
+                padding: 14px;
+                background: #0d1017;
+                gap: 12px;
+                flex: 1 1 auto;
+                min-height: 0;
+                overflow-y: auto;
+            }
+
+            /* 3. Profile Selector: 2 Rows */
+            .config-profile-bar {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+                padding-bottom: 12px;
+                margin-bottom: 8px;
+            }
+            .config-profile-select-wrap {
+                width: 100%;
+                flex-direction: column;
+                align-items: stretch;
+                gap: 4px;
+            }
+            .config-profile-select {
+                width: 100%;
+                min-height: 44px;
+                font-size: 14px;
+            }
+            .config-profile-actions {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                width: 100%;
+                margin-top: 2px;
+            }
+            .config-profile-actions .config-profile-btn {
+                flex: 1;
+                min-height: 44px;
+                font-size: 13px;
+                justify-content: center;
+            }
+            .config-profile-actions .config-profile-delete {
+                flex-shrink: 0;
+                width: 44px;
+                min-width: 44px;
+                height: 44px;
+                min-height: 44px;
+                padding: 0;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+
+            /* Touch ergonomics & inputs */
+            .config-field input,
+            .config-field select,
+            .config-field textarea {
+                min-height: 44px;
+                font-size: 14px;
+            }
+            .config-row2 {
+                grid-template-columns: 1fr;
+            }
+
+            .config-input-chips-group {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 6px;
+            }
+            .config-chips-input {
+                width: 100%;
+                min-height: 44px;
+            }
+            .config-chips-btns {
+                display: flex;
+                width: 100%;
+                gap: 6px;
+            }
+            .config-chips-btns .btn {
+                flex: 1;
+                min-height: 40px;
+                font-size: 11px;
+                padding: 4px 6px;
+                justify-content: center;
+            }
+
+            /* 4. Action Buttons Footer: Sticky bottom with vertical hierarchy */
+            .config-actions {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 8px;
+                padding: 10px 14px;
+                padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+                background: #11141c;
+                border-top: 1px solid var(--border-strong);
+                position: sticky;
+                bottom: 0;
+                z-index: 10;
+            }
+            .config-actions-main {
+                flex-direction: column;
+                width: 100%;
+                gap: 8px;
+                order: 1;
+            }
+            .btn-save-sync {
+                width: 100%;
+                height: 44px;
+                min-height: 44px;
+                font-size: 14px;
+                font-weight: 600;
+                order: 1;
+                justify-content: center;
+            }
+            .config-actions-secondary {
+                display: grid;
+                grid-template-columns: 1fr 1fr;
+                gap: 8px;
+                width: 100%;
+                order: 2;
+            }
+            .btn-cancel, .btn-save-cfg {
+                width: 100%;
+                height: 44px;
+                min-height: 44px;
+                font-size: 13px;
+                font-weight: 500;
+                justify-content: center;
+            }
+            .config-actions-danger {
+                order: 2;
+                width: 100%;
+                display: flex;
+                justify-content: center;
+                padding-top: 2px;
+            }
+            .config-actions-danger .btn-reset-db {
+                background: transparent !important;
+                border: none !important;
+                box-shadow: none !important;
+                color: var(--red-text, #f87171) !important;
+                font-size: 12px !important;
+                font-weight: 500 !important;
+                min-height: 36px !important;
+                height: auto !important;
+                padding: 6px 12px !important;
+                width: 100% !important;
+                justify-content: center !important;
+                text-align: center;
+                opacity: 0.85;
+            }
+            .config-actions-danger .btn-reset-db:hover,
+            .config-actions-danger .btn-reset-db:active {
+                opacity: 1;
+                text-decoration: underline;
+            }
+        }
+
         /* --- Mobile (< 768px) --- */
         @media (max-width: 767px) {
-            .container { padding: 0 12px 96px; }
+            .container { padding: 0 12px 96px; overflow-x: clip; }
 
+            /* Header: condensed 40px touch targets, ellipsis selector, spinner-only sync */
             .topbar { padding: 8px 12px; gap: 8px; }
+            .topbar-brand { flex: 0 1 auto; }
             .brand-subtitle { display: none; }
-            .topbar-center { margin-left: 0; }
-            .profile-drop-btn { max-width: 170px; }
+            .brand-title { max-width: 140px; }
+            .topbar-center { margin-left: 0; flex: 1 1 auto; min-width: 0; }
+            .profile-drop { min-width: 0; max-width: 100%; }
+            .profile-drop-btn { max-width: 170px; min-height: 40px; }
+            .profile-drop-label {
+                max-width: 140px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+            .topbar-actions { gap: 6px; margin-left: auto; }
             .topbar-actions .btn .btn-label { display: none; }
-            .topbar-actions .btn { padding: 6px 8px; }
+            .topbar-actions .btn,
+            .topbar-icon-btn {
+                width: 40px;
+                height: 40px;
+                min-width: 40px;
+                min-height: 40px;
+                padding: 0;
+                flex: none;
+                flex-shrink: 0;
+                display: inline-flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .topbar-sync-btn {
+                width: 40px;
+                height: 40px;
+                min-width: 40px;
+                min-height: 40px;
+                padding: 0;
+                flex: none;
+                flex-shrink: 0;
+            }
+            .topbar-sync-btn .spinner-inline { margin-right: 0; }
 
+            /* Toolbar: search full row, filters + sort share one row */
             .toolbar { gap: 8px; }
-            .faceted-search { flex-basis: 100%; order: 1; }
+            .faceted-search { flex: 1 1 100%; flex-basis: 100%; order: 1; min-height: 40px; min-width: 0; }
+            .faceted-search input { font-size: 16px; }
+            .kbd-badge { display: none; }
             .segmented-switcher { display: none; }
-            .sort-wrap { order: 2; flex: 1; }
-            .sort-wrap select { width: 100%; }
+            .toolbar-controls {
+                order: 2;
+                flex: 1 1 100%;
+                display: flex;
+                flex-direction: row;
+                gap: 8px;
+                width: 100%;
+                min-width: 0;
+            }
+            .toolbar-controls .filters-btn {
+                flex: 1 1 0;
+                min-height: 40px;
+                justify-content: center;
+                white-space: nowrap;
+            }
+            .toolbar-controls .sort-wrap { flex: 1 1 0; min-width: 0; display: flex; }
+            .toolbar-controls .sort-wrap select { width: 100%; min-height: 40px; }
 
             .filters-popover {
                 position: fixed;
@@ -2043,35 +2578,140 @@
 
             .filters-grid { grid-template-columns: 1fr 1fr; }
 
-            .kpi-bar { flex-direction: column; }
-            .kpi-main { border-right: none; border-bottom: 1px solid var(--border); min-width: 0; flex-direction: row; align-items: baseline; gap: 8px; }
-            .kpi-main-sub { margin-left: auto; }
-            .pipeline { border-top: none; }
-            .pipe-item { padding: 0 12px; }
-            .pipe-divider { margin: 6px 0; }
-            .perspective-wrap { border-left: none; border-top: 1px solid var(--border); padding: 8px 10px; }
-            .perspective-wrap select { width: 100%; max-width: none; }
+            /* Scraper strip: collapsed h-10 bar by default, bottom-sheet when open */
+            .progress-strip { padding: 8px 12px; margin-bottom: 10px; }
+            .progress-strip-row { min-height: 40px; }
+            .progress-step {
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                max-width: 46vw;
+            }
+            .progress-portal { display: none; }
+            .progress-strip.collapsed { padding-top: 4px; padding-bottom: 4px; }
+            .progress-strip.collapsed .progress-strip-row { min-height: 40px; }
+            .prog-metrics { gap: 10px 14px; }
+            .prog-logs-header { align-items: stretch; flex-direction: column; }
+            .prog-logs-filters {
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                overflow-y: hidden;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+                -webkit-overflow-scrolling: touch;
+                margin-left: -12px;
+                margin-right: -12px;
+                padding: 4px 12px;
+            }
+            .prog-logs-filters::-webkit-scrollbar { display: none; }
+            .prog-logs-filters .log-filter-btn { min-height: 40px; }
+            body.progress-sheet-open { overflow: hidden; }
+            body.progress-sheet-open .progress-strip:not(.collapsed) {
+                position: fixed;
+                left: 0; right: 0; bottom: 0;
+                z-index: 60;
+                margin: 0;
+                border-radius: var(--r-lg) var(--r-lg) 0 0;
+                border-left: none;
+                border-right: none;
+                border-bottom: none;
+                max-height: 75vh;
+                overflow-y: auto;
+                box-shadow: 0 -16px 40px rgba(0, 0, 0, 0.5);
+            }
 
-            .mode-split #appWorkspace { grid-template-columns: 1fr; }
-            .mode-split #mapWrapper { display: none; }
+            /* KPI: compact p-3 + horizontally scrollable tabs with fade */
+            .kpi-bar { flex-direction: column; overflow: hidden; }
+            .kpi-main {
+                border-right: none;
+                border-bottom: 1px solid var(--border);
+                min-width: 0;
+                flex-direction: row;
+                align-items: baseline;
+                gap: 8px;
+                padding: 8px 12px;
+            }
+            .kpi-main-value { font-size: 19px; }
+            .kpi-main-sub { margin-left: auto; white-space: nowrap; }
+            .pipeline {
+                border-top: none;
+                flex-wrap: nowrap;
+                overflow-x: auto;
+                overflow-y: hidden;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+                -webkit-overflow-scrolling: touch;
+                margin-left: -12px;
+                margin-right: -12px;
+                padding-left: 12px;
+                padding-right: 12px;
+                mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+                -webkit-mask-image: linear-gradient(to right, black calc(100% - 28px), transparent 100%);
+            }
+            .pipeline::-webkit-scrollbar { display: none; }
+            .pipe-item {
+                padding: 0 12px;
+                min-height: 40px;
+                flex: none;
+                flex-shrink: 0;
+            }
+            .pipe-divider { margin: 6px 0; flex: none; flex-shrink: 0; }
+            .perspective-wrap { border-left: none; border-top: 1px solid var(--border); padding: 8px 10px; }
+            .perspective-wrap select { width: 100%; max-width: none; min-height: 40px; }
+
+            /* Workspace: never embed split map on mobile, FAB toggles fullscreen */
+            .mode-split #appWorkspace,
+            .mode-grid #appWorkspace { grid-template-columns: 1fr; }
+            .mode-split #mapWrapper { display: none !important; }
             .mode-split .listings-column { height: auto; min-height: 0; overflow: visible; }
             .mode-split .listings-container { max-height: none; overflow-y: visible; }
-            .mode-map #mapWrapper { height: calc(100vh - 150px); min-height: 320px; }
+            .mode-map #mapWrapper { height: calc(100dvh - 150px); min-height: 320px; }
+            .mode-grid .listings-container { grid-template-columns: 1fr; }
 
             .workspace-toggle { display: none !important; }
 
-            .map-fab { display: flex; }
+            .map-fab {
+                display: flex;
+                position: fixed;
+                right: 16px;
+                bottom: 16px;
+                z-index: 50;
+                width: 48px;
+                height: 48px;
+                min-width: 48px;
+                min-height: 48px;
+            }
+            body.mobile-map-open { overflow: hidden; }
             body.mobile-map-open .map-fab { z-index: 71; }
             body.mobile-map-open #mapWrapper {
                 display: block !important;
                 position: fixed;
                 inset: 0;
                 height: 100%;
+                height: 100dvh;
                 min-height: 0;
                 border-radius: 0;
                 border: none;
                 z-index: 70;
             }
+
+            /* Listing cards: aspect-video + readable 2-col metadata grid */
+            .card-media { aspect-ratio: 16 / 9; }
+            .card-specs-grid-fixed { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .card-content { padding: 10px 12px 12px; }
+            .card-title { font-size: 15px; height: auto; min-height: 44px; }
+            .card-fav-btn { width: 40px; height: 40px; }
+            .card-action { min-height: 40px; }
+            .card-thumb, .thumb-more { min-height: 40px; min-width: 40px; height: 40px; }
+
+            /* Touch ergonomics: 40px minimum for all interactive controls */
+            .btn, .view-btn, .log-filter-btn, .menu-item,
+            .workspace-toggle button, .config-tab-btn {
+                min-height: 40px;
+            }
+            .btn-icon, .card-fav-btn, .map-fab { min-width: 40px; }
+            select, .sort-wrap select, .perspective-wrap select,
+            .field-group select, .field-group input { min-height: 40px; }
 
             .drawer { width: 100%; }
             .drawer-body { padding: 12px 14px 24px; }
@@ -2080,9 +2720,6 @@
             .nego-grid { grid-template-columns: 1fr 1fr; }
 
             .config-row2 { grid-template-columns: 1fr; }
-            #configModal { padding: 0; align-items: flex-end; }
-            .config-card { max-width: 100%; border-radius: var(--r-lg) var(--r-lg) 0 0; }
-            .config-body { max-height: 70vh; }
         }
 
         @keyframes spin { 100% { transform: rotate(360deg); } }

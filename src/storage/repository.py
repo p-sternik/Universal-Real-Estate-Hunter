@@ -29,6 +29,37 @@ def _apply_ai_fields(model: ListingModel, result: FilterResult) -> None:
         model.contact_person = result.contact_person
 
 
+def _apply_llm_cache_fields(
+    model: ListingModel,
+    desc_hash: str | None,
+    llm_json: dict | None,
+    prompt_version: str | None,
+    llm_model: str | None,
+) -> None:
+    if isinstance(desc_hash, str) and desc_hash:
+        model.desc_hash = desc_hash
+    if isinstance(llm_json, dict) and llm_json:
+        try:
+            model.llm_json_data = llm_json
+        except (TypeError, ValueError):
+            pass
+    if isinstance(prompt_version, str) and prompt_version:
+        model.llm_prompt_version = prompt_version
+    if isinstance(llm_model, str) and llm_model:
+        model.llm_model = llm_model
+
+
+# In-process medians cache (TTL) to avoid a full-table scan every cycle.
+_MEDIANS_CACHE: dict[str, float] = {}
+_MEDIANS_CACHE_TS: float = 0.0
+
+
+def clear_medians_cache() -> None:
+    global _MEDIANS_CACHE, _MEDIANS_CACHE_TS
+    _MEDIANS_CACHE = {}
+    _MEDIANS_CACHE_TS = 0.0
+
+
 class ListingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
@@ -138,6 +169,9 @@ class ListingRepository:
                 if hasattr(listing.finish_condition, "value")
                 else str(listing.finish_condition)
             )
+            # Sticky-True: False from a scraper means "not detected", not
+            # "confirmed absent" (e.g. Otodom never detects fiber). Only
+            # positive evidence flips the flag to True.
             if listing.has_visualisations:
                 existing.has_visualisations = True
             existing.sewerage = listing.sewerage.value if hasattr(listing.sewerage, "value") else str(listing.sewerage)
@@ -418,13 +452,26 @@ class ListingRepository:
         logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
         return len(listing_ids)
 
-    async def get_market_medians(self) -> dict[str, float]:
+    async def get_market_medians(self, force_refresh: bool = False) -> dict[str, float]:
         """
         Computes median price per m2 aggregated by:
         - city:district:category -> float
         - city::category -> float
         Returns a dictionary mapping composite keys to median price/m2.
+        Results are cached in-process for MEDIANS_CACHE_TTL_MINUTES.
         """
+        global _MEDIANS_CACHE, _MEDIANS_CACHE_TS
+        try:
+            from config import settings as _settings
+
+            ttl_min = int(getattr(_settings, "MEDIANS_CACHE_TTL_MINUTES", 30) or 30)
+        except Exception:
+            ttl_min = 30
+        import time as _time
+
+        now = _time.monotonic()
+        if not force_refresh and _MEDIANS_CACHE and (now - _MEDIANS_CACHE_TS) < ttl_min * 60:
+            return dict(_MEDIANS_CACHE)
         stmt = select(
             ListingModel.city,
             ListingModel.district,
@@ -460,4 +507,6 @@ class ListingRepository:
             if vals:
                 medians[k] = round(float(statistics.median(vals)), 1)
 
+        _MEDIANS_CACHE = dict(medians)
+        _MEDIANS_CACHE_TS = now
         return medians

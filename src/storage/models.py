@@ -114,6 +114,11 @@ class ListingModel(Base):
     _ai_questions: Mapped[str] = mapped_column("ai_questions", Text, default="[]")
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contact_person: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # LLM cache: stable hash of normalized description + raw JSON + prompt/model version
+    desc_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
+    _llm_json: Mapped[str | None] = mapped_column("llm_json", Text, nullable=True)
+    llm_prompt_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    llm_model: Mapped[str | None] = mapped_column(String(150), nullable=True)
 
     notified_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
@@ -201,6 +206,17 @@ class ListingModel(Base):
     @gesut_networks_data.setter
     def gesut_networks_data(self, value: dict | None):
         self.gesut_networks = json.dumps(value, ensure_ascii=False) if value else None
+
+    @property
+    def llm_json_data(self) -> dict | None:
+        try:
+            return json.loads(self._llm_json) if self._llm_json else None
+        except Exception:
+            return None
+
+    @llm_json_data.setter
+    def llm_json_data(self, value: dict | None):
+        self._llm_json = json.dumps(value, ensure_ascii=False) if value else None
 
 
 class PriceHistoryModel(Base):

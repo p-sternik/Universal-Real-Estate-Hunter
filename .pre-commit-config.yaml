@@ -58,7 +58,7 @@ repos:
     hooks:
       - id: pytest-unit
         name: Pytest (unit, no integration)
-        entry: uv run python -m pytest tests/ -q --tb=short -m "not integration" --cov=src --cov-fail-under=55
+        entry: uv run python -m pytest tests/ -q --tb=short -m "not integration" --cov=src --cov-fail-under=66
         language: system
         pass_filenames: false
         stages: [pre-push]

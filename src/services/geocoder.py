@@ -64,11 +64,13 @@ RZESZOW_DISTRICT_CENTROIDS = {
 
 
 class NominatimGeocoder:
-    def __init__(self):
+    def __init__(self) -> None:
         self.base_url = "https://nominatim.openstreetmap.org/search"
         self.headers = {"User-Agent": "RzeszowPropertyHunter/1.0 (automated house monitor; rzeszow-hunter@local)"}
         self._lock = asyncio.Lock()
         self._last_request_time = 0.0
+        # In-memory cache for the current process/cycle (avoids repeat DB + HTTP hits).
+        self._mem_cache: dict[str, tuple[float, float, str]] = {}
 
     async def _rate_limited_query(self, query: str) -> dict | None:
         """Query OSM Nominatim respecting 1 req/sec rate limit."""
@@ -103,11 +105,15 @@ class NominatimGeocoder:
         return None
 
     async def get_cached(self, session: AsyncSession, query_key: str) -> tuple[float, float, str] | None:
+        if query_key in self._mem_cache:
+            return self._mem_cache[query_key]
         stmt = select(GeocacheModel).where(GeocacheModel.query == query_key)
         res = await session.execute(stmt)
         cached = res.scalars().first()
         if cached:
-            return (cached.latitude, cached.longitude, cached.display_name or "")
+            val = (cached.latitude, cached.longitude, cached.display_name or "")
+            self._mem_cache[query_key] = val
+            return val
         return None
 
     async def set_cache(
@@ -118,6 +124,7 @@ class NominatimGeocoder:
         lon: float,
         display_name: str,
     ) -> None:
+        self._mem_cache[query_key] = (lat, lon, display_name)
         try:
             cache_entry = GeocacheModel(
                 query=query_key,
@@ -127,8 +134,8 @@ class NominatimGeocoder:
                 cached_at=datetime.now(UTC),
             )
             session.add(cache_entry)
-            await safe_commit(session)
-        except Exception as e:
+            await session.flush()
+        except (OSError, ValueError) as e:
             logger.debug(f"[Geocoder] Failed to persist cache for '{query_key}': {e}")
             try:
                 await session.rollback()
@@ -219,6 +226,34 @@ class NominatimGeocoder:
 
         # 4. No location resolved - leave coordinates empty (no misleading pin)
         return (None, None, False)
+
+
+async def geocode_many(
+    session: AsyncSession,
+    items: list[dict[str, str | None]],
+    batch_size: int = 8,
+) -> list[tuple[float | None, float | None, bool]]:
+    """Resolve multiple addresses with bounded concurrency.
+
+    DB/memory cache hits never touch the network; the 1 req/s Nominatim lock
+    still serializes real HTTP calls, but cache lookups and fallbacks run
+    concurrently in batches.
+    """
+    sem = asyncio.Semaphore(max(1, batch_size))
+    results: list[tuple[float | None, float | None, bool] | None] = [None] * len(items)
+
+    async def _one(idx: int, item: dict[str, str | None]) -> None:
+        async with sem:
+            results[idx] = await geocoder.geocode(
+                session=session,
+                street=item.get("street"),
+                district=item.get("district"),
+                city=item.get("city"),
+                location_raw=item.get("location_raw"),
+            )
+
+    await asyncio.gather(*[_one(i, it) for i, it in enumerate(items)])
+    return [r or (None, None, False) for r in results]
 
 
 # Singleton instance

@@ -174,6 +174,7 @@
     }
   },
   "scheduler": {
+    "enabled": true,
     "interval_minutes": 20,
     "night_mode": true,
     "night_interval_minutes": 60,

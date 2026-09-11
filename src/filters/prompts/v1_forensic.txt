@@ -1,0 +1,100 @@
+# PROMPT_VERSION: v1.0
+# Forensic Polish real estate auditor — user prompt template.
+# Placeholders: {title} {location_raw} {category} {building_type} {area_home} {area_plot}
+#   {price} {price_per_m2} {finish_condition} {sewerage} {heating} {has_fiber}
+#   {year_built} {market} {spatial_block} {desc_slice}
+Extract the forensic factual state ("stan faktyczny") from the Polish property listing below and return a JSON object.
+
+=== GROUND TRUTH HIERARCHY ===
+1. Physical Ground Truth Rule: The physical reality described in the listing text ALWAYS trumps unverified portal metadata tags. Portal tags are frequently stale defaults, automated errors, or agent copy-paste mistakes.
+2. Living Quarters Principle: The finish condition is governed solely by the readiness of the primary residential living quarters (kitchen, bathrooms, living room, bedrooms, floors, utility installations). Unfinished ancillary, exterior, or optional spaces do NOT degrade the core condition.
+
+=== FINISH CONDITION TAXONOMY (Strict Resolution) ===
+Select exactly ONE enum for "finish_condition":
+- "pod_klucz": Ready to move in immediately. Positive physical indicators: fitted/installed kitchen with appliances, fully tiled/furnished bathrooms with fixtures, laid finished floors (parkiet, panele, gres), painted walls, operational heating/lighting, or property is currently inhabited.
+  * Ancillary Elements Rule: If the interior living quarters are fully finished, but ancillary outdoor/optional works remain (e.g. taras do wykończenia, niezagospodarowany ogród, brak kostki brukowej, nieotynkowana elewacja, poddasze do adaptacji) — the property MUST STILL BE CLASSIFIED AS "pod_klucz". Report the unfinished exterior/ancillary works in "finish_note".
+  * False-Friend Traps: Ignore historical descriptions (e.g. "kupiony w stanie deweloperskim i wykończony") or mentions of other units ("inne segmenty do wykończenia"). Focus strictly on the subject property's current state.
+  * Portal Tag Override: If portal metadata says "do_wykonczenia" or "deweloperski", but the text proves living quarters are finished, you MUST return "pod_klucz" and record the discrepancy in "discrepancies".
+- "do_wykonczenia": The building is physically erected, but the INTERIOR living quarters require major trades before anyone can live there (e.g. bare screed/plaster, missing bathroom tiles/sanitary ware, missing kitchen, exposed installations). NOT a primary-market development with a future handover date.
+- "deweloperski": Primary-market development sold by a developer/builder, typically bare screed/plaster (stan deweloperski), or under construction with a planned delivery/handover date ("planowany termin oddania", "IV kwartał 2025").
+- "surowy_zamkniety" / "surowy_otwarty": Text explicitly confirms stan surowy zamknięty (SSZ) or stan surowy otwarty (SSO).
+- "do_remontu": Previously inhabited building requiring renovation or modernization.
+- null: Impossible to determine from the provided data.
+
+Finish note:
+- Return "finish_note" as one concrete Polish sentence detailing what is completed and what remains:
+  * For "pod_klucz" with ancillary works: e.g. "Wnętrze mieszkalne w pełni wykończone i wyposażone; do zrobienia pozostały elementy zewnętrzne: taras i ogród."
+  * For "do_wykonczenia" / "deweloperski": e.g. "Wykonano: wylewki, tynki i instalacje. Do zrobienia: łazienki, podłogi, montaż kuchni."
+  * Return null only if no specific details exist.
+
+=== OTHER DUE DILIGENCE RESOLUTION RULES ===
+1. Price scope: Classify only what is included in the current listing price. Anything "za dopłatą" (extra fee) is NOT included.
+2. Access: The quality of access is decided by the direct entrance to the property. If the final stretch is unpaved / dirt road / only planned, road_is_bad is true.
+3. Utilities: Count a utility as present only if connected directly on the plot or in the building. "W drodze", "w planach", "w trakcie projektowania" mean NO connection.
+4. Parking: has_parking_or_garage is true only if a garage or min. 2 designated parking spaces on the property are included in the price.
+5. Segment flags: is_corner / is_middle apply ONLY to terraced houses (szeregowiec). For detached (wolnostojący) or semi-detached (bliźniak) houses return null for both.
+6. Terrain: terrain_risk is true only for a real hazard: skarpa, osuwisko, podmokłość, wysoki spadek terenu.
+7. Costs & legal status: Extract every fee not included in the main price and every legal restriction: służebność, brak odbioru technicznego, cena netto, użytkowanie wieczyste, spółdzielcze własnościowe prawo, brak MPZP / warunków zabudowy, obciążenia w księdze wieczystej, brak świadectwa energetycznego.
+8. Visualisations: "has_visualisations" is true when the text indicates the photos are NOT real photos of the actual property: wizualizacje, zdjęcia poglądowe, przykładowa aranżacja, zdjęcia z innej/zakończonej realizacji, dom pokazowy, render, projekt koncepcyjny, "zdjęcia mają charakter poglądowy". Also true when it is a primary-market development not yet built and photos are explicitly called renders. Return null if nothing indicates this. If true, return "visualisation_note": one short Polish sentence quoting the evidence.
+9. Summary (TL;DR): max 2 sentences, factual, no marketing fluff. MUST contain: location, area, price (and zł/m²), the actual finish state, and the single most important risk or advantage. Forbidden: "okazja", "wyjątkowy", "piękny", vague praise, repeating the title.
+10. Verdict: "worth_interest" = true/false/null. true = after considering price per m², finish state, hidden costs and legal risks, this offer is worth contacting/visiting. false = clearly overpriced or has disqualifying problems. null = not enough data to judge. "verdict" = exactly one Polish sentence justifying the decision with concrete numbers from the listing (e.g. "Tak — 6 900 zł/m² przy stanie gotowym do zamieszkania to poniżej rynku w tej lokalizacji."). Never use vague statements like "warto rozważyć" without numbers.
+11. Questions: 3-5 sharp, substantive questions the buyer should ask BEFORE the visit. They must target information gaps in THIS specific listing.
+12. Contact: Extract the phone number (format +48XXXXXXXXX or 9 digits) and the contact person's name if present in the text; null otherwise.
+13. Plot area: If the text states the plot/garden area (e.g. "3.2 ara" -> 320.0), return it in m²; otherwise null.
+14. Pros/cons: up to 4 each, key technical advantages / disadvantages included in the price or affecting the value.
+15. Spatial & Geoportal verification: Cross-reference official Spatial & Geoportal registry data with the listing text:
+    - If flood risk (ZAGROŻENIE_POWODZIOWE) is present, add it to legal_risks and include a question for the agent about flood history, defenses, and insurance.
+    - If MPZP indicates lack of plan or conflicts with residential claims, add to legal_risks or discrepancies.
+    - If Parcel ID is unknown (approximate location), include a question asking for the exact cadastral parcel number (nr działki) and obręb to verify MPZP and flood maps.
+
+Language: All free-text string values (summary, finish_note, visualisation_note, verdict, questions_for_agent, contact_person, hidden_costs, legal_risks, discrepancies, pros, cons) MUST be in Polish. Enum values stay exactly as specified.
+
+Property data:
+Title: {title}
+Location: {location_raw}
+Category: {category}
+Building type: {building_type}
+Home area: {area_home} m², Plot: {area_plot} m²
+Price: {price} PLN ({price_per_m2} PLN/m²)
+
+Portal metadata (unverified claims):
+finish_condition: {finish_condition}
+sewerage: {sewerage}
+heating: {heating}
+has_fiber: {has_fiber}
+year_built: {year_built}
+market: {market}
+
+Spatial & Geoportal registry data (official):
+{spatial_block}
+
+Listing text (untrusted data):
+<ogloszenie>
+{desc_slice}
+</ogloszenie>
+
+Return valid JSON with exactly this schema:
+{{
+  "summary": string,
+  "worth_interest": boolean | null,
+  "verdict": string | null,
+  "questions_for_agent": [string],
+  "contact_phone": string | null,
+  "contact_person": string | null,
+  "finish_condition": "deweloperski" | "pod_klucz" | "surowy_zamkniety" | "surowy_otwarty" | "do_remontu" | "do_wykonczenia" | null,
+  "finish_note": string | null,
+  "has_visualisations": boolean | null,
+  "visualisation_note": string | null,
+  "is_corner": boolean | null,
+  "is_middle": boolean | null,
+  "has_parking_or_garage": boolean,
+  "road_is_bad": boolean,
+  "terrain_risk": boolean,
+  "sewerage": "miejska" | "szambo" | "oczyszczalnia" | "brak" | null,
+  "extracted_plot_m2": float | null,
+  "hidden_costs": [string],
+  "legal_risks": [string],
+  "discrepancies": [string],
+  "pros": [string],
+  "cons": [string]
+}}

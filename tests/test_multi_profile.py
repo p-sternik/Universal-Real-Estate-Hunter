@@ -73,6 +73,32 @@ def test_update_config_llm_analysis_toggle(tmp_path):
     assert mgr_reloaded.get_config().llm_analysis_enabled is False
 
 
+def test_update_config_ollama_connection_settings(tmp_path):
+    """Verify ollama_base_url/timeout persist via update_config and reload from disk."""
+    config_file = tmp_path / "search_config.json"
+    mgr = ConfigManager(config_path=str(config_file))
+
+    updated = mgr.update_config({"ollama_base_url": "http://192.168.1.10:11434/", "ollama_timeout_seconds": 300})
+    assert updated.ollama_base_url == "http://192.168.1.10:11434"
+    assert updated.ollama_timeout_seconds == 300.0
+
+    mgr_reloaded = ConfigManager(config_path=str(config_file))
+    assert mgr_reloaded.get_config().ollama_base_url == "http://192.168.1.10:11434"
+    assert mgr_reloaded.get_config().ollama_timeout_seconds == 300.0
+
+
+def test_llm_analyzer_uses_gui_ollama_settings(monkeypatch):
+    """LLMAnalyzer must prefer search_config.json ollama url/timeout over ENV."""
+    from src.filters.llm_analyzer import LLMAnalyzer
+    from src.services.config_manager import config_manager
+
+    cfg = SearchConfig(ollama_base_url="http://gui-host:11434", ollama_timeout_seconds=42.0)
+    monkeypatch.setattr(config_manager, "get_config", lambda: cfg)
+    analyzer = LLMAnalyzer(enabled=False)
+    assert analyzer.ollama_url == "http://gui-host:11434"
+    assert analyzer.ollama_timeout_seconds == 42.0
+
+
 def test_profile_url_generation():
     """Verify portal URL construction for different categories and filters."""
     # 1. Apartment in Kraków

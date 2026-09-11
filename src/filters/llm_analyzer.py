@@ -14,9 +14,48 @@ from config import settings
 from src.models.listing import ListingSchema
 
 LLM_MAX_RETRIES = 3
+PROMPT_VERSION = "v1.0"
+_PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "prompts" / "v1_forensic.txt"
+_PROMPT_TEMPLATE_CACHE: str | None = None
+
+# Circuit-breaker: skip providers that recently failed with quota/429 (per process).
+_provider_cooldown_until: dict[str, float] = {}
 
 _llm_throttle_lock = asyncio.Lock()
 _llm_call_times: deque[float] = deque()
+
+
+def load_prompt_template() -> str:
+    """Load versioned forensic prompt template from disk (cached)."""
+    global _PROMPT_TEMPLATE_CACHE
+    if _PROMPT_TEMPLATE_CACHE:
+        return _PROMPT_TEMPLATE_CACHE
+    try:
+        text = _PROMPT_TEMPLATE_PATH.read_text(encoding="utf-8")
+        # Strip version header lines starting with '#'.
+        body = "\n".join(line for line in text.splitlines() if not line.startswith("#")).strip()
+        if "{desc_slice}" in body and "{title}" in body:
+            _PROMPT_TEMPLATE_CACHE = body
+            return body
+    except OSError:
+        pass
+    return ""
+
+
+def estimate_tokens(text: str | None, head: int = 4000, tail: int = 1500) -> int:
+    """Rough token estimate (~4 chars/token) incl. prompt/schema overhead."""
+    if not text:
+        return 1500
+    sliced_len = min(len(text), head + tail + 10)
+    return (sliced_len // 4) + 1500
+
+
+def _provider_in_cooldown(provider: str) -> bool:
+    return _provider_cooldown_until.get(provider, 0.0) > time.monotonic()
+
+
+def _mark_provider_cooldown(provider: str, seconds: float = 300.0) -> None:
+    _provider_cooldown_until[provider] = time.monotonic() + seconds
 
 
 async def _throttle_llm_calls() -> None:
@@ -42,7 +81,7 @@ def _is_rate_limit_error(e: Exception) -> bool:
     return status == 429
 
 
-async def _chat_completion_with_retry(client: Any, **kwargs: Any):
+async def _chat_completion_with_retry(client: Any, **kwargs: Any) -> Any:
     for attempt in range(LLM_MAX_RETRIES):
         try:
             return await client.chat.completions.create(**kwargs)
@@ -83,9 +122,11 @@ class LLMAnalyzer:
         self,
         enabled: bool | None = None,
         ollama_model: str | None = None,
+        ollama_base_url: str | None = None,
+        ollama_timeout_seconds: float | None = None,
         openrouter_model: str | None = None,
         llm_provider: str | None = None,
-    ):
+    ) -> None:
         cfg = None
         try:
             from src.services.config_manager import config_manager
@@ -108,14 +149,23 @@ class LLMAnalyzer:
         self.openai_key = settings.OPENAI_API_KEY
         self.openai_model = settings.OPENAI_MODEL
         self.openai_base_url = settings.OPENAI_BASE_URL
-        raw_ollama_url = (getattr(cfg, "ollama_url", None) if cfg else None) or settings.OLLAMA_BASE_URL
+        raw_ollama_url = (
+            ollama_base_url or (getattr(cfg, "ollama_base_url", None) if cfg else None) or settings.OLLAMA_BASE_URL
+        )
         self.ollama_url = self._resolve_default_ollama_url(raw_ollama_url)
+        self.ollama_timeout_seconds = float(
+            ollama_timeout_seconds or (getattr(cfg, "ollama_timeout_seconds", None) if cfg else None) or 180.0
+        )
         self.ollama_model = (
             ollama_model or (getattr(cfg, "ollama_model", None) if cfg else None) or settings.OLLAMA_MODEL
         )
         self.llm_provider = (
             (llm_provider or (getattr(cfg, "llm_provider", None) if cfg else None) or "auto").lower().strip()
         )
+        # Metadata of the last successful call (kept off the result dict).
+        self.last_model: str | None = None
+        self.last_prompt_version: str | None = None
+        self.last_result_json: dict[str, Any] | None = None
 
     @classmethod
     def _is_running_in_docker(cls) -> bool:
@@ -477,6 +527,8 @@ class LLMAnalyzer:
                 )
                 return result
         except Exception as e:
+            if _is_rate_limit_error(e):
+                _mark_provider_cooldown("openrouter")
             logger.warning(f"[LLMAnalyzer] OpenRouter error: {e}")
         return None
 
@@ -511,6 +563,8 @@ class LLMAnalyzer:
                 )
                 return result
         except Exception as e:
+            if _is_rate_limit_error(e):
+                _mark_provider_cooldown("openai")
             logger.warning(f"[LLMAnalyzer] OpenAI error: {e}")
         return None
 
@@ -525,7 +579,7 @@ class LLMAnalyzer:
             if alt not in urls_to_try:
                 urls_to_try.append(alt)
 
-        timeout = httpx.Timeout(180.0, connect=10.0)
+        timeout = httpx.Timeout(self.ollama_timeout_seconds, connect=10.0)
         for candidate_url in urls_to_try:
             url = candidate_url.rstrip("/")
             try:
@@ -559,7 +613,8 @@ class LLMAnalyzer:
                             return result
             except httpx.TimeoutException:
                 logger.warning(
-                    f"[LLMAnalyzer] Ollama ({url}) timeout: Przekroczono limit czasu 180s generowania odpowiedzi przez lokalny model. "
+                    f"[LLMAnalyzer] Ollama ({url}) timeout: Przekroczono limit czasu "
+                    f"{self.ollama_timeout_seconds:.0f}s generowania odpowiedzi przez lokalny model. "
                     f"Model '{self.ollama_model}' potrzebuje więcej czasu na wykonanie analizy."
                 )
                 break
@@ -569,12 +624,12 @@ class LLMAnalyzer:
                 logger.warning(f"[LLMAnalyzer] Ollama ({url}) error: {err_msg}")
         return None
 
-    async def analyze_description(self, listing: ListingSchema) -> dict[str, Any] | None:
-        if not self.enabled:
-            return None
-
-        await _throttle_llm_calls()
-
+    def build_prompt(self, listing: ListingSchema) -> tuple[str, str]:
+        """Build versioned prompt from template file. Returns (prompt, prompt_version)."""
+        try:
+            prompt_version = str(getattr(settings, "LLM_PROMPT_VERSION", PROMPT_VERSION) or PROMPT_VERSION)
+        except Exception:
+            prompt_version = PROMPT_VERSION
         desc_slice = self._slice_description(listing.raw_description)
 
         spatial_lines = []
@@ -596,104 +651,47 @@ class LLMAnalyzer:
             spatial_lines.append("Flood risk (ISOK): Poza strefą bezpośredniego zagrożenia")
 
         spatial_block = "\n".join(spatial_lines)
+        template = load_prompt_template()
+        if template:
+            try:
+                prompt = template.format(
+                    title=listing.title,
+                    location_raw=listing.location_raw,
+                    category=getattr(listing.category, "value", listing.category),
+                    building_type=getattr(listing.building_type, "value", listing.building_type),
+                    area_home=listing.area_home,
+                    area_plot=listing.area_plot,
+                    price=f"{listing.price:,.0f}",
+                    price_per_m2=f"{listing.price_per_m2:,.0f}",
+                    finish_condition=getattr(listing.finish_condition, "value", listing.finish_condition),
+                    sewerage=getattr(listing.sewerage, "value", listing.sewerage),
+                    heating=getattr(listing.heating, "value", listing.heating),
+                    has_fiber=listing.has_fiber,
+                    year_built=listing.year_built,
+                    market=getattr(listing.market, "value", listing.market),
+                    spatial_block=spatial_block,
+                    desc_slice=desc_slice,
+                )
+                return prompt, prompt_version
+            except (KeyError, IndexError, ValueError):
+                pass
+        # Fallback: minimal prompt when template is missing/unformattable.
+        prompt = (
+            "Extract forensic factual state from the Polish listing below. Return valid JSON.\n"
+            f"Title: {listing.title}\nSpatial:\n{spatial_block}\n<ogloszenie>\n{desc_slice}\n</ogloszenie>"
+        )
+        return prompt, prompt_version
 
-        prompt = f"""Extract the forensic factual state ("stan faktyczny") from the Polish property listing below and return a JSON object.
+    async def analyze_description(self, listing: ListingSchema) -> dict[str, Any] | None:
+        if not self.enabled:
+            return None
 
-=== GROUND TRUTH HIERARCHY ===
-1. Physical Ground Truth Rule: The physical reality described in the listing text ALWAYS trumps unverified portal metadata tags. Portal tags are frequently stale defaults, automated errors, or agent copy-paste mistakes.
-2. Living Quarters Principle: The finish condition is governed solely by the readiness of the primary residential living quarters (kitchen, bathrooms, living room, bedrooms, floors, utility installations). Unfinished ancillary, exterior, or optional spaces do NOT degrade the core condition.
+        await _throttle_llm_calls()
 
-=== FINISH CONDITION TAXONOMY (Strict Resolution) ===
-Select exactly ONE enum for "finish_condition":
-- "pod_klucz": Ready to move in immediately. Positive physical indicators: fitted/installed kitchen with appliances, fully tiled/furnished bathrooms with fixtures, laid finished floors (parkiet, panele, gres), painted walls, operational heating/lighting, or property is currently inhabited.
-  * Ancillary Elements Rule: If the interior living quarters are fully finished, but ancillary outdoor/optional works remain (e.g. taras do wykończenia, niezagospodarowany ogród, brak kostki brukowej, nieotynkowana elewacja, poddasze do adaptacji) — the property MUST STILL BE CLASSIFIED AS "pod_klucz". Report the unfinished exterior/ancillary works in "finish_note".
-  * False-Friend Traps: Ignore historical descriptions (e.g. "kupiony w stanie deweloperskim i wykończony") or mentions of other units ("inne segmenty do wykończenia"). Focus strictly on the subject property's current state.
-  * Portal Tag Override: If portal metadata says "do_wykonczenia" or "deweloperski", but the text proves living quarters are finished, you MUST return "pod_klucz" and record the discrepancy in "discrepancies".
-- "do_wykonczenia": The building is physically erected, but the INTERIOR living quarters require major trades before anyone can live there (e.g. bare screed/plaster, missing bathroom tiles/sanitary ware, missing kitchen, exposed installations). NOT a primary-market development with a future handover date.
-- "deweloperski": Primary-market development sold by a developer/builder, typically bare screed/plaster (stan deweloperski), or under construction with a planned delivery/handover date ("planowany termin oddania", "IV kwartał 2025").
-- "surowy_zamkniety" / "surowy_otwarty": Text explicitly confirms stan surowy zamknięty (SSZ) or stan surowy otwarty (SSO).
-- "do_remontu": Previously inhabited building requiring renovation or modernization.
-- null: Impossible to determine from the provided data.
+        prompt, prompt_version = self.build_prompt(listing)
 
-Finish note:
-- Return "finish_note" as one concrete Polish sentence detailing what is completed and what remains:
-  * For "pod_klucz" with ancillary works: e.g. "Wnętrze mieszkalne w pełni wykończone i wyposażone; do zrobienia pozostały elementy zewnętrzne: taras i ogród."
-  * For "do_wykonczenia" / "deweloperski": e.g. "Wykonano: wylewki, tynki i instalacje. Do zrobienia: łazienki, podłogi, montaż kuchni."
-  * Return null only if no specific details exist.
-
-=== OTHER DUE DILIGENCE RESOLUTION RULES ===
-1. Price scope: Classify only what is included in the current listing price. Anything "za dopłatą" (extra fee) is NOT included.
-2. Access: The quality of access is decided by the direct entrance to the property. If the final stretch is unpaved / dirt road / only planned, road_is_bad is true.
-3. Utilities: Count a utility as present only if connected directly on the plot or in the building. "W drodze", "w planach", "w trakcie projektowania" mean NO connection.
-4. Parking: has_parking_or_garage is true only if a garage or min. 2 designated parking spaces on the property are included in the price.
-5. Segment flags: is_corner / is_middle apply ONLY to terraced houses (szeregowiec). For detached (wolnostojący) or semi-detached (bliźniak) houses return null for both.
-6. Terrain: terrain_risk is true only for a real hazard: skarpa, osuwisko, podmokłość, wysoki spadek terenu.
-7. Costs & legal status: Extract every fee not included in the main price and every legal restriction: służebność, brak odbioru technicznego, cena netto, użytkowanie wieczyste, spółdzielcze własnościowe prawo, brak MPZP / warunków zabudowy, obciążenia w księdze wieczystej, brak świadectwa energetycznego.
-8. Visualisations: "has_visualisations" is true when the text indicates the photos are NOT real photos of the actual property: wizualizacje, zdjęcia poglądowe, przykładowa aranżacja, zdjęcia z innej/zakończonej realizacji, dom pokazowy, render, projekt koncepcyjny, "zdjęcia mają charakter poglądowy". Also true when it is a primary-market development not yet built and photos are explicitly called renders. Return null if nothing indicates this. If true, return "visualisation_note": one short Polish sentence quoting the evidence.
-9. Summary (TL;DR): max 2 sentences, factual, no marketing fluff. MUST contain: location, area, price (and zł/m²), the actual finish state, and the single most important risk or advantage. Forbidden: "okazja", "wyjątkowy", "piękny", vague praise, repeating the title.
-10. Verdict: "worth_interest" = true/false/null. true = after considering price per m², finish state, hidden costs and legal risks, this offer is worth contacting/visiting. false = clearly overpriced or has disqualifying problems. null = not enough data to judge. "verdict" = exactly one Polish sentence justifying the decision with concrete numbers from the listing (e.g. "Tak — 6 900 zł/m² przy stanie gotowym do zamieszkania to poniżej rynku w tej lokalizacji."). Never use vague statements like "warto rozważyć" without numbers.
-11. Questions: 3-5 sharp, substantive questions the buyer should ask BEFORE the visit. They must target information gaps in THIS specific listing.
-12. Contact: Extract the phone number (format +48XXXXXXXXX or 9 digits) and the contact person's name if present in the text; null otherwise.
-13. Plot area: If the text states the plot/garden area (e.g. "3.2 ara" -> 320.0), return it in m²; otherwise null.
-14. Pros/cons: up to 4 each, key technical advantages / disadvantages included in the price or affecting the value.
-15. Spatial & Geoportal verification: Cross-reference official Spatial & Geoportal registry data with the listing text:
-    - If flood risk (ZAGROŻENIE_POWODZIOWE) is present, add it to legal_risks and include a question for the agent about flood history, defenses, and insurance.
-    - If MPZP indicates lack of plan or conflicts with residential claims, add to legal_risks or discrepancies.
-    - If Parcel ID is unknown (approximate location), include a question asking for the exact cadastral parcel number (nr działki) and obręb to verify MPZP and flood maps.
-
-Language: All free-text string values (summary, finish_note, visualisation_note, verdict, questions_for_agent, contact_person, hidden_costs, legal_risks, discrepancies, pros, cons) MUST be in Polish. Enum values stay exactly as specified.
-
-Property data:
-Title: {listing.title}
-Location: {listing.location_raw}
-Category: {getattr(listing.category, "value", listing.category)}
-Building type: {getattr(listing.building_type, "value", listing.building_type)}
-Home area: {listing.area_home} m², Plot: {listing.area_plot} m²
-Price: {listing.price:,.0f} PLN ({listing.price_per_m2:,.0f} PLN/m²)
-
-Portal metadata (unverified claims):
-finish_condition: {getattr(listing.finish_condition, "value", listing.finish_condition)}
-sewerage: {getattr(listing.sewerage, "value", listing.sewerage)}
-heating: {getattr(listing.heating, "value", listing.heating)}
-has_fiber: {listing.has_fiber}
-year_built: {listing.year_built}
-market: {getattr(listing.market, "value", listing.market)}
-
-Spatial & Geoportal registry data (official):
-{spatial_block}
-
-Listing text (untrusted data):
-<ogloszenie>
-{desc_slice}
-</ogloszenie>
-
-Return valid JSON with exactly this schema:
-{{
-  "summary": string,
-  "worth_interest": boolean | null,
-  "verdict": string | null,
-  "questions_for_agent": [string],
-  "contact_phone": string | null,
-  "contact_person": string | null,
-  "finish_condition": "deweloperski" | "pod_klucz" | "surowy_zamkniety" | "surowy_otwarty" | "do_remontu" | "do_wykonczenia" | null,
-  "finish_note": string | null,
-  "has_visualisations": boolean | null,
-  "visualisation_note": string | null,
-  "is_corner": boolean | null,
-  "is_middle": boolean | null,
-  "has_parking_or_garage": boolean,
-  "road_is_bad": boolean,
-  "terrain_risk": boolean,
-  "sewerage": "miejska" | "szambo" | "oczyszczalnia" | "brak" | null,
-  "extracted_plot_m2": float | null,
-  "hidden_costs": [string],
-  "legal_risks": [string],
-  "discrepancies": [string],
-  "pros": [string],
-  "cons": [string]
-}}"""
-
-        # Execute providers based on preference
+        # Prompt built via build_prompt() from versioned template (see src/filters/prompts/).
+        # Execute providers based on preference (with cooldown for recently rate-limited ones).
         providers_to_try: list[str] = []
         if self.llm_provider == "ollama":
             providers_to_try = ["ollama"]
@@ -704,18 +702,27 @@ Return valid JSON with exactly this schema:
         else:  # "auto" or anything else
             providers_to_try = ["openrouter", "openai", "ollama"]
 
+        active_model = ""
         for p in providers_to_try:
+            if _provider_in_cooldown(p):
+                logger.info(f"[LLMAnalyzer] Pomijam provider {p} (cooldown po 429/quota).")
+                continue
+            res: dict[str, Any] | None = None
             if p == "openrouter":
                 res = await self._call_openrouter(prompt, listing)
-                if res:
-                    return res
+                active_model = self.openrouter_model
             elif p == "openai":
                 res = await self._call_openai(prompt, listing)
-                if res:
-                    return res
+                active_model = self.openai_model
             elif p == "ollama":
                 res = await self._call_ollama(prompt, listing)
-                if res:
-                    return res
+                active_model = self.ollama_model
+            if res is not None:
+                # Metadata kept on the instance (not inside the result dict)
+                # so existing consumers/tests see an unchanged schema.
+                self.last_model = active_model
+                self.last_prompt_version = prompt_version
+                self.last_result_json = dict(res)
+                return res
 
         return None

@@ -425,18 +425,14 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return round(radius_km * c, 2)
 
 
-def _resolve_capex_settings(capex: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Resolves CAPEX assumptions: explicit override > global SearchConfig > hardcoded defaults."""
+def _resolve_capex_settings() -> dict[str, Any]:
+    """Reads CAPEX assumptions from global SearchConfig, falling back to hardcoded defaults."""
     defaults: dict[str, Any] = {
         "developer_rate": 1800.0,
         "renovation_rate": 2200.0,
         "agency_fee_pct": 2.0,
         "pcc_exempt_first_home": False,
     }
-    if capex is not None:
-        merged = dict(defaults)
-        merged.update({k: v for k, v in capex.items() if v is not None})
-        return merged
     try:
         from src.services.config_manager import config_manager
 
@@ -454,14 +450,13 @@ def _resolve_capex_settings(capex: dict[str, Any] | None = None) -> dict[str, An
 def calculate_tco_audit(
     listing: Any,
     market_median_m2: float | None = None,
-    capex: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     _ = market_median_m2
-    capex_cfg = _resolve_capex_settings(capex)
-    developer_rate = float(capex_cfg.get("developer_rate", 1800.0) or 1800.0)
-    renovation_rate = float(capex_cfg.get("renovation_rate", 2200.0) or 2200.0)
-    agency_fee_pct = float(capex_cfg.get("agency_fee_pct", 2.0) or 0.0)
-    pcc_exempt = bool(capex_cfg.get("pcc_exempt_first_home", False))
+    capex_cfg = _resolve_capex_settings()
+    developer_rate = float(capex_cfg["developer_rate"])
+    renovation_rate = float(capex_cfg["renovation_rate"])
+    agency_fee_pct = float(capex_cfg["agency_fee_pct"])
+    pcc_exempt = bool(capex_cfg["pcc_exempt_first_home"])
 
     price = float(_prop(listing, "price", 0.0) or 0.0)
     area = float(_prop(listing, "area_home", 0.0) or _prop(listing, "area_plot", 0.0) or 100.0)

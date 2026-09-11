@@ -216,6 +216,7 @@ class ScrapersSettings(BaseModel):
 
 
 class SchedulerSettings(BaseModel):
+    enabled: bool = True
     interval_minutes: int = 20
     night_mode: bool = True
     night_interval_minutes: int = 60
@@ -457,6 +458,8 @@ class SearchConfig(BaseModel):
     llm_analysis_enabled: bool = Field(default_factory=lambda: settings.USE_LLM_ANALYSIS)
     llm_provider: str = Field(default="auto")
     ollama_model: str = Field(default_factory=lambda: settings.OLLAMA_MODEL)
+    ollama_base_url: str = Field(default_factory=lambda: settings.OLLAMA_BASE_URL)
+    ollama_timeout_seconds: float = 180.0
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
     capex: CapexSettings = Field(default_factory=CapexSettings)
 
@@ -471,6 +474,8 @@ class SearchConfig(BaseModel):
                 "llm_analysis_enabled",
                 "llm_provider",
                 "ollama_model",
+                "ollama_base_url",
+                "ollama_timeout_seconds",
                 "openrouter_model",
                 "capex",
             )
@@ -633,6 +638,13 @@ class ConfigManager:
             current_dict["llm_provider"] = str(updates["llm_provider"]).strip().lower()
         if "ollama_model" in updates and updates["ollama_model"]:
             current_dict["ollama_model"] = str(updates["ollama_model"]).strip()
+        if "ollama_base_url" in updates and updates["ollama_base_url"]:
+            current_dict["ollama_base_url"] = str(updates["ollama_base_url"]).strip().rstrip("/")
+        if "ollama_timeout_seconds" in updates and updates["ollama_timeout_seconds"]:
+            try:
+                current_dict["ollama_timeout_seconds"] = max(10.0, float(updates["ollama_timeout_seconds"]))
+            except (TypeError, ValueError):
+                pass
         if "openrouter_model" in updates and updates["openrouter_model"]:
             current_dict["openrouter_model"] = str(updates["openrouter_model"]).strip()
 
@@ -649,6 +661,8 @@ class ConfigManager:
                 "llm_analysis_enabled",
                 "llm_provider",
                 "ollama_model",
+                "ollama_base_url",
+                "ollama_timeout_seconds",
                 "openrouter_model",
             )
         }

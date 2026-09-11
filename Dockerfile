@@ -34,10 +34,10 @@ RUN groupadd -r appuser && useradd -r -m -d /home/appuser -g appuser appuser
 COPY --from=builder --chown=appuser:appuser /app/.venv /app/.venv
 COPY --chown=appuser:appuser . /app
 
-# Ensure appuser owns runtime directories with full read/write permissions
+# Ensure appuser owns runtime directories (least privilege: 755, no 777)
 RUN mkdir -p /app/data /app/logs \
     && chown -R appuser:appuser /app /home/appuser \
-    && chmod -R 777 /app/data /app/logs
+    && chmod -R 755 /app/data /app/logs
 
 USER appuser
 

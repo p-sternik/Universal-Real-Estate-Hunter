@@ -15,8 +15,8 @@ from src.models.enums import (
 )
 from src.models.listing import FilterResult, ListingSchema
 
-from .fingerprint import extract_street_token, generate_property_fingerprint
-from .llm_analyzer import LLMAnalyzer
+from .fingerprint import compute_desc_hash, estimate_llm_tokens, extract_street_token, generate_property_fingerprint
+from .llm_analyzer import PROMPT_VERSION, LLMAnalyzer, estimate_tokens, load_prompt_template
 from .stage1_hard_rules import Stage1Filter
 from .stage2_semantic import Stage2SemanticFilter
 
@@ -34,6 +34,28 @@ class QualificationEngine:
         self.stage2 = Stage2SemanticFilter()
         self.llm = LLMAnalyzer(enabled=llm_enabled)
         self.llm_calls = 0
+        self.llm_successes = 0
+        self.llm_failures = 0
+        # Reason the LLM was skipped for the most recently evaluated listing:
+        # None (ran or skipped via caller cache) | "provider_error".
+        # No per-cycle budget: every listing that passes Stage I+II is analyzed.
+        self.last_skip_reason: str | None = None
+        # Metadata of the last successful LLM call (model/prompt version/raw JSON).
+        self.last_llm_model: str | None = None
+        self.last_llm_prompt_version: str | None = None
+        self.last_llm_json: dict[str, Any] | None = None
+
+    def reset_llm_counters(self) -> None:
+        self.llm_calls = 0
+        self.llm_successes = 0
+        self.llm_failures = 0
+        self.last_skip_reason = None
+
+    @staticmethod
+    def estimate_tokens(text: str | None) -> int:
+        from .fingerprint import estimate_llm_tokens
+
+        return estimate_llm_tokens(text)
 
     async def evaluate_listing(
         self,
@@ -44,6 +66,7 @@ class QualificationEngine:
         """
         Runs the multi-stage qualification pipeline on a single listing.
         """
+        self.last_skip_reason = None
         p = profile
         if not p and getattr(listing, "profile_name", None):
             from src.services.config_manager import config_manager
@@ -142,7 +165,8 @@ class QualificationEngine:
         is_borderline = bool(borderline_reasons) or finish_only_borderline
 
         # Step 3: Optional LLM Enrichment (only for listings that passed Stage II or
-        # are borderline — never for definitive rejections)
+        # are borderline — never for definitive rejections; no per-cycle budget,
+        # every eligible listing is analyzed)
         ai_summary = None
         ai_verdict = None
         worth_interest = None
@@ -162,6 +186,22 @@ class QualificationEngine:
             t_llm_start = time.perf_counter()
             self.llm_calls += 1
             llm_insights = await self.llm.analyze_description(listing)
+            if llm_insights:
+                self.llm_successes += 1
+            else:
+                self.llm_failures += 1
+                self.last_skip_reason = "provider_error"
+                logger.warning(
+                    f"🤖 [AI Audit] Provider nie zwrócił analizy dla: '{listing.title[:45]}' "
+                    f"(sprawdź klucz API / Ollama; licznik prób: {self.llm_calls})"
+                )
+            if llm_insights:
+                llm_meta = getattr(self.llm, "last_model", None)
+                llm_pv = getattr(self.llm, "last_prompt_version", None)
+                llm_raw = getattr(self.llm, "last_result_json", None)
+                self.last_llm_model = str(llm_meta) if llm_meta else None
+                self.last_llm_prompt_version = str(llm_pv) if llm_pv else None
+                self.last_llm_json = dict(llm_raw) if isinstance(llm_raw, dict) else dict(llm_insights)
             t_llm_sec = time.perf_counter() - t_llm_start
             if llm_insights:
                 v_tag = (
@@ -459,4 +499,9 @@ __all__ = [
     "QualificationEngine",
     "generate_property_fingerprint",
     "extract_street_token",
+    "compute_desc_hash",
+    "estimate_llm_tokens",
+    "PROMPT_VERSION",
+    "estimate_tokens",
+    "load_prompt_template",
 ]

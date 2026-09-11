@@ -117,9 +117,9 @@ markers = [
 source = ["src"]
 
 [tool.coverage.report]
-fail_under = 55
+fail_under = 66
 show_missing = true
-skip_covered = true
+skip_covered = false
 exclude_lines = [
     "pragma: no cover",
     "if TYPE_CHECKING:",
@@ -127,11 +127,17 @@ exclude_lines = [
     "raise NotImplementedError",
 ]
 
-# Mypy configuration
+# Mypy configuration (strict flags opt-in per module; global strict broke 90+ legacy
+# untyped defs — re-enable incrementally instead of blocking the gate)
 [tool.mypy]
 python_version = "3.11"
 ignore_missing_imports = true
 files = ["src", "main.py"]
+warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+module = ["src.filters.llm_analyzer", "src.filters.*", "src.services.pipeline", "src.services.geocoder"]
+disallow_untyped_defs = true
 
 # Bandit security linter configuration
 [tool.bandit]

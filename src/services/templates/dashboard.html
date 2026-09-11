@@ -13,9 +13,9 @@
 
 <body class="mode-split tablet-pane-list">
 
-    <!-- ===== TOPBAR: single integrated header ===== -->
+    <!-- ===== TOPBAR: single integrated header (RWD: icon-only <640px) ===== -->
     <header class="topbar">
-        <div class="topbar-brand">
+        <div class="topbar-brand" title="Universal Real Estate Hunter">
             <div class="brand-logo" aria-hidden="true">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M4 21V5a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v16"></path>
@@ -57,7 +57,7 @@
         </div>
 
         <div class="topbar-actions">
-            <button class="btn btn-icon" onclick="fetchListings()" title="Odśwież dane">
+            <button class="btn btn-icon topbar-icon-btn" onclick="fetchListings()" title="Odśwież dane" aria-label="Odśwież dane">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path>
                     <path d="M21 3v5h-5"></path>
@@ -65,14 +65,14 @@
                     <path d="M3 21v-5h5"></path>
                 </svg>
             </button>
-            <button class="btn" onclick="openConfigModal()">
+            <button class="btn topbar-icon-btn" onclick="openConfigModal()" title="Ustawienia" aria-label="Ustawienia">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path>
                     <circle cx="12" cy="12" r="3"></circle>
                 </svg>
                 <span class="btn-label">Ustawienia</span>
             </button>
-            <button class="btn btn-primary" id="btnScrape" onclick="triggerScrape()">
+            <button class="btn btn-primary topbar-sync-btn" id="btnScrape" onclick="triggerScrape()">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                     <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
                     <path d="M3 5v14a9 3 0 0 0 18 0V5"></path>
@@ -85,7 +85,7 @@
 
     <div class="container">
 
-        <!-- ===== TOOLBAR: faceted search + segmented view + sort ===== -->
+        <!-- ===== TOOLBAR: faceted search + segmented view + sort (RWD) ===== -->
         <section class="toolbar">
             <div class="faceted-search">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -93,23 +93,8 @@
                     <path d="m21 21-4.35-4.35"></path>
                 </svg>
                 <div id="filterTokens"></div>
-                <input type="text" id="searchInput" placeholder="Szukaj: ulica, dzielnica, cechy (np. Słocina, pompa ciepła)…" oninput="debouncedApplyFilters()">
-                <kbd class="kbd-badge">Ctrl+K</kbd>
-                <button class="btn btn-sm filters-btn" id="btnOpenFilters" onclick="toggleFiltersPopover(event)">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M4 21v-7"></path>
-                        <path d="M4 10V3"></path>
-                        <path d="M12 21v-9"></path>
-                        <path d="M12 8V3"></path>
-                        <path d="M20 21v-5"></path>
-                        <path d="M20 12V3"></path>
-                        <path d="M2 14h4"></path>
-                        <path d="M10 8h4"></path>
-                        <path d="M18 16h4"></path>
-                    </svg>
-                    Wszystkie filtry
-                    <span class="filters-count num" id="activeFilterCount"></span>
-                </button>
+                <input type="text" id="searchInput" placeholder="Szukaj: ulica, dzielnica, cechy (np. Słocina, pompa ciepła)…" oninput="debouncedApplyFilters()" aria-label="Szukaj ofert">
+                <kbd class="kbd-badge" aria-hidden="true">Ctrl+K</kbd>
             </div>
 
             <div class="segmented-switcher" role="tablist" aria-label="Widok">
@@ -139,17 +124,35 @@
                 </button>
             </div>
 
-            <div class="sort-wrap">
-                <select id="sortSelect" onchange="applyFilters()" aria-label="Sortowanie">
-                    <option value="score_desc">Sortuj: Score (najwyższy)</option>
-                    <option value="price_asc">Cena (od najniższej)</option>
-                    <option value="price_desc">Cena (od najwyższej)</option>
-                    <option value="area_desc">Metraż (od największego)</option>
-                    <option value="price_m2_asc">Cena / m² (najniższa)</option>
-                    <option value="created_desc">Data dodania (najnowsze)</option>
-                    <option value="deal_desc">Największe okazje (% poniżej mediany)</option>
-                    <option value="drop_desc">Największe obniżki cen (PLN)</option>
-                </select>
+            <div class="toolbar-controls">
+                <button class="btn btn-sm filters-btn" id="btnOpenFilters" onclick="toggleFiltersPopover(event)" aria-haspopup="dialog">
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M4 21v-7"></path>
+                        <path d="M4 10V3"></path>
+                        <path d="M12 21v-9"></path>
+                        <path d="M12 8V3"></path>
+                        <path d="M20 21v-5"></path>
+                        <path d="M20 12V3"></path>
+                        <path d="M2 14h4"></path>
+                        <path d="M10 8h4"></path>
+                        <path d="M18 16h4"></path>
+                    </svg>
+                    Wszystkie filtry
+                    <span class="filters-count num" id="activeFilterCount"></span>
+                </button>
+                <div class="sort-wrap">
+                    <select id="sortSelect" onchange="applyFilters()" aria-label="Sortowanie">
+                        <option value="score_desc">Sortuj: Score (najwyższy)</option>
+                        <option value="price_asc">Cena (od najniższej)</option>
+                        <option value="price_desc">Cena (od najwyższej)</option>
+                        <option value="area_desc">Metraż (od największego)</option>
+                        <option value="price_m2_asc">Cena / m² (najniższa)</option>
+                        <option value="created_desc">Data dodania (najnowsze)</option>
+                        <option value="created_asc">Data dodania (najstarsze)</option>
+                        <option value="deal_desc">Największe okazje (% poniżej mediany)</option>
+                        <option value="drop_desc">Największe obniżki cen (PLN)</option>
+                    </select>
+                </div>
             </div>
 
         <!-- ===== FILTERS POPOVER / BOTTOM SHEET ===== -->
@@ -271,24 +274,24 @@
         </div>
         </section>
 
-        <!-- ===== SCRAPE PROGRESS STRIP ===== -->
+        <!-- ===== SCRAPE PROGRESS STRIP (RWD: collapsible + bottom-sheet on mobile) ===== -->
         <section id="progressPanel" class="progress-strip" style="display:none;">
-            <div class="progress-strip-row">
-                <span class="live-dot"></span>
+            <div class="progress-strip-row" id="progressStripRow" onclick="toggleProgressPanel(event)" role="button" tabindex="0" aria-label="Zwiń lub rozwiń dziennik synchronizacji" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();toggleProgressPanel(event);}">
+                <span class="live-dot" aria-hidden="true"></span>
                 <span id="progStep" class="progress-step">Pobieranie ofert…</span>
                 <span id="progPortal" class="progress-portal"></span>
                 <span class="progress-spacer"></span>
-                <button id="btnCancelScrape" onclick="cancelScrape()" class="btn-cancel-scrape" style="display:none;" title="Przerwij bieżący cykl scrapingu">
+                <button id="btnCancelScrape" onclick="event.stopPropagation();cancelScrape()" class="btn-cancel-scrape" style="display:none;" title="Przerwij bieżący cykl scrapingu">
                     Zatrzymaj
                 </button>
                 <span id="progPercent" class="progress-pct">0%</span>
-                <button class="btn btn-sm btn-ghost progress-collapse-btn" id="btnCollapseProgress" onclick="toggleProgressPanel()" title="Zwiń / rozwiń szczegóły" aria-expanded="true" aria-controls="progressPanel">
+                <button class="btn btn-sm btn-ghost progress-collapse-btn" id="btnCollapseProgress" onclick="event.stopPropagation();toggleProgressPanel(event)" title="Zwiń / rozwiń szczegóły" aria-expanded="true" aria-controls="progressPanel">
                     <svg id="progressCollapseIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="m18 15-6-6-6 6"></path>
                     </svg>
                 </button>
             </div>
-            <div class="prog-bar-track">
+            <div class="prog-bar-track" aria-hidden="true">
                 <div id="progBar" class="prog-bar-fill"></div>
             </div>
             <div class="prog-metrics">
@@ -377,8 +380,8 @@
         <button id="tglMap" onclick="tabletShow('map')">Pokaż mapę</button>
     </div>
 
-    <!-- ===== MOBILE MAP FAB ===== -->
-    <button class="map-fab" id="mapFab" onclick="toggleMobileMap()" title="Przełącz mapę">
+    <!-- ===== MOBILE MAP FAB (RWD: Lista <-> Pełnoekranowa mapa) ===== -->
+    <button class="map-fab" id="mapFab" onclick="toggleMobileMap()" title="Przełącz: Lista / Mapa" aria-label="Przełącz: Lista / Mapa">
         <svg id="mapFabIconMap" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
             <path d="M14.106 5.553a2 2 0 0 0 1.788 0l3.659-1.83A1 1 0 0 1 21 4.619v12.764a1 1 0 0 1-.553.894l-4.553 2.277a2 2 0 0 1-1.788 0l-4.212-2.106a2 2 0 0 0-1.788 0l-3.659 1.83A1 1 0 0 1 3 19.381V6.618a1 1 0 0 1 .553-.894l4.553-2.277a2 2 0 0 1 1.788 0z"></path>
             <path d="M15 5.764v15"></path>
@@ -409,7 +412,7 @@
                     <h2 class="config-title">Konfiguracja wyszukiwania i scraperów</h2>
                     <div class="config-subtitle">Zarządzanie profilami (domy, mieszkania, działki) oraz portalami</div>
                 </div>
-                <button class="btn btn-ghost btn-sm" onclick="closeConfigModal(null)" aria-label="Zamknij">
+                <button class="btn btn-ghost btn-sm config-close-btn" onclick="closeConfigModal(null)" aria-label="Zamknij">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                         <path d="M18 6 6 18"></path>
                         <path d="m6 6 12 12"></path>
@@ -429,26 +432,34 @@
 
                 <!-- TAB 1: PROFILES -->
                 <div id="configTabProfiles">
-                    <div class="portal-row" style="padding-top:0;">
-                        <div class="portal-info" style="flex:1;gap:8px;">
-                            <label style="font-size:11px;font-weight:600;color:var(--text-muted);white-space:nowrap;">Profil:</label>
-                            <select id="cfgProfileSelect" onchange="onProfileSelectChange(this.value)" style="flex:1;background:var(--input);border:1px solid var(--border);border-radius:var(--r-sm);color:var(--text-primary);padding:6px 9px;font-size:12px;"></select>
+                    <div class="config-profile-bar">
+                        <div class="config-profile-select-wrap">
+                            <label for="cfgProfileSelect" class="config-profile-label">Profil:</label>
+                            <select id="cfgProfileSelect" onchange="onProfileSelectChange(this.value)" class="config-profile-select"></select>
                         </div>
-                        <button type="button" class="btn btn-sm" onclick="duplicateCurrentProfile()" title="Duplikuj bieżący profil" style="display:inline-flex;align-items:center;gap:4px;">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
-                            Duplikuj
-                        </button>
-                        <button type="button" class="btn btn-sm" onclick="createNewProfile()">+ Nowy profil</button>
-                        <button type="button" class="btn btn-sm btn-danger" id="btnDeleteProfile" onclick="deleteCurrentProfile()" title="Usuń profil">
-                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <path d="M3 6h18"></path>
-                                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                                <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                            </svg>
-                        </button>
+                        <div class="config-profile-actions">
+                            <button type="button" class="btn btn-sm config-profile-btn" onclick="createNewProfile()">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                    <line x1="12" y1="5" x2="12" y2="19"></line>
+                                    <line x1="5" y1="12" x2="19" y2="12"></line>
+                                </svg>
+                                <span>Nowy profil</span>
+                            </button>
+                            <button type="button" class="btn btn-sm config-profile-btn" onclick="duplicateCurrentProfile()" title="Duplikuj bieżący profil">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                                </svg>
+                                <span>Duplikuj</span>
+                            </button>
+                            <button type="button" class="btn btn-sm btn-danger config-profile-delete" id="btnDeleteProfile" onclick="deleteCurrentProfile()" title="Usuń profil" aria-label="Usuń profil">
+                                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                    <path d="M3 6h18"></path>
+                                    <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                                    <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
 
                     <div class="config-row2">
@@ -805,7 +816,17 @@
                         Ustawienia automatycznego przeszukiwania portali w trybie ciągłym (daemon <code>python main.py run</code>).
                     </div>
 
-                    <div class="config-field">
+                    <div style="margin:8px 0 14px 0;">
+                        <label class="check-item">
+                            <input type="checkbox" id="cfgSchedulerEnabled" checked style="width:auto;" onchange="toggleSchedulerInputs(this.checked)">
+                            <span><strong>Włącz harmonogram (daemon)</strong></span>
+                        </label>
+                        <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
+                            Po wyłączeniu <code>python main.py run</code> nie uruchamia cykli (ręczna synchronizacja nadal działa).
+                        </div>
+                    </div>
+
+                    <div class="config-field" id="dayIntervalField">
                         <label for="cfgIntervalMinutes">Interwał przeszukiwania w dzień (minuty):</label>
                         <select id="cfgIntervalMinutes">
                             <option value="10">Co 10 minut (agresywny / gorący rynek)</option>
@@ -815,6 +836,9 @@
                             <option value="45">Co 45 minut</option>
                             <option value="60">Co 60 minut (1 godzina)</option>
                             <option value="120">Co 2 godziny</option>
+                            <option value="360">Co 6 godzin</option>
+                            <option value="720">Co 12 godzin</option>
+                            <option value="1440">Co 24 godziny</option>
                         </select>
                     </div>
 
@@ -846,6 +870,8 @@
                             <option value="120">Co 2 godziny</option>
                             <option value="180">Co 3 godziny</option>
                             <option value="360">Co 6 godzin</option>
+                            <option value="720">Co 12 godzin</option>
+                            <option value="1440">Co 24 godziny</option>
                         </select>
                     </div>
                 </div>
@@ -881,6 +907,19 @@
                     </div>
 
                     <div class="config-field" style="margin-top:14px;">
+                        <div class="config-row2">
+                            <div class="config-field">
+                                <label for="cfgOllamaBaseUrl">Adres Ollama (Base URL):</label>
+                                <input type="text" id="cfgOllamaBaseUrl" placeholder="http://localhost:11434" style="width:100%;">
+                            </div>
+                            <div class="config-field">
+                                <label for="cfgOllamaTimeout">Timeout generowania (s):</label>
+                                <input type="number" id="cfgOllamaTimeout" placeholder="180" step="10" min="10" style="width:100%;">
+                            </div>
+                        </div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;">
+                            W Dockerze użyj <code>http://host.docker.internal:11434</code>. Większe modele mogą potrzebować dłuższego timeoutu.
+                        </div>
                         <label for="cfgOllamaModelSelect">Model dla lokalnego Ollama:</label>
                         <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
                             <select id="cfgOllamaModelSelect" style="flex:1;" onchange="onOllamaSelectChange(this.value)">
@@ -890,11 +929,13 @@
                                 <option value="custom">Inny / wpisany ręcznie...</option>
                             </select>
                         </div>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input type="text" id="cfgOllamaModel" placeholder="llama3.1:8b" style="flex:1;" oninput="onOllamaInputCustom(this.value)">
-                            <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('llama3.1:8b')">llama3.1:8b</button>
-                            <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:7b')">qwen2.5:7b</button>
-                            <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:3b')">qwen2.5:3b</button>
+                        <div class="config-input-chips-group">
+                            <input type="text" id="cfgOllamaModel" placeholder="llama3.1:8b" class="config-chips-input" oninput="onOllamaInputCustom(this.value)">
+                            <div class="config-chips-btns">
+                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('llama3.1:8b')">llama3.1:8b</button>
+                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:7b')">qwen2.5:7b</button>
+                                <button type="button" class="btn btn-sm" onclick="setOllamaModelChip('qwen2.5:3b')">qwen2.5:3b</button>
+                            </div>
                         </div>
                         <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
                             Wybierz z listy wykrytych modeli lub wpisz dowolny model pobrany przez <code>ollama pull</code>.
@@ -903,11 +944,13 @@
 
                     <div class="config-field" id="openrouterModelField" style="margin-top:14px;">
                         <label for="cfgOpenRouterModel">Model dla OpenRouter (chmura):</label>
-                        <div style="display:flex;gap:8px;align-items:center;">
-                            <input type="text" id="cfgOpenRouterModel" placeholder="google/gemini-2.5-flash-lite:nitro" style="flex:1;">
-                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('google/gemini-2.5-flash-lite:nitro')">gemini-flash-lite</button>
-                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('meta-llama/llama-3.3-70b-instruct:free')">llama-3.3-70b:free</button>
-                            <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('deepseek/deepseek-chat')">deepseek-chat</button>
+                        <div class="config-input-chips-group">
+                            <input type="text" id="cfgOpenRouterModel" placeholder="google/gemini-2.5-flash-lite:nitro" class="config-chips-input">
+                            <div class="config-chips-btns">
+                                <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('google/gemini-2.5-flash-lite:nitro')">gemini-flash-lite</button>
+                                <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('meta-llama/llama-3.3-70b-instruct:free')">llama-3.3-70b:free</button>
+                                <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('deepseek/deepseek-chat')">deepseek-chat</button>
+                            </div>
                         </div>
                         <div id="openrouterKeyNotice" style="font-size:11px;color:var(--text-muted);margin-top:4px;">
                             Wpisz identyfikator modelu z OpenRouter. Dostępne gdy w .env skonfigurowano OPENROUTER_API_KEY.
@@ -948,32 +991,39 @@
             </div>
 
             <div class="config-actions">
-                <button class="btn btn-danger" onclick="resetDatabaseData()">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M3 6h18"></path>
-                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                        <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                    Resetuj bazę danych
-                </button>
-                <span class="spacer"></span>
-                <button class="btn" onclick="closeConfigModal(null)">Anuluj</button>
-                <button class="btn" onclick="saveConfiguration(false)">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
-                        <path d="M17 21v-8H7v8"></path>
-                        <path d="M7 3v5h8"></path>
-                    </svg>
-                    Zapisz konfigurację
-                </button>
-                <button class="btn btn-primary" onclick="saveConfiguration(true)">
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
-                        <path d="M3 5v14a9 3 0 0 0 18 0V5"></path>
-                        <path d="M3 12a9 3 0 0 0 18 0"></path>
-                    </svg>
-                    Zapisz i synchronizuj
-                </button>
+                <div class="config-actions-danger">
+                    <button type="button" class="btn btn-danger btn-reset-db" onclick="resetDatabaseData()">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                        <span>Resetuj bazę danych</span>
+                    </button>
+                </div>
+                <div class="config-actions-main">
+                    <div class="config-actions-secondary">
+                        <button type="button" class="btn btn-cancel" onclick="closeConfigModal(null)">
+                            Anuluj
+                        </button>
+                        <button type="button" class="btn btn-save-cfg" onclick="saveConfiguration(false)">
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"></path>
+                                <path d="M17 21v-8H7v8"></path>
+                                <path d="M7 3v5h8"></path>
+                            </svg>
+                            <span>Zapisz konfigurację</span>
+                        </button>
+                    </div>
+                    <button type="button" class="btn btn-primary btn-save-sync" onclick="saveConfiguration(true)">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <ellipse cx="12" cy="5" rx="9" ry="3"></ellipse>
+                            <path d="M3 5v14a9 3 0 0 0 18 0V5"></path>
+                            <path d="M3 12a9 3 0 0 0 18 0"></path>
+                        </svg>
+                        <span>Zapisz i synchronizuj</span>
+                    </button>
+                </div>
             </div>
         </div>
     </div>
@@ -1074,20 +1124,6 @@
                         </button>
                     </h3>
                     <ul id="aiQuestionsList" class="questions-list"></ul>
-                </section>
-
-                <!-- CAPEX -->
-                <section class="drawer-section">
-                    <h3 class="drawer-section-title">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <rect x="2" y="5" width="20" height="14" rx="2"></rect>
-                            <path d="M2 10h20"></path>
-                        </svg>
-                        Struktura kosztów całkowitych (CAPEX)
-                    </h3>
-                    <table class="capex-table" id="aiBudgetTable">
-                        <tbody id="aiBudgetBody"></tbody>
-                    </table>
                 </section>
 
                 <!-- Argumentacja cenowa -->

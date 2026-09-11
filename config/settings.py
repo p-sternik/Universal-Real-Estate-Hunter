@@ -56,16 +56,13 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # Database
-    DATABASE_URL: str = "sqlite+aiosqlite:///listings.db"
+    # Database (kept under data/ to avoid committing live DB from repo root)
+    DATABASE_URL: str = "sqlite+aiosqlite:///data/listings.db"
 
     # Notifiers
     DISCORD_WEBHOOK_URL: str | None = None
     TELEGRAM_BOT_TOKEN: str | None = None
     TELEGRAM_CHAT_ID: str | None = None
-
-    # Scheduler
-    CHECK_INTERVAL_MINUTES: int = 20
 
     # Stage I: Numerical thresholds
     MAX_PRICE: float = 1_300_000.0
@@ -94,6 +91,9 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     OPENROUTER_MODEL: str = "nex-agi/nex-n2.5-mini:free"
     LLM_MAX_CALLS_PER_MINUTE: int = 15
+    LLM_PROMPT_VERSION: str = "v1.0"
+    MEDIANS_CACHE_TTL_MINUTES: int = 30
+    GEOCODE_BATCH_SIZE: int = 8
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"
     OPENAI_BASE_URL: str | None = None

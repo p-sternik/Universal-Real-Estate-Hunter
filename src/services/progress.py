@@ -114,8 +114,6 @@ class ProgressTracker:
         # sequential listing analysis 60-95, wrap-up 95-100.
         self._parallel_total = 1
         self._parallel_done = 0
-        self._proc_base: float = 60.0
-        self._proc_share: float = 35.0
 
     def _sync_shared_status(self) -> None:
         try:
@@ -137,8 +135,6 @@ class ProgressTracker:
         self._session_started_at = datetime.now(UTC)
         self._parallel_total = max(total_portals, 1)
         self._parallel_done = 0
-        self._proc_base = 60.0
-        self._proc_share = 35.0 / self._parallel_total
         self.add_log("🚀 Rozpoczęto cykl scrapingu i analizy ofert.")
         self._sync_shared_status()
 
@@ -165,8 +161,7 @@ class ProgressTracker:
                 completed=self.percentage,
             )
 
-    def update_portal(self, portal_name: str, current_page: int, total_pages: int, percent: int):
-        _ = percent  # historical sequential offset; parallel scrape uses record_portal_done instead
+    def update_portal(self, portal_name: str, current_page: int, total_pages: int):
         self.current_portal = portal_name
         self.current_page = current_page
         self.total_pages = total_pages
@@ -215,27 +210,12 @@ class ProgressTracker:
         self._refresh_rich()
         self._sync_shared_status()
 
-    def begin_processing_step(self, step_idx: int, total_steps: int) -> None:
-        """Anchor the analysis window (60-95) for one sequential batch."""
-        total = max(total_steps, 1)
-        self._proc_base = 60.0 + ((step_idx - 1) / total) * 35.0
-        self._proc_share = 35.0 / total
-        self._refresh_rich()
-        self._sync_shared_status()
-
-    def finish_processing_step(self, step_idx: int, total_steps: int) -> None:
-        """Snap to the end of one sequential batch (never backwards)."""
-        total = max(total_steps, 1)
-        end = 60.0 + (step_idx / total) * 35.0
-        self.percentage = int(min(95, max(self.percentage, end)))
-        self._refresh_rich()
-        self._sync_shared_status()
-
-    def update_processing(self, done: int, total: int) -> None:
-        """Progress during qualification/analysis of scraped listings."""
+    def set_processing_fraction(self, step_idx: int, total_steps: int, done: int = 0, total: int = 1) -> None:
+        """Single analysis-window (60-95) updater: batch position plus in-batch fraction, never backwards."""
+        steps = max(total_steps, 1)
         frac = min(1.0, max(0.0, done / max(total, 1)))
         self.current_step = f"Analiza ofert ({self.current_portal}): {done}/{total}..."
-        self.percentage = int(min(95, max(self.percentage, self._proc_base + frac * self._proc_share)))
+        self.percentage = int(min(95, max(self.percentage, 60.0 + ((step_idx - 1 + frac) / steps) * 35.0)))
         self._refresh_rich()
         self._sync_shared_status()
 
@@ -306,9 +286,16 @@ class ProgressTracker:
         self.percentage = 100
         self.current_step = "Zakończono pomyślnie!"
         if summary.get("llm_enabled", True):
+            calls = summary.get("llm_calls", 0)
+            ok = summary.get("llm_successes", calls - summary.get("llm_failures", 0))
+            failed = summary.get("llm_failures", summary.get("llm_failed", 0))
+            cache_skipped = summary.get("llm_skipped", 0) - failed
             ai_part = (
-                f", AI LLM: {summary.get('llm_calls', 0)} analiz "
-                f"(pominięto {summary.get('llm_skipped', 0)} — opis bez zmian lub reguły)"
+                f", AI LLM: {calls} prób ({ok} udanych"
+                + (f", {failed} nieudanych" if failed else "")
+                + f", pominięto {summary.get('llm_skipped', 0)}"
+                + (f" — cache/reguły: {cache_skipped}" if cache_skipped > 0 else "")
+                + ")"
             )
         else:
             ai_part = ", AI LLM: wyłączona w konfiguracji"

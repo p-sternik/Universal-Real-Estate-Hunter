@@ -84,8 +84,13 @@
         }
 
         function toggleMobileMap() {
-            document.body.classList.toggle('mobile-map-open');
+            const open = document.body.classList.toggle('mobile-map-open');
             syncMapFab();
+            const fab = document.getElementById('mapFab');
+            if (fab) {
+                fab.setAttribute('aria-label', open ? 'Pokaż listę ofert' : 'Pokaż pełnoekranową mapę');
+                fab.setAttribute('aria-pressed', open ? 'true' : 'false');
+            }
             setTimeout(() => {
                 if (map) map.invalidateSize();
             }, 250);
@@ -97,6 +102,11 @@
             const iconClose = document.getElementById('mapFabIconClose');
             if (iconMap) iconMap.style.display = open ? 'none' : '';
             if (iconClose) iconClose.style.display = open ? '' : 'none';
+            const fab = document.getElementById('mapFab');
+            if (fab) {
+                fab.setAttribute('aria-label', open ? 'Pokaż listę ofert' : 'Pokaż pełnoekranową mapę');
+                fab.setAttribute('aria-pressed', open ? 'true' : 'false');
+            }
         }
 
         // ========================
@@ -339,13 +349,30 @@
             ];
             tabs.forEach(([btnId, tabId, name]) => {
                 const btn = document.getElementById(btnId);
-                if (btn) btn.classList.toggle('active', tab === name);
+                if (btn) {
+                    btn.classList.toggle('active', tab === name);
+                    if (tab === name) {
+                        btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+                    }
+                }
                 const tabEl = document.getElementById(tabId);
                 if (tabEl) tabEl.style.display = (tab === name) ? 'block' : 'none';
             });
             if (tab === 'ai' && typeof checkLlmStatusIfEmpty === 'function') {
                 checkLlmStatusIfEmpty();
             }
+        }
+
+        function toggleSchedulerInputs(enabled) {
+            const day = document.getElementById('dayIntervalField');
+            const nightRow = document.getElementById('cfgNightMode')?.closest('div');
+            const row = document.getElementById('nightSettingsRow');
+            const interval = document.getElementById('nightIntervalField');
+            [day, nightRow, row, interval].forEach(el => {
+                if (!el) return;
+                el.style.opacity = enabled ? '1' : '0.4';
+                el.style.pointerEvents = enabled ? 'auto' : 'none';
+            });
         }
 
         function toggleNightModeInputs(enabled) {
@@ -681,6 +708,11 @@
             document.getElementById('cfgRequestDelay').value = sc.request_delay ?? 1.0;
 
             const sched = activeConfig.scheduler || {};
+            if (document.getElementById('cfgSchedulerEnabled')) {
+                const schedOn = sched.enabled !== false;
+                document.getElementById('cfgSchedulerEnabled').checked = schedOn;
+                toggleSchedulerInputs(schedOn);
+            }
             if (document.getElementById('cfgIntervalMinutes')) {
                 document.getElementById('cfgIntervalMinutes').value = sched.interval_minutes || 20;
             }
@@ -711,6 +743,12 @@
                 document.getElementById('cfgOllamaModel').value = olModel;
                 if (typeof syncOllamaSelectWithInput === 'function') syncOllamaSelectWithInput(olModel);
             }
+            if (document.getElementById('cfgOllamaBaseUrl')) {
+                document.getElementById('cfgOllamaBaseUrl').value = activeConfig.ollama_base_url || 'http://localhost:11434';
+            }
+            if (document.getElementById('cfgOllamaTimeout')) {
+                document.getElementById('cfgOllamaTimeout').value = activeConfig.ollama_timeout_seconds ?? 180;
+            }
             if (document.getElementById('cfgOpenRouterModel')) {
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
             }
@@ -736,12 +774,14 @@
             loadProfileIntoForm(currentProfileId);
 
             document.getElementById('configModal').classList.add('open');
+            document.body.classList.add('config-open');
             closeProfileMenu();
         }
 
         function closeConfigModal(e) {
             if (!e || e.target.id === 'configModal' || e === null) {
                 document.getElementById('configModal').classList.remove('open');
+                document.body.classList.remove('config-open');
             }
         }
 
@@ -773,6 +813,7 @@
             };
 
             const schedulerPayload = {
+                enabled: document.getElementById('cfgSchedulerEnabled')?.checked ?? true,
                 interval_minutes: parseInt(document.getElementById('cfgIntervalMinutes')?.value) || 20,
                 night_mode: document.getElementById('cfgNightMode')?.checked ?? true,
                 quiet_hours_start: document.getElementById('cfgQuietStart')?.value || '22:00',
@@ -795,6 +836,8 @@
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
                 llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
                 ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b',
+                ollama_base_url: document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || 'http://localhost:11434',
+                ollama_timeout_seconds: parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || 180,
                 openrouter_model: document.getElementById('cfgOpenRouterModel')?.value?.trim() || 'google/gemini-2.5-flash-lite:nitro'
             };
 
@@ -802,7 +845,7 @@
                 activeConfig = await Transport.saveConfig(payload);
                 allProfiles = activeConfig.profiles || allProfiles;
                 scrapersConfig = activeConfig.scrapers || scrapersPayload;
-                document.getElementById('configModal').classList.remove('open');
+                closeConfigModal(null);
                 showToast("Zapisano konfigurację");
 
                 await fetchConfig();
@@ -935,10 +978,10 @@
             const total = viewItems.length;
             const favs = viewItems.filter(i => i.user_status === 'FAVORITE').length;
             const toVisit = viewItems.filter(i => i.user_status === 'TO_VISIT').length;
-            const wl = viewItems.filter(i => i.qualification_status === 'QUALIFIED_WHITELIST').length;
-            const qual = viewItems.filter(i => i.is_qualified).length;
-            const rev = viewItems.filter(i => i.qualification_status === 'NEEDS_REVIEW').length;
-            const border = viewItems.filter(i => i.qualification_status === 'NEEDS_REVIEW_BORDERLINE').length;
+            const wl = viewItems.filter(i => i.qualification_status === 'QUALIFIED_WHITELIST' && i.user_status !== 'REJECTED').length;
+            const qual = viewItems.filter(i => i.is_qualified && i.user_status !== 'REJECTED').length;
+            const rev = viewItems.filter(i => i.qualification_status === 'NEEDS_REVIEW' && i.user_status !== 'REJECTED').length;
+            const border = viewItems.filter(i => i.qualification_status === 'NEEDS_REVIEW_BORDERLINE' && i.user_status !== 'REJECTED').length;
             const rej = viewItems.filter(i => i.user_status === 'REJECTED' || i.qualification_status.startsWith('REJECTED')).length;
             const newCnt = viewItems.filter(i => i.is_new_cycle).length;
 
@@ -1028,10 +1071,10 @@
 
                 if (currentFilter === 'CRM_FAVORITE' && item.user_status !== 'FAVORITE') return false;
                 if (currentFilter === 'CRM_TO_VISIT' && item.user_status !== 'TO_VISIT') return false;
-                if (currentFilter === 'QUALIFIED_WHITELIST' && item.qualification_status !== 'QUALIFIED_WHITELIST') return false;
-                if (currentFilter === 'QUALIFIED' && !item.is_qualified) return false;
-                if (currentFilter === 'NEEDS_REVIEW' && item.qualification_status !== 'NEEDS_REVIEW') return false;
-                if (currentFilter === 'NEEDS_REVIEW_BORDERLINE' && item.qualification_status !== 'NEEDS_REVIEW_BORDERLINE') return false;
+                if (currentFilter === 'QUALIFIED_WHITELIST' && (item.qualification_status !== 'QUALIFIED_WHITELIST' || item.user_status === 'REJECTED')) return false;
+                if (currentFilter === 'QUALIFIED' && (!item.is_qualified || item.user_status === 'REJECTED')) return false;
+                if (currentFilter === 'NEEDS_REVIEW' && (item.qualification_status !== 'NEEDS_REVIEW' || item.user_status === 'REJECTED')) return false;
+                if (currentFilter === 'NEEDS_REVIEW_BORDERLINE' && (item.qualification_status !== 'NEEDS_REVIEW_BORDERLINE' || item.user_status === 'REJECTED')) return false;
                 if (currentFilter === 'REJECTED' && item.user_status !== 'REJECTED' && !item.qualification_status.startsWith('REJECTED')) return false;
                 if (currentFilter === 'NEW' && !item.is_new_cycle) return false;
 
@@ -1076,13 +1119,10 @@
                 filtered.sort((a, b) => a.price_per_m2 - b.price_per_m2);
             } else if (sortMode === 'created_desc') {
                 filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            } else if (sortMode === 'created_asc') {
+                filtered.sort((a, b) => new Date(a.created_at || 0) - new Date(b.created_at || 0));
             } else if (sortMode === 'deal_desc') {
-                const devOf = (i) => {
-                    const v = (i.price_deviation_adjusted_pct !== null && i.price_deviation_adjusted_pct !== undefined)
-                        ? i.price_deviation_adjusted_pct
-                        : i.price_deviation_pct;
-                    return (v === null || v === undefined) ? 9999 : v;
-                };
+                const devOf = (i) => (i.price_deviation_adjusted_pct ?? i.price_deviation_pct ?? 9999);
                 filtered.sort((a, b) => devOf(a) - devOf(b));
             } else if (sortMode === 'drop_desc') {
                 filtered.sort((a, b) => (b.price_drop_amount || 0) - (a.price_drop_amount || 0));
@@ -1593,6 +1633,11 @@
             // Delta badges join the main badge in the left topbar group
             let deltaBadge = '';
             let deltaPill = '';
+            const aiQuestions = item.ai_questions;
+            const hasAiAudit = !!(item.ai_summary || (Array.isArray(aiQuestions) ? aiQuestions.length > 0 : aiQuestions));
+            const aiBadge = hasAiAudit
+                ? `<span class="card-badge badge-ai" title="Oferta posiada analizę AI — raport w szczegółach oferty">AI</span>`
+                : '';
             if (item.is_new_cycle) {
                 deltaBadge = `<span class="card-badge badge-new">Nowa</span>`;
                 deltaPill = `<span class="meta-tag tag-exact">Nowa</span>`;
@@ -1664,16 +1709,8 @@
                 ? `${escapeHtml(item.parcel_shape_type)}${item.parcel_aspect_ratio ? ` (1:${item.parcel_aspect_ratio})` : ''}`
                 : '';
             const roadMpzpText = [roadText, mpzpZoneText].filter(Boolean).join(' · ');
-            let gesutText = '';
-            try {
-                const gn = item.gesut_networks;
-                const nets = gn && gn.networks ? gn.networks : (gn && typeof gn === 'object' && !gn.coverage ? gn : null);
-                if (nets && typeof nets === 'object') {
-                    const short = { woda: 'w', kanalizacja: 'k', gaz: 'g', prad: 'e', cieplo: 'c', telekomunikacja: 't' };
-                    const present = Object.keys(short).filter(k => nets[k]);
-                    if (present.length > 0) gesutText = present.map(k => short[k]).join(' · ');
-                }
-            } catch (e) { gesutText = ''; }
+            const gesutNets = item.gesut_networks?.networks ?? {};
+            const gesutText = Object.keys(gesutNets).filter(k => gesutNets[k]).join(' · ');
 
             let specsHtml = '';
             if (cat === 'mieszkanie') {
@@ -1815,6 +1852,7 @@
                         <div class="card-badges-group">
                             <span class="card-badge ${badgeClass}">${badgeLabel}</span>
                             ${deltaBadge}
+                            ${aiBadge}
                         </div>
                         <button type="button" class="card-fav-btn ${item.user_status === 'FAVORITE' ? 'active' : ''}" onclick="event.stopPropagation(); toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">
                             ${item.user_status === 'FAVORITE' ? '★' : '☆'}
@@ -2021,11 +2059,6 @@
             }
 
             let escapedMsg = escapeHtml(msgText);
-            // No emoji in the panel (badges + SVG carry the meaning) — keep tag text like [AI Audit].
-            escapedMsg = escapedMsg
-                .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '')
-                .replace(/\s{2,}/g, ' ')
-                .trim();
             escapedMsg = escapedMsg.replace(/(\d[\d\s,.]*\s*(?:zł|PLN|m²|m2))/g, '<strong>$1</strong>');
 
             return `
@@ -2120,37 +2153,88 @@
 
             if (btnScrape) {
                 if (st.is_running) {
-                    btnScrape.disabled = true;
-                    btnScrape.innerHTML = st.cancel_requested ? 'Zatrzymywanie…' : 'Synchronizacja w toku…';
+                    setScrapeButtonState(st.cancel_requested ? 'stopping' : 'running');
                 } else {
-                    btnScrape.disabled = false;
-                    btnScrape.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg><span class="btn-label">Synchronizuj bazę</span>';
+                    setScrapeButtonState('idle');
                 }
             }
+        }
+
+        const SCRAPE_IDLE_HTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg><span class="btn-label">Synchronizuj bazę</span>';
+        const SCRAPE_RUNNING_HTML = '<span class="spinner-inline" aria-hidden="true"></span><span class="btn-label">Synchronizacja w toku…</span>';
+        const SCRAPE_STOPPING_HTML = '<span class="spinner-inline" aria-hidden="true"></span><span class="btn-label">Zatrzymywanie…</span>';
+
+        function setScrapeButtonState(state) {
+            const btn = document.getElementById('btnScrape');
+            if (!btn) return;
+            btn.classList.toggle('is-running', state !== 'idle');
+            if (state === 'idle') {
+                btn.disabled = false;
+                btn.innerHTML = SCRAPE_IDLE_HTML;
+                btn.setAttribute('aria-label', 'Synchronizuj bazę');
+            } else if (state === 'starting') {
+                btn.disabled = true;
+                btn.innerHTML = SCRAPE_RUNNING_HTML;
+                btn.setAttribute('aria-label', 'Inicjalizacja synchronizacji');
+            } else if (state === 'running') {
+                btn.disabled = true;
+                btn.innerHTML = SCRAPE_RUNNING_HTML;
+                btn.setAttribute('aria-label', 'Synchronizacja w toku');
+            } else if (state === 'stopping') {
+                btn.disabled = true;
+                btn.innerHTML = SCRAPE_STOPPING_HTML;
+                btn.setAttribute('aria-label', 'Zatrzymywanie synchronizacji');
+            }
+        }
+
+        function isMobileViewport() {
+            return window.matchMedia('(max-width: 767px)').matches;
+        }
+
+        function syncProgressSheetState() {
+            const panel = document.getElementById('progressPanel');
+            if (!panel) return;
+            const expandedOnMobile = isMobileViewport() && !panel.classList.contains('collapsed') && panel.style.display !== 'none';
+            document.body.classList.toggle('progress-sheet-open', expandedOnMobile);
+        }
+
+        function applyMobileProgressDefault() {
+            const panel = document.getElementById('progressPanel');
+            if (!panel) return;
+            if (isMobileViewport() && !panel.dataset.userToggled) {
+                panel.classList.add('collapsed');
+                const btn = document.getElementById('btnCollapseProgress');
+                if (btn) btn.setAttribute('aria-expanded', 'false');
+            }
+            syncProgressSheetState();
         }
 
         function toggleProgressPanel() {
             const panel = document.getElementById('progressPanel');
             if (!panel) return;
             const collapsed = panel.classList.toggle('collapsed');
+            panel.dataset.userToggled = '1';
             const btn = document.getElementById('btnCollapseProgress');
             if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-            try { localStorage.setItem('hunter_progress_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+            syncProgressSheetState();
+            if (map) map.invalidateSize();
         }
 
-        function applyProgressCollapsed() {
-            let collapsed = false;
-            try { collapsed = localStorage.getItem('hunter_progress_collapsed') === '1'; } catch (e) {}
-            const panel = document.getElementById('progressPanel');
-            if (panel) panel.classList.toggle('collapsed', collapsed);
-            const btn = document.getElementById('btnCollapseProgress');
-            if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-        }
+        window.addEventListener('resize', () => {
+            syncProgressSheetState();
+        });
+        window.addEventListener('orientationchange', () => {
+            setTimeout(syncProgressSheetState, 250);
+        });
 
         function startScrapeMonitor() {
             if (scrapePollTimer) return;
             const panel = document.getElementById('progressPanel');
-            if (panel) panel.style.display = 'block';
+            if (panel) {
+                panel.style.display = 'block';
+                applyMobileProgressDefault();
+            }
+            if (map) map.invalidateSize();
 
             scrapePollTimer = setInterval(async () => {
                 try {
@@ -2162,11 +2246,7 @@
                         clearInterval(scrapePollTimer);
                         scrapePollTimer = null;
 
-                        const btnScrape = document.getElementById('btnScrape');
-                        if (btnScrape) {
-                            btnScrape.disabled = false;
-                            btnScrape.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg><span class="btn-label">Synchronizuj bazę</span>';
-                        }
+                        setScrapeButtonState('idle');
                         const btnCancel = document.getElementById('btnCancelScrape');
                         if (btnCancel) btnCancel.style.display = 'none';
 
@@ -2188,7 +2268,11 @@
                 const st = await Transport.scrapeStatus();
                 if (st && st.is_running) {
                     const panel = document.getElementById('progressPanel');
-                    if (panel) panel.style.display = 'block';
+                    if (panel) {
+                        panel.style.display = 'block';
+                        applyMobileProgressDefault();
+                    }
+                    if (map) map.invalidateSize();
                     renderScrapeStatus(st);
                     startScrapeMonitor();
                 }
@@ -2198,13 +2282,13 @@
         }
 
         async function triggerScrape() {
-            const btn = document.getElementById('btnScrape');
             const panel = document.getElementById('progressPanel');
-            if (btn) {
-                btn.disabled = true;
-                btn.innerText = "Inicjalizacja…";
+            setScrapeButtonState('starting');
+            if (panel) {
+                panel.style.display = 'block';
+                applyMobileProgressDefault();
             }
-            if (panel) panel.style.display = 'block';
+            if (map) map.invalidateSize();
 
             const curProf = allProfiles.find(p => p.id === selectedProfileId);
             const profName = curProf ? curProf.name : 'Wszystkie profile';
@@ -2215,13 +2299,11 @@
                 if (out.conflict) {
                     showToast("Synchronizacja jest już w toku.");
                 }
+                setScrapeButtonState('running');
                 startScrapeMonitor();
             } catch (err) {
                 showToast("Błąd podczas uruchamiania synchronizacji: " + err);
-                if (btn) {
-                    btn.disabled = false;
-                    btn.innerText = "Synchronizuj bazę";
-                }
+                setScrapeButtonState('idle');
             }
         }
 
@@ -2662,8 +2744,7 @@
                 qList.innerHTML = '<li class="no-data">Brak pytań — uruchom synchronizację z analizą LLM.</li>';
             }
 
-            // CAPEX
-            buildBudgetTable(item);
+            // CAPEX renders once, inside the Due Diligence audit block (renderLandAuditHtml).
 
             // Price adjustment factors
             const negSection = document.getElementById('aiNegotiationSection');
@@ -2775,22 +2856,6 @@
             if (e && e.target && e.target.id !== 'aiModal') return;
             document.getElementById('aiModal').classList.remove('open');
             currentAiItem = null;
-        }
-
-        function buildBudgetTable(item) {
-            // Server-side TCO only (respects Settings → Koszty CAPEX); backend always provides land_audit.
-            const tco = item.land_audit?.tco_audit;
-            const breakdown = (tco && Array.isArray(tco.breakdown)) ? tco.breakdown : [];
-            const rows = breakdown.map(b => `
-                <tr>
-                    <td><strong>${escapeHtml(b.item)}</strong></td>
-                    <td class="amount">${Math.round(b.amount || 0).toLocaleString('pl-PL')} zł</td>
-                    <td class="note">${escapeHtml(b.desc || '')}</td>
-                </tr>
-            `).join('');
-            const total = Math.round((tco && tco.total_acquisition_cost) || item.price || 0).toLocaleString('pl-PL');
-            document.getElementById('aiBudgetBody').innerHTML = rows +
-                `<tr class="total"><td>Suma nakładów kapitałowych (CAPEX)</td><td class="amount">~${total} zł</td><td class="note">Zakup + podatki + opłaty + adaptacja</td></tr>`;
         }
 
         function copyAiQuestions() {
@@ -2979,6 +3044,8 @@
             const requestedModel = ollamaModelInput ? ollamaModelInput.value.trim() : null;
             const requestedOpenRouter = document.getElementById('cfgOpenRouterModel')?.value?.trim() || null;
             const requestedProvider = document.getElementById('cfgLlmProvider')?.value || null;
+            const requestedOllamaUrl = document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
+            const requestedOllamaTimeout = parseFloat(document.getElementById('cfgOllamaTimeout')?.value) || null;
 
             if (btn) btn.disabled = true;
             if (label) label.innerHTML = '<span class="spinner-inline"></span> Testowanie...';
@@ -2989,6 +3056,8 @@
             try {
                 const data = await Transport.testLlm({
                     ollama_model: requestedModel,
+                    ollama_base_url: requestedOllamaUrl,
+                    ollama_timeout_seconds: requestedOllamaTimeout,
                     openrouter_model: requestedOpenRouter,
                     llm_provider: requestedProvider
                 });
@@ -3200,7 +3269,6 @@
         });
 
         window.addEventListener('DOMContentLoaded', async () => {
-            applyProgressCollapsed();
             await fetchConfig();
             const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
             const center = curProf ? getCityCenter(curProf.city) : [50.0375, 22.0047];

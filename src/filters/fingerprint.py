@@ -79,6 +79,28 @@ def extract_street_token(
     return "rzeszow_area"
 
 
+def compute_desc_hash(raw_description: str | None) -> str | None:
+    """Stable hash of normalized description for LLM result caching.
+
+    Normalizes whitespace/case via :func:`normalize_text` so trivial
+    formatting edits do not invalidate the cache.
+    """
+    if not raw_description:
+        return None
+    normalized = normalize_text(raw_description)
+    if not normalized:
+        return None
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:32]
+
+
+def estimate_llm_tokens(text: str | None, head: int = 4000, tail: int = 1500) -> int:
+    """Rough token estimate (~4 chars/token) for the sliced description + prompt overhead."""
+    if not text:
+        return 1500  # prompt template + schema overhead
+    sliced_len = min(len(text), head + tail + 10)
+    return (sliced_len // 4) + 1500
+
+
 def generate_property_fingerprint(
     price: float,
     area_home: float,

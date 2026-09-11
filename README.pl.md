@@ -201,8 +201,7 @@ DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
 TELEGRAM_BOT_TOKEN=123456:ABC-DEF...
 TELEGRAM_CHAT_ID=-100123456789
 
-# Fallback harmonogramu (gdy nie ustawione w search_config.json)
-CHECK_INTERVAL_MINUTES=20
+# Harmonogram jest w search_config.json (edycja z dashboardu)
 
 # Fallback progów Etapu I
 MAX_PRICE=1300000.0
@@ -224,7 +223,7 @@ OLLAMA_MODEL=llama3.1:8b
 
 # Sieć i scraping
 PROXY_URL=
-REQUEST_TIMEOUT_SECONDS=20
+REQUEST_TIMEOUT_SECONDS=25
 MAX_RETRIES=3
 FETCH_DETAILS=true
 ```

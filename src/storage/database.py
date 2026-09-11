@@ -72,12 +72,47 @@ async def safe_commit(session: AsyncSession, max_retries: int = 7, initial_backo
                     raise
 
 
+def _migrate_legacy_root_db(db_path_str: str) -> str:
+    """One-time move of the historical ``listings.db`` from repo root to ``data/``.
+
+    Returns the (possibly unchanged) resolved DB path string.
+    """
+    try:
+        p_new = Path(db_path_str)
+        if not p_new.is_absolute():
+            p_new = Path.cwd() / p_new
+        if p_new.parent.name == "data" and p_new.name == "listings.db":
+            legacy = p_new.parent.parent / "listings.db"
+            if legacy.exists() and not p_new.exists():
+                p_new.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    legacy.rename(p_new)
+                    logger.info(f"[Database] Przeniesiono legacy DB {legacy} -> {p_new}")
+                except OSError:
+                    import shutil
+
+                    shutil.copy2(legacy, p_new)
+                    logger.info(f"[Database] Skopiowano legacy DB {legacy} -> {p_new}")
+                for ext in ("-wal", "-shm"):
+                    legacy_aux = Path(str(legacy) + ext)
+                    new_aux = Path(str(p_new) + ext)
+                    if legacy_aux.exists() and not new_aux.exists():
+                        try:
+                            legacy_aux.rename(new_aux)
+                        except OSError:
+                            pass
+    except Exception as e:
+        logger.debug(f"[Database] Legacy DB migration note: {e}")
+    return db_path_str
+
+
 def verify_and_repair_sqlite_permissions(db_path_str: str) -> None:
     """
-    Proactively checks and heals SQLite directory/file permissions.
-    If the directory or file is read-only (e.g. Docker host bind-mount permission mismatch),
-    attempts automatic chmod healing or outputs an actionable diagnostic message.
+    Proactively checks SQLite directory/file writability.
+    Uses least-privilege modes (755/644) and never 777. If healing fails,
+    logs an actionable diagnostic instead of silently broadening permissions.
     """
+    db_path_str = _migrate_legacy_root_db(db_path_str)
     p_db = Path(db_path_str).resolve()
     directory = p_db.parent
     try:
@@ -93,21 +128,15 @@ def verify_and_repair_sqlite_permissions(db_path_str: str) -> None:
         test_file.write_text("ok", encoding="utf-8")
         test_file.unlink(missing_ok=True)
         can_write = True
-    except (PermissionError, OSError):
-        try:
-            directory.chmod(0o777)
-            test_file.write_text("ok", encoding="utf-8")
-            test_file.unlink(missing_ok=True)
-            can_write = True
-        except Exception:
-            pass
+    except (PermissionError, OSError) as e:
+        logger.warning(f"[Database] Brak zapisu w '{directory}': {e}")
 
     if not can_write:
         logger.critical(
             f"[Database] 🚨 BŁĄD UPRAWNIEŃ: Katalog '{directory}' nie zezwala na zapis dla tego procesu!\n"
-            f"SQLite nie będzie mógł zapisać bazy danych ani utworzyć plików WAL/SHM (attempt to write a readonly database).\n"
-            f"Rozwiązanie na maszynie hosta:\n"
-            f"  sudo chmod -R 777 {directory}"
+            f"SQLite nie będzie mógł zapisać bazy danych ani utworzyć plików WAL/SHM.\n"
+            f"Rozwiązanie na maszynie hosta: upewnij się, że właściciel katalogu to bieżący "
+            f"użytkownik/kontener (chown), zamiast chmod 777."
         )
 
     if p_db.exists():
@@ -115,18 +144,10 @@ def verify_and_repair_sqlite_permissions(db_path_str: str) -> None:
             with p_db.open("r+b"):
                 pass
         except (PermissionError, OSError):
-            try:
-                p_db.chmod(0o666)
-            except Exception:
-                logger.error(f"[Database] Plik bazy '{p_db}' jest tylko do odczytu. Rozwiązanie: sudo chmod 666 {p_db}")
-
-    for ext in ("-wal", "-shm"):
-        p_aux = Path(f"{db_path_str}{ext}")
-        if p_aux.exists():
-            try:
-                p_aux.chmod(0o666)
-            except Exception:
-                pass
+            logger.error(
+                f"[Database] Plik bazy '{p_db}' jest tylko do odczytu. "
+                f"Rozwiązanie: chown do bieżącego użytkownika lub chmod 644."
+            )
 
 
 def get_engine() -> AsyncEngine:
@@ -329,22 +350,19 @@ async def _migrate_sqlite_columns(conn) -> None:
                     if col_name not in existing_cols:
                         logger.info(f"Migrating schema: adding '{col_name}' to listings table")
                         sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}"))
+                llm_cache_cols = [
+                    ("desc_hash", "VARCHAR(64)"),
+                    ("llm_json", "TEXT"),
+                    ("llm_prompt_version", "VARCHAR(50)"),
+                    ("llm_model", "VARCHAR(150)"),
+                ]
+                for col_name, col_type in llm_cache_cols:
+                    if col_name not in existing_cols:
+                        logger.info(f"Migrating schema: adding '{col_name}' to listings table")
+                        sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}"))
+                sync_conn.execute(text("CREATE INDEX IF NOT EXISTS ix_listings_desc_hash ON listings (desc_hash)"))
 
-                sync_conn.execute(
-                    text(
-                        """
-                        CREATE TABLE IF NOT EXISTS spatial_cache (
-                            cache_key VARCHAR(300) PRIMARY KEY,
-                            data_json TEXT NOT NULL,
-                            created_at DATETIME NOT NULL,
-                            expires_at DATETIME
-                        )
-                        """
-                    )
-                )
-                sync_conn.execute(
-                    text("CREATE INDEX IF NOT EXISTS ix_spatial_cache_expires ON spatial_cache (expires_at)")
-                )
+                # spatial_cache table + expires index come from SpatialCacheModel via Base.metadata.create_all.
                 sync_conn.execute(
                     text(
                         "CREATE INDEX IF NOT EXISTS ix_listings_perf ON listings (profile_id, is_qualified, qualification_score, created_at)"

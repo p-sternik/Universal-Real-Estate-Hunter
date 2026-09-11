@@ -72,8 +72,6 @@ class GeoportalService:
         self._cache: dict[str, Any] = {}
 
     async def _get_cached(self, key: str) -> Any | None:
-        if key in self._cache:
-            return self._cache[key]
         try:
             async with get_session() as session:
                 item = await session.get(SpatialCacheModel, key)
@@ -83,15 +81,12 @@ class GeoportalService:
                     if exp and exp.tzinfo is None:
                         exp = exp.replace(tzinfo=UTC)
                     if exp is None or exp > now:
-                        val = json.loads(item.data_json)
-                        self._cache[key] = val
-                        return val
+                        return json.loads(item.data_json)
         except Exception:
             pass
         return None
 
     async def _set_cached(self, key: str, value: Any, ttl_days: int = 90) -> None:
-        self._cache[key] = value
         try:
             data_str = json.dumps(value, ensure_ascii=False)
             exp = datetime.now(UTC) + timedelta(days=ttl_days)
@@ -851,29 +846,31 @@ class GeoportalService:
 
     @staticmethod
     def count_gesut_pixels(png_bytes: bytes) -> dict[str, int]:
-        """Counts pixels of each GESUT network color in a transparent WMS map image."""
-        img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        """Counts pixels of each GESUT network color in a transparent WMS map image.
+
+        Optimized: single pass over ``getdata()`` with precomputed layer colors
+        and early skip of fully transparent pixels (no nested per-pixel loops
+        over ``img.load()``).
+        """
         counts: dict[str, int] = {key: 0 for key, _, _ in GeoportalService.GESUT_LAYERS}
-        pix = img.load()
-        if pix is None:
+        try:
+            img = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        except Exception:
             return counts
-        width, height = img.size
-        for y in range(height):
-            for x in range(width):
-                pixel = pix[x, y]
-                if not isinstance(pixel, tuple) or len(pixel) < 4:
-                    continue
-                r, g, b, a = pixel[0], pixel[1], pixel[2], pixel[3]
-                if a < 128:
-                    continue
-                for key, _layer, (tr, tg, tb) in GeoportalService.GESUT_LAYERS:
-                    if (
-                        abs(r - tr) <= GeoportalService.GESUT_COLOR_TOLERANCE
-                        and abs(g - tg) <= GeoportalService.GESUT_COLOR_TOLERANCE
-                        and abs(b - tb) <= GeoportalService.GESUT_COLOR_TOLERANCE
-                    ):
-                        counts[key] += 1
-                        break
+        tol = GeoportalService.GESUT_COLOR_TOLERANCE
+        layers = [(key, tr, tg, tb) for key, _, (tr, tg, tb) in GeoportalService.GESUT_LAYERS]
+        pixels = list(img.getdata())
+        for pixel in pixels:
+            if not isinstance(pixel, tuple) or len(pixel) < 4:
+                continue
+            a = pixel[3]
+            if a < 128:
+                continue
+            r, g, b = pixel[0], pixel[1], pixel[2]
+            for key, tr, tg, tb in layers:
+                if abs(r - tr) <= tol and abs(g - tg) <= tol and abs(b - tb) <= tol:
+                    counts[key] += 1
+                    break
         return counts
 
     async def get_gesut_networks(
@@ -911,8 +908,8 @@ class GeoportalService:
                 "REQUEST": "GetMap",
                 "BBOX": bbox,
                 "CRS": "EPSG:4326",
-                "WIDTH": "200",
-                "HEIGHT": "200",
+                "WIDTH": "128",
+                "HEIGHT": "128",
                 "LAYERS": ",".join(layer_names),
                 "STYLES": "",
                 "FORMAT": "image/png",
@@ -1313,8 +1310,11 @@ class GeoportalService:
                 cy=main_centroid[1] if main_centroid else None,
             )
 
-            # Step 3: Surrounding search points (8 directions) - only for non-flats
-            surround_pids: set[str] = set()
+            # Step 3: Surrounding search points (8 directions) - only for non-flats.
+            # Coroutines are only created here; they run together with the env tasks
+            # in the single gather wave below (all inputs are already known —
+            # main_pid is only used to filter the results afterwards).
+            surround_tasks = []
             if not is_flat:
                 d_lat = radius_meters / 111139.0
                 d_lon = radius_meters / (111139.0 * math.cos(math.radians(lat)))
@@ -1322,20 +1322,15 @@ class GeoportalService:
                 surround_coords = [
                     (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a))) for a in angles
                 ]
-
                 surround_tasks = [self.get_parcel_by_xy(client, pt_lat, pt_lon) for pt_lon, pt_lat in surround_coords]
-                surround_infos = await asyncio.gather(*surround_tasks, return_exceptions=True)
 
-                for r in surround_infos:
-                    if isinstance(r, dict) and r.get("parcel_id"):
-                        pid = r["parcel_id"]
-                        if pid != main_pid:
-                            surround_pids.add(pid)
-
-            result["surrounding_parcels_count"] = len(surround_pids)
-
-            # Await environmental and zoning tasks concurrently
-            env_results = await asyncio.gather(
+            # Single concurrent wave: surrounding parcels + environmental/zoning tasks.
+            # Both gathers are created first and awaited together, so the I/O
+            # overlaps in one wave. Semantics unchanged: parcel-level failures stay
+            # non-fatal (inner return_exceptions=True, as before), env failures
+            # propagate exactly like the old standalone env gather.
+            surround_future = asyncio.gather(*surround_tasks, return_exceptions=True)
+            env_future = asyncio.gather(
                 mpzp_task or asyncio.sleep(0, result={}),
                 flood_task or asyncio.sleep(0, result={}),
                 sopo_task or asyncio.sleep(0, result={}),
@@ -1348,6 +1343,7 @@ class GeoportalService:
                 terrain_task or asyncio.sleep(0, result={}),
                 power_lines_task,
             )
+            surround_infos, env_results = await asyncio.gather(surround_future, env_future)
             (
                 mpzp,
                 flood,
@@ -1361,6 +1357,15 @@ class GeoportalService:
                 terrain,
                 power_lines,
             ) = env_results
+
+            surround_pids: set[str] = set()
+            for r in surround_infos:
+                if isinstance(r, dict) and r.get("parcel_id"):
+                    pid = r["parcel_id"]
+                    if pid != main_pid:
+                        surround_pids.add(pid)
+
+            result["surrounding_parcels_count"] = len(surround_pids)
 
             result["mpzp_zone"] = mpzp.get("zone")
             result["mpzp_status"] = mpzp.get("status")

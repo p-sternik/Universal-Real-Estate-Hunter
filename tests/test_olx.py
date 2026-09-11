@@ -88,7 +88,7 @@ async def test_olx_parse_ad_house_params():
 @pytest.mark.asyncio
 async def test_olx_parse_ad_flat_params():
     scraper = OLXScraper()
-    scraper.profile = type("P", (), {"category": "mieszkanie", "name": "test"})  # type: ignore
+    scraper.profile = type("P", (), {"category": "mieszkanie", "name": "test"})
 
     ad = {
         "id": 1000,

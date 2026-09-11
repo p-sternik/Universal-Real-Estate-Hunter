@@ -55,14 +55,16 @@ class ScraperPipeline:
         repo: ListingRepository,
         profile: Any | None = None,
         market_medians: dict[str, float] | None = None,
-    ) -> dict:
-        result = {
+        defer_save: bool = False,
+    ) -> dict[str, Any]:
+        result: dict[str, Any] = {
             "is_new": False,
             "is_duplicate_fingerprint": False,
             "price_changed": False,
             "qualified": False,
             "notified": False,
             "llm_skipped": False,
+            "llm_skip_reason": None,
         }
 
         if profile:
@@ -167,17 +169,15 @@ class ScraperPipeline:
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
         is_exact_coords = True
         stage1_passed = True
-        if hasattr(self.engine, "stage1"):
-            stage1_attr = getattr(self.engine, "stage1", None)
-            from unittest.mock import AsyncMock, MagicMock
-
-            if stage1_attr is not None and not isinstance(stage1_attr, (AsyncMock, MagicMock)):
-                try:
-                    s1_res = stage1_attr.evaluate(listing, profile=profile)
-                    if isinstance(s1_res, tuple) and len(s1_res) >= 1:
-                        stage1_passed = bool(s1_res[0])
-                except Exception as e:
-                    logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
+        stage1_attr = getattr(self.engine, "stage1", None)
+        evaluate_fn = getattr(stage1_attr, "evaluate", None)
+        if callable(evaluate_fn):
+            try:
+                s1_res = evaluate_fn(listing, profile=profile)
+                if isinstance(s1_res, tuple) and len(s1_res) >= 1:
+                    stage1_passed = bool(s1_res[0])
+            except (ValueError, TypeError, AttributeError) as e:
+                logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
 
         geo_audit = None
         if stage1_passed:
@@ -274,20 +274,58 @@ class ScraperPipeline:
                     logger.debug(f"[Pipeline] Geoportal audit skipped: {e}")
 
         # Check if LLM can be skipped because this listing was already analyzed.
-        # If LLM analysis is enabled and the listing has no AI summary yet (e.g. rows
-        # scraped before the AI Due Diligence feature), run the LLM once to backfill.
+        # Uses stable desc_hash (normalized text) + prompt version instead of raw
+        # strip() comparison, so formatting-only edits do not burn LLM calls, while
+        # a prompt upgrade forces exactly one re-audit per listing.
+        from src.filters.fingerprint import compute_desc_hash
+
+        try:
+            prompt_version = str(getattr(settings, "LLM_PROMPT_VERSION", "v1.0") or "v1.0")
+        except Exception:
+            prompt_version = "v1.0"
+        current_desc_hash = compute_desc_hash(listing.raw_description)
         skip_llm = not self.llm_analysis_enabled
         if self.llm_analysis_enabled and existing_model and existing_model.qualification_status:
-            desc_unchanged = not listing.raw_description or (
-                existing_model.raw_description
-                and listing.raw_description.strip() == existing_model.raw_description.strip()
+            cached = getattr(existing_model, "llm_json_data", None)
+            has_ai = bool(cached or existing_model.ai_summary or existing_model.ai_questions)
+            hash_match = bool(
+                current_desc_hash
+                and getattr(existing_model, "desc_hash", None) == current_desc_hash
+                and getattr(existing_model, "llm_prompt_version", None) == prompt_version
+                and has_ai
             )
-            if desc_unchanged and (existing_model.ai_summary or existing_model.ai_questions):
+            if not hash_match and getattr(existing_model, "desc_hash", None) is None and has_ai:
+                # Legacy rows saved before desc_hash existed: fall back to
+                # the previous strip() comparison so we don't re-bill them.
+                desc_unchanged = not listing.raw_description or (
+                    existing_model.raw_description
+                    and listing.raw_description.strip() == existing_model.raw_description.strip()
+                )
+                hash_match = bool(desc_unchanged)
+            if hash_match:
                 skip_llm = True
         result["llm_skipped"] = skip_llm
 
         # 2. Run two-stage qualification engine (LLM now receives spatial context in listing!)
         filter_result = await self.engine.evaluate_listing(listing, profile=profile, skip_llm=skip_llm)
+        # The engine may fail to get an answer from the provider — propagate that
+        # so cycle summaries stay honest.
+        engine_skip_reason = getattr(self.engine, "last_skip_reason", None)
+        if engine_skip_reason == "provider_error":
+            result["llm_skipped"] = True
+            result["llm_skip_reason"] = engine_skip_reason
+        last_json = getattr(self.engine, "last_llm_json", None)
+        estimate_fn = getattr(self.engine, "estimate_tokens", None)
+        if not skip_llm and isinstance(last_json, dict):
+            result["llm_model"] = getattr(self.engine, "last_llm_model", None)
+            result["llm_prompt_version"] = getattr(self.engine, "last_llm_prompt_version", None)
+            result["llm_json"] = last_json
+            result["desc_hash"] = current_desc_hash
+            if callable(estimate_fn):
+                try:
+                    result["llm_tokens_est"] = estimate_fn(listing.raw_description)
+                except Exception:
+                    pass
 
         # If LLM was skipped, preserve previously saved LLM pros/cons and AI fields
         if skip_llm and existing_model:
@@ -571,10 +609,38 @@ class ScraperPipeline:
                 f"[Pipeline] Zakwalifikowano '{listing.title[:40]}' ({listing.price:,.0f} zł, {filter_result.score:.0f} pkt)"
             )
 
-        # 4. Save or update in database
+        # 4. Save or update in database (deferred in batch mode — see _persist_batch,
+        # which persists the whole batch with a single commit instead of one per listing)
+        if defer_save:
+            llm_bundle = None
+            if result.get("llm_json") and current_desc_hash:
+                llm_bundle = {
+                    "desc_hash": current_desc_hash,
+                    "json": result.get("llm_json"),
+                    "prompt_version": result.get("llm_prompt_version"),
+                    "model": result.get("llm_model"),
+                }
+            result["_deferred_save"] = {
+                "listing": listing,
+                "filter_result": filter_result,
+                "is_exact_coords": is_exact_coords,
+                "llm": llm_bundle,
+            }
+            return result
+
         db_model, is_new, price_changed = await repo.save_or_update(
             listing, filter_result, is_exact_coords=is_exact_coords
         )
+        if result.get("llm_json") and current_desc_hash:
+            from src.storage.repository import _apply_llm_cache_fields
+
+            _apply_llm_cache_fields(
+                db_model,
+                current_desc_hash,
+                result.get("llm_json"),
+                result.get("llm_prompt_version"),
+                result.get("llm_model"),
+            )
         result["is_new"] = is_new
         result["price_changed"] = price_changed
 
@@ -615,6 +681,94 @@ class ScraperPipeline:
 
         return result
 
+    async def _persist_batch(
+        self,
+        pending: list[tuple[Any, dict[str, Any]]],
+        profile: Any | None,
+        market_medians: dict[str, float] | None,
+    ) -> None:
+        """Persist one batch of analyzed listings with a single commit.
+
+        `pending` holds (item, res) pairs from process_listing(..., defer_save=True).
+        Fills is_new / price_changed / notified in each res dict. Notification
+        delivery stays concurrent (gathered); only the notified_at marking joins
+        the batch commit.
+        """
+        from src.storage.repository import _apply_llm_cache_fields
+
+        notify_jobs: list[dict[str, Any]] = []
+        async with get_session() as session:
+            repo = ListingRepository(session)
+            medians = market_medians if market_medians is not None else await repo.get_market_medians()
+            for _item, res in pending:
+                bundle = res.pop("_deferred_save", None)
+                if bundle is None:
+                    continue
+                listing = bundle["listing"]
+                filt = bundle["filter_result"]
+                db_model, is_new, price_changed = await repo.save_or_update(
+                    listing, filt, is_exact_coords=bundle["is_exact_coords"]
+                )
+                llm = bundle.get("llm")
+                if llm and llm.get("json") and llm.get("desc_hash"):
+                    _apply_llm_cache_fields(
+                        db_model, llm["desc_hash"], llm["json"], llm.get("prompt_version"), llm.get("model")
+                    )
+                res["is_new"] = is_new
+                res["price_changed"] = price_changed
+                should_notify = filt.is_qualified and (
+                    (is_new and not res["is_duplicate_fingerprint"]) or price_changed
+                )
+                if should_notify and db_model.notified_at is None:
+                    local_median = resolve_local_median(
+                        medians,
+                        listing.city,
+                        listing.district,
+                        getattr(listing, "category", "dom"),
+                    )
+                    advice = analyze_negotiation(
+                        listing=listing,
+                        filter_result=filt,
+                        market_median_m2=local_median,
+                    )
+                    notify_jobs.append(
+                        {
+                            "res": res,
+                            "listing": listing,
+                            "filt": filt,
+                            "advice": advice,
+                            "webhook_url": getattr(profile, "discord_webhook_url", None),
+                            "db_id": db_model.id,
+                        }
+                    )
+        if not notify_jobs:
+            return
+        sent = await asyncio.gather(*[self._send_listing_notifications(job) for job in notify_jobs])
+        marked_ids: list[int] = []
+        for job, ok in zip(notify_jobs, sent, strict=True):
+            if ok:
+                job["res"]["notified"] = True
+                marked_ids.append(job["db_id"])
+        if marked_ids:
+            async with get_session() as session:
+                repo = ListingRepository(session)
+                for listing_id in marked_ids:
+                    await repo.mark_as_notified(listing_id)
+
+    async def _send_listing_notifications(self, job: dict[str, Any]) -> bool:
+        """Deliver Discord + Telegram alerts for one qualified listing."""
+        logger.info(
+            f"[Pipeline] Alerting on qualified offer: {job['listing'].title} "
+            f"[{job['filt'].status.value}] (Score: {job['filt'].score:.1f})"
+        )
+        discord_ok = await self.discord.send_notification(
+            job["listing"], job["filt"], webhook_url=job["webhook_url"], negotiation_advice=job["advice"]
+        )
+        telegram_ok = await self.telegram.send_notification(
+            job["listing"], job["filt"], negotiation_advice=job["advice"]
+        )
+        return bool(discord_ok or telegram_ok)
+
     async def run_cycle(self, target_profile: str | None = None) -> dict:
         """Run a complete scraping and processing cycle across active profiles with inter-process lock protection."""
         from src.services.scrape_lock import get_scrape_lock
@@ -651,7 +805,10 @@ class ScraperPipeline:
         self.llm_analysis_enabled = bool(getattr(cfg, "llm_analysis_enabled", settings.USE_LLM_ANALYSIS))
         self.engine = QualificationEngine(llm_enabled=self.llm_analysis_enabled)
         if self.llm_analysis_enabled:
-            logger.info("[Pipeline] AI LLM analysis enabled.")
+            logger.info(
+                f"[Pipeline] AI LLM analysis enabled (bez limitu na cykl, "
+                f"prompt: {getattr(settings, 'LLM_PROMPT_VERSION', 'v1.0')})."
+            )
         await init_db()
 
         total_scraped = 0
@@ -661,6 +818,7 @@ class ScraperPipeline:
         total_qualified = 0
         total_notified = 0
         total_llm_skipped = 0
+        total_llm_failed = 0
 
         if self._custom_scrapers:
             execution_plan: list[tuple[SearchProfile | None, list[BaseScraper]]] = [(None, self.scrapers)]
@@ -731,11 +889,11 @@ class ScraperPipeline:
         # 1. Scrape all portals in parallel
         scrape_portal_times: list[tuple[str, float]] = []
 
-        async def scrape_portal(prof, prof_name, scraper):
+        async def scrape_portal(prof: Any, prof_name: str, scraper: Any) -> tuple[Any, str, str, list, Any]:
             t_start = time.perf_counter()
             if global_tracker.is_cancelled():
                 return prof, prof_name, scraper.name, [], None
-            global_tracker.update_portal(f"{scraper.name} ({prof_name})", 1, getattr(scraper, "max_pages", 1), 10)
+            global_tracker.update_portal(f"{scraper.name} ({prof_name})", 1, getattr(scraper, "max_pages", 1))
             scraper.progress_cb = global_tracker.update_portal_page
             try:
                 listings = await scraper.scrape()
@@ -776,7 +934,7 @@ class ScraperPipeline:
 
             step_idx += 1
             total_scraped += len(listings)
-            global_tracker.begin_processing_step(step_idx, total_steps)
+            global_tracker.set_processing_fraction(step_idx, total_steps)
 
             if not listings:
                 continue
@@ -792,12 +950,14 @@ class ScraperPipeline:
             }
 
             async def safe_process(
-                item,
-                prof=prof,
-                total_listings=len(listings),
-                medians=cycle_medians,
-                cancel_res=empty_cancel_res,
-            ):
+                item: Any,
+                prof: Any = prof,
+                total_listings: int = len(listings),
+                medians: dict[str, float] = cycle_medians,
+                cancel_res: dict[str, Any] = empty_cancel_res,
+                _step_idx: int = step_idx,
+                _total_steps: int = total_steps,
+            ) -> tuple[Any, dict[str, Any]]:
                 nonlocal processed
                 if global_tracker.is_cancelled():
                     return item, cancel_res
@@ -806,13 +966,19 @@ class ScraperPipeline:
                         return item, cancel_res
                     async with get_session() as session:
                         repo = ListingRepository(session)
-                        res = await self.process_listing(item, repo, profile=prof, market_medians=medians)
+                        res = await self.process_listing(
+                            item, repo, profile=prof, market_medians=medians, defer_save=True
+                        )
                     processed += 1
                     if processed % 5 == 0 or processed == total_listings:
-                        global_tracker.update_processing(processed, total_listings)
+                        global_tracker.set_processing_fraction(_step_idx, _total_steps, processed, total_listings)
                     return item, res
 
             results = await asyncio.gather(*[safe_process(item) for item in listings])
+
+            # Single-commit batch persist: 1 commit per batch instead of per listing.
+            # (Per-item sessions above are effectively read-only + geocoder cache.)
+            await self._persist_batch(list(results), prof, cycle_medians)
 
             for _item, res in results:
                 if res["is_new"]:
@@ -827,6 +993,8 @@ class ScraperPipeline:
                     total_notified += 1
                 if res.get("llm_skipped"):
                     total_llm_skipped += 1
+                    if res.get("llm_skip_reason") == "provider_error":
+                        total_llm_failed += 1
 
                 global_tracker.record_items(
                     count=1,
@@ -834,7 +1002,7 @@ class ScraperPipeline:
                     duplicates=1 if res["is_duplicate_fingerprint"] else 0,
                 )
 
-            global_tracker.finish_processing_step(step_idx, total_steps)
+            global_tracker.set_processing_fraction(step_idx, total_steps, 1, 1)
 
         # Backfill spatial audit for existing database listings missing new metrics
         if not global_tracker.is_cancelled():
@@ -865,7 +1033,10 @@ class ScraperPipeline:
             "qualified": total_qualified,
             "notified": total_notified,
             "llm_calls": self.engine.llm_calls,
+            "llm_successes": self.engine.llm_successes,
+            "llm_failures": self.engine.llm_failures,
             "llm_skipped": total_llm_skipped,
+            "llm_failed": total_llm_failed,
             "llm_enabled": self.llm_analysis_enabled,
             "cancelled": global_tracker.is_cancelled(),
         }
@@ -881,7 +1052,9 @@ class ScraperPipeline:
             f"=== Cycle Finished ===\n"
             f"Scraped: {total_scraped} | New: {total_new} | Duplicates: {total_duplicates} | "
             f"Price changes: {total_price_changes} | Qualified: {total_qualified} | Notified: {total_notified} | "
-            f"LLM: {self.engine.llm_calls} analiz, {total_llm_skipped} pominiętych"
+            f"LLM: {self.engine.llm_calls} prób ({self.engine.llm_successes} udanych, "
+            f"{self.engine.llm_failures} nieudanych), pominiętych: {total_llm_skipped} "
+            f"(błędy providera: {total_llm_failed}, cache/reguły: {total_llm_skipped - total_llm_failed})"
         )
         return summary
 

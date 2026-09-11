@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
@@ -404,3 +405,56 @@ async def test_pipeline_backfill_existing_spatial_data(async_session, monkeypatc
     # Second run should find 0 listings needing backfill
     updated_again = await pipeline.backfill_existing_spatial_data(async_session, repo)
     assert updated_again == 0
+
+
+@pytest.mark.asyncio
+async def test_persist_batch_single_commit_for_many_listings(async_session, monkeypatch):
+    """Deferred batch persist must write N listings with O(1) sessions, not one session per listing."""
+    import src.services.pipeline as pipeline_module
+    from src.services.geoportal import geoportal_service
+
+    monkeypatch.setattr(geoportal_service, "audit_location", AsyncMock(return_value={}))
+
+    session_calls: list[int] = []
+
+    @asynccontextmanager
+    async def fake_get_session():
+        session_calls.append(1)
+        yield async_session
+
+    monkeypatch.setattr(pipeline_module, "get_session", fake_get_session)
+
+    engine_mock = AsyncMock()
+    engine_mock.evaluate_listing.return_value = make_qualified_result(score=70.0)
+    pipeline = make_pipeline(llm_enabled=False, engine_mock=engine_mock)
+
+    repo = ListingRepository(async_session)
+    listings = []
+    for i in ("batch-1", "batch-2"):
+        listing = make_listing()
+        listing.id = i
+        listing.url = f"https://otodom.pl/oferta/{i}"
+        listings.append(listing)
+
+    pending = []
+    for listing in listings:
+        res = await pipeline.process_listing(listing, repo, defer_save=True)
+        assert "_deferred_save" in res
+        # Nothing written yet — analyze phase is read-only
+        assert await repo.get_by_url(listing.url) is None
+        pending.append((listing, res))
+
+    await pipeline._persist_batch(pending, None, {})
+
+    for listing, res in pending:
+        assert "_deferred_save" not in res
+        assert res["is_new"] is True
+        assert res["notified"] is True
+        model = await repo.get_by_url(listing.url)
+        assert model is not None
+        assert model.notified_at is not None
+
+    # One session for the batch write + one for notified_at marking (not N per listing)
+    assert len(session_calls) == 2
+    assert pipeline.discord.send_notification.await_count == 2
+    assert pipeline.telegram.send_notification.await_count == 2
