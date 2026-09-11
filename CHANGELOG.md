@@ -6,6 +6,30 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.9.0 (2026-09-11)
+
+### Bug Fixes
+
+- **dashboard**: Resolve profile selector dropdown z-index and clipping
+  ([`0c878db`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/0c878db1ed1ef17ee1afb81cfbacdcbaa659597f))
+
+- **db**: Ensure init_db is called on dashboard and scheduler startup
+  ([`a2ee699`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/a2ee699211fd996418637e60802cf1ecf25ed3ed))
+
+- **progress**: Prevent test progress logs from leaking into shared status file
+  ([`95c72e4`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/95c72e44dbedc15fa3de041e40607cd0ec9b88ee))
+
+### Features
+
+- Migrate default docker database to postgresql with auto-migration from sqlite
+  ([`6bd5ff3`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/6bd5ff3df9f9d4d2759bf0d1200ad60923c5111e))
+
+### Refactoring
+
+- **storage**: Shrink sqlite to postgres auto-migration logic
+  ([`4926b93`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/4926b932b9e1abb9e11f74ef8d768b9f4afdfa72))
+
+
 ## v1.8.1 (2026-09-11)
 
 ### Bug Fixes
