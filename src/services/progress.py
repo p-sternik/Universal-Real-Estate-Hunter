@@ -79,9 +79,18 @@ def read_shared_status() -> dict[str, Any] | None:
         mtime = p.stat().st_mtime
         content = p.read_text(encoding="utf-8")
         data = json.loads(content)
-        if data.get("is_running") and (time.time() - mtime > 180):
-            data["is_running"] = False
-            data["current_step"] = "Zatrzymano lub przekroczono limit czasu"
+
+        if data.get("is_running"):
+            from src.services.scrape_lock import get_scrape_lock
+
+            lock = get_scrape_lock()
+            stale_time = time.time() - mtime
+            # If no progress updates for > 45s and lock is free, or > 120s unconditionally
+            if (stale_time > 45 and not lock.is_locked()) or stale_time > 120:
+                data["is_running"] = False
+                data["current_step"] = "Zakończono lub przerwano proces"
+                write_shared_status(data)
+
         return data
     except Exception:
         return None
@@ -309,26 +318,30 @@ class ProgressTracker:
         self.is_running = False
         self.cancel_requested = False
         clear_shared_cancellation()
-        self.percentage = 100
-        self.current_step = "Zakończono pomyślnie!"
-        if summary.get("llm_enabled", True):
-            calls = summary.get("llm_calls", 0)
-            ok = summary.get("llm_successes", calls - summary.get("llm_failures", 0))
-            failed = summary.get("llm_failures", summary.get("llm_failed", 0))
-            cache_skipped = summary.get("llm_skipped", 0) - failed
-            ai_part = (
-                f", AI LLM: {calls} prób ({ok} udanych"
-                + (f", {failed} nieudanych" if failed else "")
-                + f", pominięto {summary.get('llm_skipped', 0)}"
-                + (f" — cache/reguły: {cache_skipped}" if cache_skipped > 0 else "")
-                + ")"
-            )
+        if summary.get("error"):
+            self.current_step = f"Błąd: {summary['error']}"
+            self.add_log(f"❌ Cykl zakończony błędem: {summary['error']}", level="error")
         else:
-            ai_part = ", AI LLM: wyłączona w konfiguracji"
-        self.add_log(
-            f"✅ Cykl zakończony. Pobrane: {summary.get('total_scraped', 0)}, "
-            f"Nowe: {summary.get('new_listings', 0)}, Zakwalifikowane: {summary.get('qualified', 0)}{ai_part}"
-        )
+            self.percentage = 100
+            self.current_step = "Zakończono pomyślnie!"
+            if summary.get("llm_enabled", True):
+                calls = summary.get("llm_calls", 0)
+                ok = summary.get("llm_successes", calls - summary.get("llm_failures", 0))
+                failed = summary.get("llm_failures", summary.get("llm_failed", 0))
+                cache_skipped = summary.get("llm_skipped", 0) - failed
+                ai_part = (
+                    f", AI LLM: {calls} prób ({ok} udanych"
+                    + (f", {failed} nieudanych" if failed else "")
+                    + f", pominięto {summary.get('llm_skipped', 0)}"
+                    + (f" — cache/reguły: {cache_skipped}" if cache_skipped > 0 else "")
+                    + ")"
+                )
+            else:
+                ai_part = ", AI LLM: wyłączona w konfiguracji"
+            self.add_log(
+                f"✅ Cykl zakończony. Pobrane: {summary.get('total_scraped', 0)}, "
+                f"Nowe: {summary.get('new_listings', 0)}, Zakwalifikowane: {summary.get('qualified', 0)}{ai_part}"
+            )
 
         if self._rich_progress and self._task_id is not None:
             self._rich_progress.update(

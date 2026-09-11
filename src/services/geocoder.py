@@ -104,21 +104,30 @@ class NominatimGeocoder:
 
         return None
 
-    async def get_cached(self, session: AsyncSession, query_key: str) -> tuple[float, float, str] | None:
+    async def get_cached(self, session: AsyncSession | None, query_key: str) -> tuple[float, float, str] | None:
         if query_key in self._mem_cache:
             return self._mem_cache[query_key]
-        stmt = select(GeocacheModel).where(GeocacheModel.query == query_key)
-        res = await session.execute(stmt)
-        cached = res.scalars().first()
-        if cached:
-            val = (cached.latitude, cached.longitude, cached.display_name or "")
-            self._mem_cache[query_key] = val
-            return val
+        try:
+            if session is not None:
+                cached = await session.get(GeocacheModel, query_key)
+                if cached:
+                    val = (cached.latitude, cached.longitude, cached.display_name or "")
+                    self._mem_cache[query_key] = val
+                    return val
+            else:
+                async with get_session() as s:
+                    cached = await s.get(GeocacheModel, query_key)
+                    if cached:
+                        val = (cached.latitude, cached.longitude, cached.display_name or "")
+                        self._mem_cache[query_key] = val
+                        return val
+        except Exception as e:
+            logger.debug(f"[Geocoder] Failed to read cache for '{query_key}': {e}")
         return None
 
     async def set_cache(
         self,
-        session: AsyncSession,
+        session: AsyncSession | None,
         query_key: str,
         lat: float,
         lon: float,
@@ -126,21 +135,25 @@ class NominatimGeocoder:
     ) -> None:
         self._mem_cache[query_key] = (lat, lon, display_name)
         try:
-            cache_entry = GeocacheModel(
-                query=query_key,
-                latitude=lat,
-                longitude=lon,
-                display_name=display_name,
-                cached_at=datetime.now(UTC),
-            )
-            session.add(cache_entry)
-            await session.flush()
-        except (OSError, ValueError) as e:
+            async with get_session() as write_session:
+                existing = await write_session.get(GeocacheModel, query_key)
+                if existing:
+                    existing.latitude = lat
+                    existing.longitude = lon
+                    existing.display_name = display_name
+                    existing.cached_at = datetime.now(UTC)
+                else:
+                    cache_entry = GeocacheModel(
+                        query=query_key,
+                        latitude=lat,
+                        longitude=lon,
+                        display_name=display_name,
+                        cached_at=datetime.now(UTC),
+                    )
+                    write_session.add(cache_entry)
+                await safe_commit(write_session)
+        except Exception as e:
             logger.debug(f"[Geocoder] Failed to persist cache for '{query_key}': {e}")
-            try:
-                await session.rollback()
-            except Exception:
-                pass
 
     def _find_district_fallback(
         self,
@@ -162,7 +175,7 @@ class NominatimGeocoder:
 
     async def geocode(
         self,
-        session: AsyncSession,
+        session: AsyncSession | None = None,
         street: str | None = None,
         district: str | None = None,
         city: str | None = None,
@@ -229,10 +242,12 @@ class NominatimGeocoder:
 
 
 async def geocode_many(
-    session: AsyncSession,
-    items: list[dict[str, str | None]],
+    session: AsyncSession | None = None,
+    items: list[dict[str, str | None]] | None = None,
     batch_size: int = 8,
 ) -> list[tuple[float | None, float | None, bool]]:
+    if items is None:
+        items = []
     """Resolve multiple addresses with bounded concurrency.
 
     DB/memory cache hits never touch the network; the 1 req/s Nominatim lock

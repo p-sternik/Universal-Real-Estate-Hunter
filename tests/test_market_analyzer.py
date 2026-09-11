@@ -7,6 +7,8 @@ from src.models.listing import FilterResult, ListingSchema
 from src.services.discord_notifier import DiscordNotifier
 from src.services.market_analyzer import (
     NegotiationAdvice,
+    PropertyValuationEngine,
+    PropertyValuationIntelligence,
     analyze_land_and_utilities,
     analyze_negotiation,
     calculate_commute_audit,
@@ -15,6 +17,7 @@ from src.services.market_analyzer import (
     calculate_risk_shield,
     calculate_tco_audit,
     resolve_local_median,
+    valuation_engine,
 )
 from src.services.telegram_notifier import TelegramNotifier
 
@@ -673,3 +676,59 @@ def test_analyze_negotiation_with_shape_slope_power_factors():
     assert "nachylenie" in args_joined.lower() or "spadek" in args_joined.lower()
     assert "wysokiego napięcia" in args_joined.lower()
     assert "światłowodu" in args_joined.lower()
+
+
+def test_property_valuation_engine_evaluate():
+    listing = {
+        "city": "Rzeszów",
+        "district": "Słocina",
+        "category": "dom",
+        "price": 800_000,
+        "price_per_m2": 8_000,
+        "area_home": 100.0,
+        "finish_condition": "pod_klucz",
+        "latitude": 50.02,
+        "longitude": 22.04,
+        "access_road_type": "asfaltowa",
+        "sewerage": "miejska",
+    }
+    medians = {"rzeszów:słocina:dom": 7500.0}
+
+    intel = valuation_engine.evaluate(
+        listing=listing,
+        market_medians=medians,
+        price_drop_amount=20_000,
+        price_drop_pct=2.4,
+        price_history_count=2,
+    )
+
+    assert isinstance(intel, PropertyValuationIntelligence)
+    assert intel.local_median_m2 == 7500.0
+    assert intel.negotiation.market_median_m2 == 7500.0
+    assert intel.negotiation.price_deviation_pct == 6.7
+    assert "tco_audit" in intel.land_and_utilities
+    assert "commute_audit" in intel.land_and_utilities
+    assert "risk_shield" in intel.land_and_utilities
+    assert "gesut_audit" in intel.land_and_utilities
+
+    # Helper properties
+    assert intel.tco_audit is intel.land_and_utilities["tco_audit"]
+    assert intel.commute_audit is intel.land_and_utilities["commute_audit"]
+    assert intel.risk_shield is intel.land_and_utilities["risk_shield"]
+    assert intel.gesut_audit is intel.land_and_utilities["gesut_audit"]
+    assert intel.cadastral_packet is intel.land_and_utilities["cadastral_packet"]
+
+    # Dashboard dict format
+    d = intel.to_dashboard_dict()
+    assert d["market_median_m2"] == 7500.0
+    assert d["price_deviation_pct"] == 6.7
+    assert d["fair_market_value"] is not None
+    assert d["suggested_opening_offer"] is not None
+    assert "land_audit" in d
+    assert d["land_audit"] == intel.land_and_utilities
+
+
+def test_property_valuation_engine_custom_medians():
+    engine = PropertyValuationEngine(market_medians={"krakow::mieszkanie": 15000.0})
+    assert engine.resolve_median("Krakow", None, "mieszkanie") == 15000.0
+    assert engine.resolve_median("Warszawa", None, "mieszkanie") is None

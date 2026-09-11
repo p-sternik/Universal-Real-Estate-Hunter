@@ -68,3 +68,5 @@ htmlcov/
 *.swo
 .DS_Store
 Thumbs.db
+.agents
+skills-lock.json

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from loguru import logger
 from sqlalchemy import event, text
+from sqlalchemy import inspect as sa_inspect
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -439,17 +440,19 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
                     return []
                 rows = sync_conn.execute(f"SELECT * FROM {table_name}").fetchall()
                 col_names = [col[1] for col in sync_conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
-                valid_cols = {c.name for c in model_cls.__table__.columns}
+                mapper = sa_inspect(model_cls)
+                col_to_attr = {a.columns[0].name: a.key for a in mapper.column_attrs}
                 items = []
                 for r in rows:
-                    row_dict = {k: r[k] for k in col_names if k in valid_cols}
+                    row_dict = {col_to_attr[k]: r[k] for k in col_names if k in col_to_attr}
                     for dt in dt_cols:
-                        val = row_dict.get(dt)
+                        attr_k = col_to_attr.get(dt, dt)
+                        val = row_dict.get(attr_k)
                         if isinstance(val, str) and val:
                             try:
-                                row_dict[dt] = datetime.fromisoformat(val)
+                                row_dict[attr_k] = datetime.fromisoformat(val)
                             except Exception:
-                                row_dict[dt] = datetime.now(UTC) if dt in ("recorded_at", "cached_at") else None
+                                row_dict[attr_k] = datetime.now(UTC) if dt in ("recorded_at", "cached_at") else None
                     items.append(model_cls(**row_dict))
                 return items
 

@@ -1,9 +1,16 @@
-# Git & Docker
+# Git, CI & Docker
 .git
 .gitignore
 .dockerignore
+.github/
+Dockerfile*
+docker-compose*.yml
 README*.md
 LICENSE
+CHANGELOG.md
+.pre-commit-config.yaml
+skills-lock.json
+requirements.txt
 
 # Python
 __pycache__/
@@ -43,7 +50,10 @@ listings_report.html
 logs/
 *.log
 
-# Tests & Tools
+# Tests, CI & Agent Tools
+tests/
+.agents/
+scratch/
 .pytest_cache/
 .coverage
 htmlcov/

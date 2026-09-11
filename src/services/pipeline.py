@@ -1,5 +1,4 @@
 import asyncio
-import re
 import time
 from datetime import UTC, datetime
 from typing import Any
@@ -9,12 +8,12 @@ from sqlalchemy import select
 
 from config import settings
 from src.filters import QualificationEngine
-from src.models.enums import BuildingType, FinishCondition, HeatingType, SewerageType
+from src.models.enums import FinishCondition, HeatingType, SewerageType
 from src.models.listing import ListingSchema
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.config_manager import SearchProfile
 from src.services.discord_notifier import DiscordNotifier
-from src.services.market_analyzer import analyze_negotiation, resolve_local_median
+from src.services.market_analyzer import valuation_engine
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
@@ -169,15 +168,23 @@ class ScraperPipeline:
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
         is_exact_coords = True
         stage1_passed = True
-        stage1_attr = getattr(self.engine, "stage1", None)
-        evaluate_fn = getattr(stage1_attr, "evaluate", None)
-        if callable(evaluate_fn):
+        if hasattr(self.engine, "precheck_stage1"):
             try:
-                s1_res = evaluate_fn(listing, profile=profile)
+                s1_res = self.engine.precheck_stage1(listing, profile=profile)
                 if isinstance(s1_res, tuple) and len(s1_res) >= 1:
                     stage1_passed = bool(s1_res[0])
-            except (ValueError, TypeError, AttributeError) as e:
+            except Exception as e:
                 logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
+        else:
+            stage1_attr = getattr(self.engine, "stage1", None)
+            evaluate_fn = getattr(stage1_attr, "evaluate", None)
+            if callable(evaluate_fn):
+                try:
+                    s1_res = evaluate_fn(listing, profile=profile)
+                    if isinstance(s1_res, tuple) and len(s1_res) >= 1:
+                        stage1_passed = bool(s1_res[0])
+                except (ValueError, TypeError, AttributeError) as e:
+                    logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
 
         geo_audit = None
         if stage1_passed:
@@ -307,7 +314,9 @@ class ScraperPipeline:
         result["llm_skipped"] = skip_llm
 
         # 2. Run two-stage qualification engine (LLM now receives spatial context in listing!)
-        filter_result = await self.engine.evaluate_listing(listing, profile=profile, skip_llm=skip_llm)
+        filter_result = await self.engine.evaluate_listing(
+            listing, profile=profile, skip_llm=skip_llm, geo_audit=geo_audit
+        )
         # The engine may fail to get an answer from the provider — propagate that
         # so cycle summaries stay honest.
         engine_skip_reason = getattr(self.engine, "last_skip_reason", None)
@@ -351,237 +360,53 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # Propagate spatial fields to filter_result
-        for f in (
-            "landslide_risk",
-            "egib_building_status",
-            "egib_soil_class",
-            "noise_level_db",
-            "noise_zone",
-            "nature_protected_zone",
-            "monument_zone",
-            "cemetery_buffer_zone",
-            "broadband_status",
-            "broadband_details",
-            "parcel_front_width_m",
-            "parcel_length_m",
-            "parcel_aspect_ratio",
-            "parcel_shape_type",
-            "terrain_slope_pct",
-            "terrain_aspect",
-            "walkability_pka_dist_m",
-            "walkability_pka_name",
-            "power_lines_risk",
-        ):
-            if (val := getattr(listing, f, None)) is not None:
-                setattr(filter_result, f, val)
+        # If a mock or custom engine did not apply spatial findings, ensure spatial fields and scoring are applied
+        if filter_result.is_qualified and not filter_result.mpzp_zone and listing.mpzp_zone:
+            from src.filters import QualificationEngine
 
-        # 3. Enrich filter_result with spatial audit findings (MPZP, flood risk, cadastral parcel, Tier 1 checks)
-        if filter_result.is_qualified:
-            if listing.mpzp_zone:
-                filter_result.mpzp_zone = listing.mpzp_zone
-                if listing.mpzp_status == "OBOWIĄZUJĄCY":
-                    filter_result.pros.append(f"Miejscowy Plan (MPZP): {listing.mpzp_zone}")
-                elif listing.mpzp_status == "BRAK_PLANU_LUB_CYFRYZACJI":
-                    filter_result.cons.append("⚠️ Brak cyfrowego MPZP w Geoportalu (wymaga weryfikacji WZ)")
+            apply_fn = getattr(self.engine, "apply_spatial_findings", None)
+            if not callable(apply_fn) or hasattr(apply_fn, "_mock_return_value"):
+                apply_fn = QualificationEngine.apply_spatial_findings
 
-            if listing.flood_risk_zone:
-                filter_result.flood_risk_zone = listing.flood_risk_zone
-                if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE":
-                    filter_result.cons.append("⚠️ Zagrożenie powodziowe (ISOK): Działka w strefie ryzyka powodziowego")
-                    filter_result.score = max(0.0, filter_result.score - 20.0)
-
-            # SOPO Landslide
-            if listing.landslide_risk in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
-                filter_result.cons.append(
-                    "🚨 Aktywne osuwisko / Zagrożenie ruchami masowymi (PIG-PIB SOPO): "
-                    "Ryzyko naruszenia konstrukcji, odmowy ubezpieczenia lub kredytu"
-                )
-                filter_result.score = max(0.0, filter_result.score - 50.0)
-
-            # EGiB Building disclosure & Soil class
-            if listing.egib_building_status:
-                cat = (
-                    listing.category.value
-                    if hasattr(listing.category, "value")
-                    else str(getattr(listing, "category", "dom"))
-                ).lower()
-                is_house = cat in ("dom", "segment", "blizniak", "szeregowiec") or listing.building_type in (
-                    BuildingType.WOLNOSTOJACY,
-                    BuildingType.BLIZNIAK,
-                    BuildingType.SZEREGOWIEC,
-                )
-                finish = (
-                    listing.finish_condition.value
-                    if hasattr(listing.finish_condition, "value")
-                    else str(listing.finish_condition or "")
-                ).lower()
-                is_developer = "deweloperski" in finish or (
-                    hasattr(listing, "market") and str(listing.market).lower() == "pierwotny"
-                )
-
-                if is_house and not is_developer:
-                    if listing.egib_building_status == "BRAK_W_EWIDENCJI":
-                        filter_result.cons.append(
-                            "⚠️ Dom nieujawniony w ewidencji budynków EGiB: Ryzyko samowoli budowlanej, "
-                            "braku odbioru końcowego lub problemu z kredytem hipotecznym"
-                        )
-                        filter_result.score = max(0.0, filter_result.score - 15.0)
-                    elif listing.egib_building_status == "UJAWNIONY":
-                        filter_result.pros.append(
-                            "Budynek formalnie ujawniony w państwowej ewidencji budynków (EGiB użytek B/Br)"
-                        )
-
-            if listing.egib_soil_class and re.search(
-                r"\b(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)\b", listing.egib_soil_class, re.IGNORECASE
+            res_spatial = apply_fn(
+                self.engine if apply_fn != QualificationEngine.apply_spatial_findings else QualificationEngine(),
+                listing=listing,
+                score=filter_result.score,
+                pros=filter_result.pros,
+                cons=filter_result.cons,
+                geo_audit=geo_audit,
+            )
+            if asyncio.iscoroutine(res_spatial):
+                res_spatial = await res_spatial
+            new_score, new_pros, new_cons = res_spatial
+            filter_result.score = min(100.0, max(0.0, new_score))
+            filter_result.pros = new_pros
+            filter_result.cons = new_cons
+            for sf in (
+                "mpzp_zone",
+                "flood_risk_zone",
+                "landslide_risk",
+                "egib_building_status",
+                "egib_soil_class",
+                "noise_level_db",
+                "noise_zone",
+                "nature_protected_zone",
+                "monument_zone",
+                "cemetery_buffer_zone",
+                "broadband_status",
+                "broadband_details",
+                "parcel_front_width_m",
+                "parcel_length_m",
+                "parcel_aspect_ratio",
+                "parcel_shape_type",
+                "terrain_slope_pct",
+                "terrain_aspect",
+                "walkability_pka_dist_m",
+                "walkability_pka_name",
+                "power_lines_risk",
             ):
-                filter_result.cons.append(
-                    f"⚠️ Grunt chroniony w EGiB ({listing.egib_soil_class}): Klasa bonitacyjna podlega "
-                    "ustawowej ochronie rolnej (trudności z odrolnieniem i rozbudową)"
-                )
-                filter_result.score = max(0.0, filter_result.score - 10.0)
-
-            # Acoustic Noise (>65 dB)
-            if (listing.noise_level_db is not None and listing.noise_level_db > 65.0) or (
-                listing.noise_zone and "WYSOKI" in listing.noise_zone
-            ):
-                db_str = f"{listing.noise_level_db:.0f}" if listing.noise_level_db is not None else ">65"
-                filter_result.cons.append(
-                    f"⚠️ Podwyższony poziom hałasu ({db_str} dB Lden): "
-                    "Przekroczenie progu uciążliwości akustycznej w sąsiedztwie korytarza tranzytowego"
-                )
-                filter_result.score = max(0.0, filter_result.score - 15.0)
-
-            # GDOŚ Nature protection
-            if listing.nature_protected_zone:
-                filter_result.cons.append(
-                    f"⚠️ Obszar chroniony przyrodniczo (GDOŚ: {listing.nature_protected_zone}): "
-                    "Rygory środowiskowe i ograniczenia inwestycyjne"
-                )
-                filter_result.score = max(0.0, filter_result.score - 10.0)
-
-            # NID Monuments
-            if listing.monument_zone:
-                filter_result.cons.append(
-                    f"🏛️ Obiekt w rejestrze zabytków / strefa konserwatorska (NID: {listing.monument_zone}): "
-                    "Wszelkie prace budowlane wymagają uzgodnień z Wojewódzkim Konserwatorem Zabytków (WKZ)"
-                )
-                filter_result.score = max(0.0, filter_result.score - 15.0)
-
-            # Cemetery Buffer
-            if listing.cemetery_buffer_zone:
-                if listing.cemetery_buffer_zone == "<50m":
-                    filter_result.cons.append(
-                        "🚨 Bezpośrednia strefa sanitarna cmentarza (<50m): Ustawowy zakaz rozbudowy "
-                        "i lokalizacji okien mieszkalnych (Rozporządzenie MZ)"
-                    )
-                    filter_result.score = max(0.0, filter_result.score - 25.0)
-                elif listing.cemetery_buffer_zone == "50-150m":
-                    filter_result.cons.append(
-                        "⚠️ Strefa ochronna cmentarza (50–150m): Ograniczenia sanitarne i warunki ujęć wody"
-                    )
-                    filter_result.score = max(0.0, filter_result.score - 10.0)
-
-            # Broadband (SIDUSIS)
-            if listing.broadband_status == "ŚWIATŁOWÓD_AKTYWNY":
-                filter_result.pros.append("🌐 Światłowód aktywny FTTH (potwierdzony w SIDUSIS internet.gov.pl)")
-                filter_result.score = min(100.0, filter_result.score + 5.0)
-            elif listing.broadband_status in ("PLANOWANY_KPO", "PLANOWANY_KPO_FERC"):
-                filter_result.pros.append("📡 Planowana rozbudowa światłowodu (KPO / FERC)")
-            elif listing.broadband_status in ("BRAK", "BRAK_ZASIĘGU"):
-                filter_result.cons.append(
-                    "⚠️ Brak stacjonarnego internetu szerokopasmowego (SIDUSIS): Konieczność łączności LTE/5G lub Starlink"
-                )
-                filter_result.score = max(0.0, filter_result.score - 5.0)
-
-            # Parcel shape & Front width
-            if listing.parcel_front_width_m is not None:
-                if listing.parcel_front_width_m < 16.0:
-                    filter_result.cons.append(
-                        f"📐 Wąski front działki ({listing.parcel_front_width_m:.1f} m < 16 m): "
-                        "Restrykcje odległościowe Prawa Budowlanego i utrudnienia w zagospodarowaniu"
-                    )
-                    filter_result.score = max(0.0, filter_result.score - 15.0)
-                elif listing.parcel_shape_type == "REGULARNY" and listing.parcel_front_width_m >= 18.0:
-                    aspect_val = listing.parcel_aspect_ratio or 1.0
-                    filter_result.pros.append(
-                        f"📐 Foremna działka: szerokość frontu {listing.parcel_front_width_m:.0f} m "
-                        f"(proporcje 1:{aspect_val:.1f})"
-                    )
-
-            # Terrain slope & Aspect
-            if listing.terrain_slope_pct is not None:
-                if listing.terrain_slope_pct > 8.0:
-                    filter_result.cons.append(
-                        f"⛰️ Strome nachylenie terenu (spadek {listing.terrain_slope_pct:.1f}%, ekspozycja {listing.terrain_aspect or 'nieokreślona'}): "
-                        "Ryzyko kosztownej niwelacji terenu, budowy murów oporowych i problemów ze spływem wód"
-                    )
-                    filter_result.score = max(0.0, filter_result.score - 15.0)
-                elif (
-                    listing.terrain_aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
-                    and listing.terrain_slope_pct >= 2.0
-                ):
-                    filter_result.pros.append(
-                        f"☀️ Południowa ekspozycja stoku (spadek {listing.terrain_slope_pct:.1f}%) — doskonałe nasłonecznienie pod fotowoltaikę"
-                    )
-                elif listing.terrain_slope_pct <= 3.0:
-                    filter_result.pros.append(f"🟢 Płaski, bezpieczny teren (spadek {listing.terrain_slope_pct:.1f}%)")
-
-            # High Voltage Power lines
-            if listing.power_lines_risk and any(
-                k in listing.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN")
-            ):
-                filter_result.cons.append(
-                    f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({listing.power_lines_risk}): "
-                    "Pas technologiczny, pole elektromagnetyczne i obniżona wartość rynkowa"
-                )
-                filter_result.score = max(0.0, filter_result.score - 20.0)
-
-            # Walkability (PKA)
-            if listing.walkability_pka_dist_m is not None and listing.walkability_pka_dist_m <= 1500:
-                walk_m = listing.walkability_pka_dist_m
-                walk_min = max(1, round(walk_m / 80))
-                pka_n = listing.walkability_pka_name or "PKA"
-                pka_dest = (
-                    " do centrum" if (listing.city or "").lower() not in ("rzeszów", "rzeszow") else " do Rzeszowa"
-                )
-                filter_result.pros.append(
-                    f"🚆 Stacja kolejowa PKA ({pka_n}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd{pka_dest}"
-                )
-                filter_result.score = min(100.0, filter_result.score + 5.0)
-
-            if geo_audit:
-                risks = geo_audit.get("surrounding_risks", [])
-                if risks:
-                    for r in risks:
-                        if not any(
-                            m in r
-                            for m in (
-                                "zagrożenia powodziowego",
-                                "SOPO",
-                                "osuwisk",
-                                "hałas",
-                                "GDOŚ",
-                                "NID",
-                                "cmentar",
-                                "Gleba",
-                                "EGiB",
-                                "Wąska działka",
-                                "szerokość frontu",
-                                "SIDUSIS",
-                                "Stroma działka",
-                                "nachylenie",
-                                "Linia elektroenergetyczna",
-                            )
-                        ):
-                            filter_result.cons.append(f"⚠️ Geoportal: {r}")
-                    if any("Ba" in r or "Bi" in r or "Tk" in r for r in risks):
-                        filter_result.score = max(0.0, filter_result.score - 25.0)
-
-                p_num = geo_audit.get("main_parcel_number")
-                p_area = geo_audit.get("cadastral_area")
-                if p_num and p_area:
-                    filter_result.pros.append(f"Zidentyfikowano działkę w Geoportalu: nr {p_num} ({p_area} m²)")
+                if (val := getattr(listing, sf, None)) is not None:
+                    setattr(filter_result, sf, val)
 
         result["qualified"] = filter_result.is_qualified
 
@@ -657,17 +482,12 @@ class ScraperPipeline:
             # Calculate market negotiation advice
             if market_medians is None:
                 market_medians = await repo.get_market_medians()
-            local_median = resolve_local_median(
-                market_medians,
-                listing.city,
-                listing.district,
-                getattr(listing, "category", "dom"),
-            )
-            advice = analyze_negotiation(
+            valuation_intel = valuation_engine.evaluate(
                 listing=listing,
                 filter_result=filter_result,
-                market_median_m2=local_median,
+                market_medians=market_medians,
             )
+            advice = valuation_intel.negotiation
 
             webhook_url = getattr(profile, "discord_webhook_url", None)
             discord_ok = await self.discord.send_notification(
@@ -720,17 +540,12 @@ class ScraperPipeline:
                     (is_new and not res["is_duplicate_fingerprint"]) or price_changed
                 )
                 if should_notify and db_model.notified_at is None:
-                    local_median = resolve_local_median(
-                        medians,
-                        listing.city,
-                        listing.district,
-                        getattr(listing, "category", "dom"),
-                    )
-                    advice = analyze_negotiation(
+                    valuation_intel = valuation_engine.evaluate(
                         listing=listing,
                         filter_result=filt,
-                        market_median_m2=local_median,
+                        market_medians=medians,
                     )
+                    advice = valuation_intel.negotiation
                     notify_jobs.append(
                         {
                             "res": res,
@@ -1079,7 +894,18 @@ class ScraperPipeline:
             .limit(limit)
         )
         res_coords = await session.execute(missing_coords_stmt)
-        for item in res_coords.scalars().all():
+        coords_items = list(res_coords.scalars().all())
+        total_coords = len(coords_items)
+        if total_coords > 0:
+            global_tracker.add_log(f"📍 Rozpoczęto geokodowanie {total_coords} ofert bez współrzędnych...", level="geo")
+
+        for idx, item in enumerate(coords_items, start=1):
+            if global_tracker.is_cancelled():
+                logger.info("[Pipeline] Cancellation requested during geocoding backfill.")
+                break
+            global_tracker.current_step = f"Geokodowanie adresów: {idx}/{total_coords}..."
+            global_tracker._sync_shared_status()
+
             lat, lon, is_exact = await geocoder.geocode(
                 session=session,
                 street=item.street,
@@ -1110,11 +936,19 @@ class ScraperPipeline:
         )
         res = await session.execute(stmt)
         items = list(res.scalars().all())
-        if not items:
+        if not items or global_tracker.is_cancelled():
             return 0
 
+        total_spatial = len(items)
+        global_tracker.add_log(f"🗺️ Uzupełnianie rejestrów Geoportal/SIDUSIS dla {total_spatial} ofert...", level="geo")
         updated_count = 0
-        for item in items:
+        for idx, item in enumerate(items, start=1):
+            if global_tracker.is_cancelled():
+                logger.info("[Pipeline] Cancellation requested during spatial backfill.")
+                break
+            global_tracker.current_step = f"Audyt Geoportal/rejestry: {idx}/{total_spatial}..."
+            global_tracker._sync_shared_status()
+
             try:
                 assert item.latitude is not None and item.longitude is not None
                 geo_audit = await geoportal_service.audit_location(

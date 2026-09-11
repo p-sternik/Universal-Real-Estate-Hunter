@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 import pytest_asyncio
 from aiohttp.test_utils import TestClient, TestServer
@@ -92,6 +94,31 @@ async def test_geocoder_fallback(test_session: AsyncSession):
     assert lat is not None and lon is not None
     assert abs(lat - 50.04) < 0.05
     assert abs(lon - 22.08) < 0.05
+
+
+@pytest.mark.asyncio
+async def test_geocoder_concurrent_cache_write():
+    from src.storage.database import init_db
+
+    await init_db()
+    geocoder = NominatimGeocoder()
+    geocoder._mem_cache.clear()
+
+    async def write_cache(idx: int):
+        query = f"street:budziwój {idx % 3}, budziwój, polska"
+        await geocoder.set_cache(
+            session=None,
+            query_key=query,
+            lat=49.9668 + idx * 0.001,
+            lon=21.9797 + idx * 0.001,
+            display_name=f"Budziwój {idx}",
+        )
+
+    await asyncio.gather(*[write_cache(i) for i in range(10)])
+
+    res = await geocoder.get_cached(session=None, query_key="street:budziwój 0, budziwój, polska")
+    assert res is not None
+    assert abs(res[0] - 49.9668) < 0.05
 
 
 @pytest.mark.asyncio

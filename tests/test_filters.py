@@ -857,3 +857,71 @@ async def test_qualification_engine_llm_overrides_portal_do_wykonczenia_to_pod_k
     assert res.contact_phone == "+48501234567"
     assert res.contact_person == "Jan Kowalski"
     assert res.worth_interest is True
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_precheck_stage1():
+    """QualificationEngine exposes precheck_stage1 as a clean seam."""
+    engine = QualificationEngine(llm_enabled=False)
+    valid_listing = create_sample_listing(price=700_000.0, area_home=120.0)
+    passed, reasons, matched_wl = engine.precheck_stage1(valid_listing, profile=PermissiveProfile())
+    assert passed is True
+    assert reasons == []
+
+    expensive_listing = create_sample_listing(price=5_000_000.0, area_home=120.0)
+    passed_exp, reasons_exp, _ = engine.precheck_stage1(expensive_listing, profile=PermissiveProfile())
+    assert passed_exp is False
+    assert len(reasons_exp) > 0
+
+
+@pytest.mark.asyncio
+async def test_qualification_engine_deep_spatial_evaluation():
+    """QualificationEngine directly applies spatial risk deductions and pros/cons."""
+    engine = QualificationEngine(llm_enabled=False)
+    listing = create_sample_listing(
+        price=700_000.0,
+        area_home=120.0,
+        raw_description="Dom jednorodzinny wolnostojący, pod klucz, dojazd asfaltowy, kanalizacja miejska, pompa ciepła.",
+    )
+    # Attach spatial findings
+    listing.mpzp_zone = "MN: tereny mieszkaniowe"
+    listing.mpzp_status = "OBOWIĄZUJĄCY"
+    listing.flood_risk_zone = "ZAGROŻENIE_POWODZIOWE"
+    listing.landslide_risk = "OSUWISKO"
+    listing.noise_level_db = 68.0
+    listing.broadband_status = "ŚWIATŁOWÓD_AKTYWNY"
+    listing.parcel_front_width_m = 14.0
+    listing.terrain_slope_pct = 12.0
+    listing.walkability_pka_dist_m = 600
+    listing.walkability_pka_name = "Rzeszów Główny"
+
+    geo_audit = {
+        "surrounding_risks": ["Działka 123 ma użytek komercyjny/składowy (Bi): Bi"],
+        "main_parcel_number": "100/2",
+        "cadastral_area": 950.0,
+    }
+
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile(), geo_audit=geo_audit)
+
+    assert res.is_qualified is True
+    assert res.mpzp_zone == "MN: tereny mieszkaniowe"
+    assert res.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE"
+    assert res.landslide_risk == "OSUWISKO"
+    assert res.noise_level_db == 68.0
+    assert res.broadband_status == "ŚWIATŁOWÓD_AKTYWNY"
+    assert res.parcel_front_width_m == 14.0
+    assert res.terrain_slope_pct == 12.0
+    assert res.walkability_pka_name == "Rzeszów Główny"
+
+    # Verify pros and cons
+    assert any("Miejscowy Plan" in p for p in res.pros)
+    assert any("Światłowód aktywny FTTH" in p for p in res.pros)
+    assert any("Stacja kolejowa PKA" in p for p in res.pros)
+    assert any("Zidentyfikowano działkę w Geoportalu" in p for p in res.pros)
+
+    assert any("Zagrożenie powodziowe" in c for c in res.cons)
+    assert any("Aktywne osuwisko" in c for c in res.cons)
+    assert any("Podwyższony poziom hałasu" in c for c in res.cons)
+    assert any("Wąski front działki" in c for c in res.cons)
+    assert any("Strome nachylenie terenu" in c for c in res.cons)
+    assert any("Geoportal" in c for c in res.cons)

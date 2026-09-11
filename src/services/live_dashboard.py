@@ -14,7 +14,7 @@ from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.services.config_manager import config_manager
-from src.services.market_analyzer import analyze_land_and_utilities, analyze_negotiation, resolve_local_median
+from src.services.market_analyzer import valuation_engine
 from src.services.pipeline import ScraperPipeline
 from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session, init_db, safe_commit
 
@@ -294,10 +294,21 @@ class LiveDashboardServer:
         from src.services.progress import global_tracker, read_shared_status
 
         payload = global_tracker.get_status_payload()
-        if not payload.get("is_running"):
-            shared = read_shared_status()
-            if shared and shared.get("is_running"):
-                return web.json_response(shared)
+        shared = read_shared_status()
+
+        if payload.get("is_running"):
+            return web.json_response(payload)
+
+        if shared and shared.get("is_running"):
+            return web.json_response(shared)
+
+        if (
+            shared
+            and (shared.get("logs") or shared.get("items_scraped", 0) > 0)
+            and (not payload.get("logs") or len(shared.get("logs", [])) >= len(payload.get("logs", [])))
+        ):
+            return web.json_response(shared)
+
         return web.json_response(payload)
 
     async def handle_index(self, request: web.Request) -> web.Response:
@@ -430,20 +441,13 @@ class LiveDashboardServer:
                     )
                 )
 
-                local_median = resolve_local_median(
-                    market_medians,
-                    item.city,
-                    item.district,
-                    item.category,
-                )
-                neg_advice = analyze_negotiation(
+                valuation = valuation_engine.evaluate(
                     listing=item,
-                    market_median_m2=local_median,
+                    market_medians=market_medians,
                     price_drop_amount=float(price_drop_amount or 0.0),
                     price_drop_pct=float(price_drop_pct or 0.0),
                     price_history_count=len(ph),
                 )
-                land_audit = analyze_land_and_utilities(item, market_median_m2=local_median)
 
                 data.append(
                     {
@@ -533,17 +537,8 @@ class LiveDashboardServer:
                         "price_drop_pct": price_drop_pct,
                         "initial_price": initial_price,
                         "price_history_count": len(ph),
-                        # Negotiation & Market Intelligence
-                        "market_median_m2": neg_advice.market_median_m2,
-                        "price_deviation_pct": neg_advice.price_deviation_pct,
-                        "price_deviation_adjusted_pct": neg_advice.price_deviation_adjusted_pct,
-                        "days_on_market": neg_advice.days_on_market,
-                        "negotiation_leverage": neg_advice.negotiation_leverage,
-                        "fair_market_value": neg_advice.fair_market_value,
-                        "suggested_opening_offer": neg_advice.suggested_opening_offer,
-                        "negotiation_arguments": neg_advice.arguments,
-                        # Automated Intelligence: TCO, Commute, Risk
-                        "land_audit": land_audit,
+                        # Negotiation & Market Intelligence & Automated Audits
+                        **valuation.to_dashboard_dict(),
                     }
                 )
 
@@ -848,16 +843,45 @@ class LiveDashboardServer:
         return web.json_response({"status": "started", "message": "Scraping uruchomiony w tle."})
 
     async def handle_cancel_scrape(self, request: web.Request) -> web.Response:
-        from src.services.progress import global_tracker
+        from src.services.progress import (
+            global_tracker,
+            read_shared_status,
+            signal_shared_cancellation,
+            write_shared_status,
+        )
+        from src.services.scrape_lock import get_scrape_lock
 
         logger.info("[LiveDashboard] Stop scrape requested via Web UI.")
-        if not global_tracker.is_running:
+        shared = read_shared_status()
+        lock = get_scrape_lock()
+        is_running = bool(
+            global_tracker.is_running
+            or (shared and shared.get("is_running"))
+            or lock.is_locked()
+            or (self._active_scrape_task and not self._active_scrape_task.done())
+        )
+
+        if not is_running:
+            if shared and (
+                shared.get("is_running")
+                or shared.get("current_step") not in ("Bezczynny", "Zatrzymano", "Zakończono pomyślnie!")
+            ):
+                shared["is_running"] = False
+                shared["current_step"] = "Zatrzymano"
+                write_shared_status(shared)
+            global_tracker.reset()
             return web.json_response(
                 {"status": "not_running", "message": "Scraping nie jest obecnie uruchomiony."},
                 status=200,
             )
 
         global_tracker.request_cancel()
+        signal_shared_cancellation()
+        if shared:
+            shared["cancel_requested"] = True
+            shared["current_step"] = "Zatrzymywanie procesu..."
+            write_shared_status(shared)
+
         if self._active_scrape_task and not self._active_scrape_task.done():
             self._active_scrape_task.cancel()
         return web.json_response({"status": "cancelling", "message": "Zażądano zatrzymania scrapingu."})

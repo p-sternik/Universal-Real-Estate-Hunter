@@ -1334,6 +1334,7 @@ def _calculate_gesut_descriptive(listing: Any) -> dict[str, Any]:
 def analyze_land_and_utilities(
     listing: Any,
     market_median_m2: float | None = None,
+    gesut_networks: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Automated high-ROI intelligence synthesis (100% automated, zero manual lookups):
@@ -1378,7 +1379,7 @@ def analyze_land_and_utilities(
     tco = calculate_tco_audit(listing, market_median_m2=market_median_m2)
     commute = calculate_commute_audit(listing)
     risk = calculate_risk_shield(listing)
-    gesut = calculate_gesut_audit(listing)
+    gesut = calculate_gesut_audit(listing, gesut_networks=gesut_networks)
 
     return {
         "cadastral_packet": cadastral_packet,
@@ -1388,3 +1389,119 @@ def analyze_land_and_utilities(
         "risk_shield": risk,
         "gesut_audit": gesut,
     }
+
+
+@dataclass
+class PropertyValuationIntelligence:
+    """Consolidated valuation and spatial due diligence intelligence."""
+
+    local_median_m2: float | None
+    negotiation: NegotiationAdvice
+    land_and_utilities: dict[str, Any]
+
+    @property
+    def cadastral_packet(self) -> dict[str, Any]:
+        return self.land_and_utilities.get("cadastral_packet", {})
+
+    @property
+    def tco_audit(self) -> dict[str, Any]:
+        return self.land_and_utilities.get("tco_audit", {})
+
+    @property
+    def commute_audit(self) -> dict[str, Any]:
+        return self.land_and_utilities.get("commute_audit", {})
+
+    @property
+    def risk_shield(self) -> dict[str, Any]:
+        return self.land_and_utilities.get("risk_shield", {})
+
+    @property
+    def gesut_audit(self) -> dict[str, Any]:
+        return self.land_and_utilities.get("gesut_audit", {})
+
+    def to_dashboard_dict(self) -> dict[str, Any]:
+        """Provides the exact key-value mapping expected by live dashboard API."""
+        return {
+            "market_median_m2": self.negotiation.market_median_m2,
+            "price_deviation_pct": self.negotiation.price_deviation_pct,
+            "price_deviation_adjusted_pct": self.negotiation.price_deviation_adjusted_pct,
+            "days_on_market": self.negotiation.days_on_market,
+            "negotiation_leverage": self.negotiation.negotiation_leverage,
+            "fair_market_value": self.negotiation.fair_market_value,
+            "suggested_opening_offer": self.negotiation.suggested_opening_offer,
+            "negotiation_arguments": self.negotiation.arguments,
+            "land_audit": self.land_and_utilities,
+        }
+
+
+class PropertyValuationEngine:
+    """Consolidated valuation and financial intelligence engine.
+
+    Synthesizes:
+    - Market median resolution across city/district tiers
+    - Negotiation leverage, FMV, and strategic opening offer
+    - True Cost of Ownership (TCO) including finishing capex, notary, and taxes
+    - Commute matrix (PKA rail, S19/A4, city center)
+    - Spatial Risk Shield (flood, landslides, monuments, noise, high-voltage)
+    - GESUT infrastructure audit (network proximity, water, sewer, fiber)
+    """
+
+    def __init__(
+        self,
+        market_medians: dict[str, float] | None = None,
+        capex_settings: dict[str, Any] | None = None,
+    ) -> None:
+        self.market_medians = market_medians or {}
+        self.capex_settings = capex_settings
+
+    def resolve_median(
+        self,
+        city: str | None,
+        district: str | None,
+        category: str | None,
+        override_medians: dict[str, float] | None = None,
+    ) -> float | None:
+        medians = override_medians if override_medians is not None else self.market_medians
+        return resolve_local_median(medians, city, district, category)
+
+    def evaluate(
+        self,
+        listing: Any,
+        filter_result: FilterResult | None = None,
+        market_medians: dict[str, float] | None = None,
+        price_drop_amount: float = 0.0,
+        price_drop_pct: float = 0.0,
+        price_history_count: int = 1,
+        gesut_networks: dict[str, Any] | None = None,
+    ) -> PropertyValuationIntelligence:
+        medians = market_medians if market_medians is not None else self.market_medians
+        city = _prop(listing, "city", None)
+        district = _prop(listing, "district", None)
+        category = _prop(listing, "category", "dom")
+
+        local_median = resolve_local_median(medians, city, district, category)
+
+        neg_advice = analyze_negotiation(
+            listing=listing,
+            filter_result=filter_result,
+            market_median_m2=local_median,
+            price_drop_amount=price_drop_amount,
+            price_drop_pct=price_drop_pct,
+            price_history_count=price_history_count,
+        )
+
+        land_audit = analyze_land_and_utilities(
+            listing=listing,
+            market_median_m2=local_median,
+            gesut_networks=gesut_networks,
+        )
+
+        return PropertyValuationIntelligence(
+            local_median_m2=local_median,
+            negotiation=neg_advice,
+            land_and_utilities=land_audit,
+        )
+
+
+# Singleton valuation engine instance
+valuation_engine = PropertyValuationEngine()

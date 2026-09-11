@@ -57,11 +57,232 @@ class QualificationEngine:
 
         return estimate_llm_tokens(text)
 
+    def precheck_stage1(self, listing: ListingSchema, profile: Any | None = None) -> tuple[bool, list[str], str | None]:
+        """Fast Stage 1 pre-check to decide whether expensive geocoding/spatial lookups should proceed."""
+        p = profile
+        if not p and getattr(listing, "profile_name", None):
+            from src.services.config_manager import config_manager
+
+            p = config_manager.get_profile(listing.profile_name)
+        return self.stage1.evaluate(listing, profile=p)
+
+    def apply_spatial_findings(
+        self,
+        listing: ListingSchema,
+        score: float,
+        pros: list[str],
+        cons: list[str],
+        geo_audit: dict[str, Any] | None = None,
+    ) -> tuple[float, list[str], list[str]]:
+        """
+        Applies spatial due diligence findings (MPZP, flood, SOPO, EGiB, noise, monuments, broadband, parcel geometry, slope, PKA)
+        directly to the qualification scoring, pros, and cons.
+        """
+        if listing.mpzp_zone:
+            if listing.mpzp_status == "OBOWIĄZUJĄCY":
+                pros.append(f"Miejscowy Plan (MPZP): {listing.mpzp_zone}")
+            elif listing.mpzp_status == "BRAK_PLANU_LUB_CYFRYZACJI":
+                cons.append("⚠️ Brak cyfrowego MPZP w Geoportalu (wymaga weryfikacji WZ)")
+
+        if listing.flood_risk_zone == "ZAGROŻENIE_POWODZIOWE":
+            cons.append("⚠️ Zagrożenie powodziowe (ISOK): Działka w strefie ryzyka powodziowego")
+            score -= 20.0
+
+        # SOPO Landslide
+        if listing.landslide_risk in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
+            cons.append(
+                "🚨 Aktywne osuwisko / Zagrożenie ruchami masowymi (PIG-PIB SOPO): "
+                "Ryzyko naruszenia konstrukcji, odmowy ubezpieczenia lub kredytu"
+            )
+            score -= 50.0
+
+        # EGiB Building disclosure & Soil class
+        if listing.egib_building_status:
+            cat = (
+                listing.category.value
+                if hasattr(listing.category, "value")
+                else str(getattr(listing, "category", "dom"))
+            ).lower()
+            is_house = cat in ("dom", "segment", "blizniak", "szeregowiec") or listing.building_type in (
+                BuildingType.WOLNOSTOJACY,
+                BuildingType.BLIZNIAK,
+                BuildingType.SZEREGOWIEC,
+            )
+            finish = (
+                listing.finish_condition.value
+                if hasattr(listing.finish_condition, "value")
+                else str(listing.finish_condition or "")
+            ).lower()
+            is_developer = "deweloperski" in finish or (
+                hasattr(listing, "market") and str(listing.market).lower() == "pierwotny"
+            )
+
+            if is_house and not is_developer:
+                if listing.egib_building_status == "BRAK_W_EWIDENCJI":
+                    cons.append(
+                        "⚠️ Dom nieujawniony w ewidencji budynków EGiB: Ryzyko samowoli budowlanej, "
+                        "braku odbioru końcowego lub problemu z kredytem hipotecznym"
+                    )
+                    score -= 15.0
+                elif listing.egib_building_status == "UJAWNIONY":
+                    pros.append("Budynek formalnie ujawniony w państwowej ewidencji budynków (EGiB użytek B/Br)")
+
+        if listing.egib_soil_class and re.search(
+            r"\b(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)\b", listing.egib_soil_class, re.IGNORECASE
+        ):
+            cons.append(
+                f"⚠️ Grunt chroniony w EGiB ({listing.egib_soil_class}): Klasa bonitacyjna podlega "
+                "ustawowej ochronie rolnej (trudności z odrolnieniem i rozbudową)"
+            )
+            score -= 10.0
+
+        # Acoustic Noise (>65 dB)
+        if (listing.noise_level_db is not None and listing.noise_level_db > 65.0) or (
+            listing.noise_zone and "WYSOKI" in listing.noise_zone
+        ):
+            db_str = f"{listing.noise_level_db:.0f}" if listing.noise_level_db is not None else ">65"
+            cons.append(
+                f"⚠️ Podwyższony poziom hałasu ({db_str} dB Lden): "
+                "Przekroczenie progu uciążliwości akustycznej w sąsiedztwie korytarza tranzytowego"
+            )
+            score -= 15.0
+
+        # GDOŚ Nature protection
+        if listing.nature_protected_zone:
+            cons.append(
+                f"⚠️ Obszar chroniony przyrodniczo (GDOŚ: {listing.nature_protected_zone}): "
+                "Rygory środowiskowe i ograniczenia inwestycyjne"
+            )
+            score -= 10.0
+
+        # NID Monuments
+        if listing.monument_zone:
+            cons.append(
+                f"🏛️ Obiekt w rejestrze zabytków / strefa konserwatorska (NID: {listing.monument_zone}): "
+                "Wszelkie prace budowlane wymagają uzgodnień z Wojewódzkim Konserwatorem Zabytków (WKZ)"
+            )
+            score -= 15.0
+
+        # Cemetery Buffer
+        if listing.cemetery_buffer_zone:
+            if listing.cemetery_buffer_zone == "<50m":
+                cons.append(
+                    "🚨 Bezpośrednia strefa sanitarna cmentarza (<50m): Ustawowy zakaz rozbudowy "
+                    "i lokalizacji okien mieszkalnych (Rozporządzenie MZ)"
+                )
+                score -= 25.0
+            elif listing.cemetery_buffer_zone == "50-150m":
+                cons.append("⚠️ Strefa ochronna cmentarza (50–150m): Ograniczenia sanitarne i warunki ujęć wody")
+                score -= 10.0
+
+        # Broadband (SIDUSIS)
+        if listing.broadband_status == "ŚWIATŁOWÓD_AKTYWNY":
+            pros.append("🌐 Światłowód aktywny FTTH (potwierdzony w SIDUSIS internet.gov.pl)")
+            score += 5.0
+        elif listing.broadband_status in ("PLANOWANY_KPO", "PLANOWANY_KPO_FERC"):
+            pros.append("📡 Planowana rozbudowa światłowodu (KPO / FERC)")
+        elif listing.broadband_status in ("BRAK", "BRAK_ZASIĘGU"):
+            cons.append(
+                "⚠️ Brak stacjonarnego internetu szerokopasmowego (SIDUSIS): Konieczność łączności LTE/5G lub Starlink"
+            )
+            score -= 5.0
+
+        # Parcel shape & Front width
+        if listing.parcel_front_width_m is not None:
+            if listing.parcel_front_width_m < 16.0:
+                cons.append(
+                    f"📐 Wąski front działki ({listing.parcel_front_width_m:.1f} m < 16 m): "
+                    "Restrykcje odległościowe Prawa Budowlanego i utrudnienia w zagospodarowaniu"
+                )
+                score -= 15.0
+            elif listing.parcel_shape_type == "REGULARNY" and listing.parcel_front_width_m >= 18.0:
+                aspect_val = listing.parcel_aspect_ratio or 1.0
+                pros.append(
+                    f"📐 Foremna działka: szerokość frontu {listing.parcel_front_width_m:.0f} m "
+                    f"(proporcje 1:{aspect_val:.1f})"
+                )
+
+        # Terrain slope & Aspect
+        if listing.terrain_slope_pct is not None:
+            if listing.terrain_slope_pct > 8.0:
+                cons.append(
+                    f"⛰️ Strome nachylenie terenu (spadek {listing.terrain_slope_pct:.1f}%, ekspozycja {listing.terrain_aspect or 'nieokreślona'}): "
+                    "Ryzyko kosztownej niwelacji terenu, budowy murów oporowych i problemów ze spływem wód"
+                )
+                score -= 15.0
+            elif (
+                listing.terrain_aspect in ("POŁUDNIOWY", "POŁUDNIOWO-ZACHODNI", "POŁUDNIOWO-WSCHODNI")
+                and listing.terrain_slope_pct >= 2.0
+            ):
+                pros.append(
+                    f"☀️ Południowa ekspozycja stoku (spadek {listing.terrain_slope_pct:.1f}%) — doskonałe nasłonecznienie pod fotowoltaikę"
+                )
+            elif listing.terrain_slope_pct <= 3.0:
+                pros.append(f"🟢 Płaski, bezpieczny teren (spadek {listing.terrain_slope_pct:.1f}%)")
+
+        # High Voltage Power lines
+        if listing.power_lines_risk and any(
+            k in listing.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN")
+        ):
+            cons.append(
+                f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({listing.power_lines_risk}): "
+                "Pas technologiczny, pole elektromagnetyczne i obniżona wartość rynkowa"
+            )
+            score -= 20.0
+
+        # Walkability (PKA)
+        if listing.walkability_pka_dist_m is not None and listing.walkability_pka_dist_m <= 1500:
+            walk_m = listing.walkability_pka_dist_m
+            walk_min = max(1, round(walk_m / 80))
+            pka_n = listing.walkability_pka_name or "PKA"
+            pka_dest = " do centrum" if (listing.city or "").lower() not in ("rzeszów", "rzeszow") else " do Rzeszowa"
+            pros.append(
+                f"🚆 Stacja kolejowa PKA ({pka_n}: {walk_m} m, ~{walk_min} min pieszo) — szybki dojazd{pka_dest}"
+            )
+            score += 5.0
+
+        # Surrounding risks from geo_audit
+        if geo_audit:
+            risks = geo_audit.get("surrounding_risks", [])
+            if risks:
+                for r in risks:
+                    if not any(
+                        m in r
+                        for m in (
+                            "zagrożenia powodziowego",
+                            "SOPO",
+                            "osuwisk",
+                            "hałas",
+                            "GDOŚ",
+                            "NID",
+                            "cmentar",
+                            "Gleba",
+                            "EGiB",
+                            "Wąska działka",
+                            "szerokość frontu",
+                            "SIDUSIS",
+                            "Stroma działka",
+                            "nachylenie",
+                            "Linia elektroenergetyczna",
+                        )
+                    ):
+                        cons.append(f"⚠️ Geoportal: {r}")
+                if any("Ba" in r or "Bi" in r or "Tk" in r for r in risks):
+                    score -= 25.0
+
+            p_num = geo_audit.get("main_parcel_number")
+            p_area = geo_audit.get("cadastral_area")
+            if p_num and p_area:
+                pros.append(f"Zidentyfikowano działkę w Geoportalu: nr {p_num} ({p_area} m²)")
+
+        return score, pros, cons
+
     async def evaluate_listing(
         self,
         listing: ListingSchema,
         profile: Any | None = None,
         skip_llm: bool = False,
+        geo_audit: dict[str, Any] | None = None,
     ) -> FilterResult:
         """
         Runs the multi-stage qualification pipeline on a single listing.
@@ -340,6 +561,27 @@ class QualificationEngine:
                 ai_questions=ai_questions,
                 contact_phone=contact_phone,
                 contact_person=contact_person,
+                mpzp_zone=listing.mpzp_zone,
+                flood_risk_zone=listing.flood_risk_zone,
+                landslide_risk=listing.landslide_risk,
+                egib_building_status=listing.egib_building_status,
+                egib_soil_class=listing.egib_soil_class,
+                noise_level_db=listing.noise_level_db,
+                noise_zone=listing.noise_zone,
+                nature_protected_zone=listing.nature_protected_zone,
+                monument_zone=listing.monument_zone,
+                cemetery_buffer_zone=listing.cemetery_buffer_zone,
+                broadband_status=listing.broadband_status,
+                broadband_details=listing.broadband_details,
+                parcel_front_width_m=listing.parcel_front_width_m,
+                parcel_length_m=listing.parcel_length_m,
+                parcel_aspect_ratio=listing.parcel_aspect_ratio,
+                parcel_shape_type=listing.parcel_shape_type,
+                terrain_slope_pct=listing.terrain_slope_pct,
+                terrain_aspect=listing.terrain_aspect,
+                walkability_pka_dist_m=listing.walkability_pka_dist_m,
+                walkability_pka_name=listing.walkability_pka_name,
+                power_lines_risk=listing.power_lines_risk,
             )
 
         if not passed_stage2:
@@ -367,6 +609,27 @@ class QualificationEngine:
                 ai_questions=ai_questions,
                 contact_phone=contact_phone,
                 contact_person=contact_person,
+                mpzp_zone=listing.mpzp_zone,
+                flood_risk_zone=listing.flood_risk_zone,
+                landslide_risk=listing.landslide_risk,
+                egib_building_status=listing.egib_building_status,
+                egib_soil_class=listing.egib_soil_class,
+                noise_level_db=listing.noise_level_db,
+                noise_zone=listing.noise_zone,
+                nature_protected_zone=listing.nature_protected_zone,
+                monument_zone=listing.monument_zone,
+                cemetery_buffer_zone=listing.cemetery_buffer_zone,
+                broadband_status=listing.broadband_status,
+                broadband_details=listing.broadband_details,
+                parcel_front_width_m=listing.parcel_front_width_m,
+                parcel_length_m=listing.parcel_length_m,
+                parcel_aspect_ratio=listing.parcel_aspect_ratio,
+                parcel_shape_type=listing.parcel_shape_type,
+                terrain_slope_pct=listing.terrain_slope_pct,
+                terrain_aspect=listing.terrain_aspect,
+                walkability_pka_dist_m=listing.walkability_pka_dist_m,
+                walkability_pka_name=listing.walkability_pka_name,
+                power_lines_risk=listing.power_lines_risk,
             )
 
         # Step 4: Scoring & Status resolution
@@ -448,6 +711,15 @@ class QualificationEngine:
         if listing.has_fiber:
             score += 5.0
 
+        # Step 4.5: Spatial Due Diligence Integration (MPZP, Flood, SOPO, EGiB, Noise, Monuments, FTTH, Slope, etc.)
+        score, pros, cons = self.apply_spatial_findings(
+            listing=listing,
+            score=score,
+            pros=pros,
+            cons=cons,
+            geo_audit=geo_audit,
+        )
+
         score = min(100.0, max(0.0, score))
 
         if matched_wl:
@@ -489,6 +761,27 @@ class QualificationEngine:
             ai_questions=ai_questions,
             contact_phone=contact_phone,
             contact_person=contact_person,
+            mpzp_zone=listing.mpzp_zone,
+            flood_risk_zone=listing.flood_risk_zone,
+            landslide_risk=listing.landslide_risk,
+            egib_building_status=listing.egib_building_status,
+            egib_soil_class=listing.egib_soil_class,
+            noise_level_db=listing.noise_level_db,
+            noise_zone=listing.noise_zone,
+            nature_protected_zone=listing.nature_protected_zone,
+            monument_zone=listing.monument_zone,
+            cemetery_buffer_zone=listing.cemetery_buffer_zone,
+            broadband_status=listing.broadband_status,
+            broadband_details=listing.broadband_details,
+            parcel_front_width_m=listing.parcel_front_width_m,
+            parcel_length_m=listing.parcel_length_m,
+            parcel_aspect_ratio=listing.parcel_aspect_ratio,
+            parcel_shape_type=listing.parcel_shape_type,
+            terrain_slope_pct=listing.terrain_slope_pct,
+            terrain_aspect=listing.terrain_aspect,
+            walkability_pka_dist_m=listing.walkability_pka_dist_m,
+            walkability_pka_name=listing.walkability_pka_name,
+            power_lines_risk=listing.power_lines_risk,
         )
 
 

@@ -2104,9 +2104,13 @@
 
             const pct = Math.min(100, Math.max(0, st.percentage || 0));
             document.getElementById('progPercent').innerText = pct + '%';
-            document.getElementById('progBar').style.width = pct + '%';
-            document.getElementById('progStep').innerText = st.current_step || 'Przetwarzanie…';
-            document.getElementById('progPortal').innerText = st.current_portal ? `Aktywny: ${st.current_portal}` : 'Inicjalizacja…';
+            if (st.is_running) {
+                document.getElementById('progStep').innerText = st.current_step || 'Przetwarzanie…';
+                document.getElementById('progPortal').innerText = st.current_portal ? `Aktywny: ${st.current_portal}` : 'Inicjalizacja…';
+            } else {
+                document.getElementById('progStep').innerText = st.current_step || 'Zakończono';
+                document.getElementById('progPortal').innerText = '';
+            }
 
             document.getElementById('progScraped').innerText = st.items_scraped || 0;
             document.getElementById('progQualified').innerText = st.items_qualified || 0;
@@ -2340,9 +2344,21 @@
                 const out = await Transport.cancelScrape();
                 if (out.status === 'not_running') {
                     showToast("Synchronizacja nie jest obecnie uruchomiona.");
+                    setScrapeButtonState('idle');
+                    if (btnCancel) btnCancel.style.display = 'none';
+                    const progStep = document.getElementById('progStep');
+                    if (progStep) progStep.innerText = 'Gotowy';
+                    const progPortal = document.getElementById('progPortal');
+                    if (progPortal) progPortal.innerText = '';
+                } else {
+                    showToast("Wysłano polecenie zatrzymania.");
                 }
             } catch (e) {
                 showToast("Nie udało się wysłać żądania zatrzymania.");
+                if (btnCancel) {
+                    btnCancel.disabled = false;
+                    btnCancel.innerText = "Zatrzymaj";
+                }
             }
         }
 
