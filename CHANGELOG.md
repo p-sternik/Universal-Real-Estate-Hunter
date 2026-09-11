@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.7.0 (2026-09-11)
+
+### Features
+
+- Safety hard-rejects, configurable CAPEX, spatial cache and dashboard UX
+  ([`4c6903d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/4c6903d037e6760e5197f99c305a3f0f4ca7fbbf))
+
+
 ## v1.6.4 (2026-09-11)
 
 ### Bug Fixes
