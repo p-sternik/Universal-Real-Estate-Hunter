@@ -263,6 +263,13 @@ class ProgressTracker:
         else:
             cat = category
 
+        if cat == "rejected" and level == "warning":
+            level = "info"
+
+        # Prevent exact consecutive duplicate logs
+        if self.logs and self.logs[-1].get("message") == message and self.logs[-1].get("category") == cat:
+            return
+
         entry = {"time": now_str, "message": message, "level": level, "category": cat}
         self.logs.append(entry)
         if len(self.logs) > 500:

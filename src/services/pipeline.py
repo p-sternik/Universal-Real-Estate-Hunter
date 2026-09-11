@@ -595,7 +595,7 @@ class ScraperPipeline:
                 reason_str = "Odrzucono przez reguły"
             global_tracker.add_log(
                 f"❌ [Odrzucono] {listing.title[:60]}: {reason_str}",
-                level="warning",
+                level="info",
                 category="rejected",
             )
             logger.info(f"[Pipeline] Odrzucono '{listing.title[:60]}': {reason_str}")

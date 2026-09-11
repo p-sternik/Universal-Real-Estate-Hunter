@@ -2016,6 +2016,29 @@
         let currentLogFilter = 'all';
         let lastScrapeStatus = null;
 
+        function isLogSuccess(l) {
+            return l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐')));
+        }
+
+        function isLogRejected(l) {
+            return l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]'));
+        }
+
+        function isLogGeo(l) {
+            return l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]') || l.message.includes('[SIDUSIS]')));
+        }
+
+        function isLogAi(l) {
+            return l.category === 'ai' || l.level === 'ai' || (l.message && (l.message.includes('[AI Audit]') || l.message.includes('[AI]')));
+        }
+
+        function isLogError(l) {
+            if (isLogRejected(l) || isLogSuccess(l) || isLogGeo(l) || isLogAi(l)) {
+                return false;
+            }
+            return l.category === 'error' || l.level === 'error' || l.category === 'warning' || l.level === 'warning' || (l.message && (l.message.includes('Błąd') || l.message.includes('🛑')));
+        }
+
         function setLogFilter(filterName, btn) {
             currentLogFilter = filterName;
             const container = document.getElementById('progLogFilters');
@@ -2044,17 +2067,17 @@
             }
 
             let levelBadge = '';
-            if (cat === 'geo' || level === 'geo' || rawMsg.includes('[Geokoder]') || rawMsg.includes('[Rejestry]') || rawMsg.includes('[Geoportal]') || rawMsg.includes('[Backfill]')) {
+            if (isLogGeo(l)) {
                 levelBadge = `<span class="log-level-badge log-level-geo">REJESTRY</span>`;
-            } else if (cat === 'rejected' || level === 'rejected' || rawMsg.includes('[Odrzucono]')) {
+            } else if (isLogRejected(l)) {
                 levelBadge = `<span class="log-level-badge log-level-rejected">ODRZUCONA</span>`;
-            } else if (cat === 'ai' || level === 'ai' || rawMsg.includes('[AI Audit]')) {
+            } else if (isLogAi(l)) {
                 levelBadge = `<span class="log-level-badge log-level-ai">AI AUDIT</span>`;
-            } else if (cat === 'success' || level === 'success' || rawMsg.includes('[Zakwalifikowano]') || rawMsg.includes('⭐')) {
+            } else if (isLogSuccess(l)) {
                 levelBadge = `<span class="log-level-badge log-level-success">KWALIFIKACJA</span>`;
-            } else if (level === 'error' || cat === 'error') {
+            } else if (level === 'error' || cat === 'error' || (rawMsg && rawMsg.includes('Błąd'))) {
                 levelBadge = `<span class="log-level-badge log-level-error">BŁĄD</span>`;
-            } else if (level === 'warning' || cat === 'warning') {
+            } else if (level === 'warning' || cat === 'warning' || (rawMsg && rawMsg.includes('🛑'))) {
                 levelBadge = `<span class="log-level-badge log-level-warning">UWAGA</span>`;
             }
 
@@ -2092,48 +2115,46 @@
             document.getElementById('progElapsed').innerText =
                 elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
 
-            if (st.logs && st.logs.length > 0) {
-                // Update log filter counts
-                const allCnt = st.logs.length;
-                const succCnt = st.logs.filter(l => l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐')))).length;
-                const geoCnt = st.logs.filter(l => l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]')))).length;
-                const isAi = (l) => l.category === 'ai' || l.level === 'ai' || (l.message && l.message.includes('[AI Audit]'));
-                const aiCnt = st.logs.filter(isAi).length;
-                const rejCnt = st.logs.filter(l => l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]'))).length;
-                const errCnt = st.logs.filter(l => l.category === 'error' || l.level === 'error' || l.level === 'warning' || l.category === 'warning').length;
+            const allLogs = st.logs || [];
+            // Update log filter counts
+            const allCnt = allLogs.length;
+            const succCnt = allLogs.filter(isLogSuccess).length;
+            const geoCnt = allLogs.filter(isLogGeo).length;
+            const aiCnt = allLogs.filter(isLogAi).length;
+            const rejCnt = allLogs.filter(isLogRejected).length;
+            const errCnt = allLogs.filter(isLogError).length;
 
-                const elAll = document.getElementById('cntLogAll');
-                if (elAll) elAll.innerText = allCnt;
-                const elSucc = document.getElementById('cntLogSuccess');
-                if (elSucc) elSucc.innerText = succCnt;
-                const elGeo = document.getElementById('cntLogGeo');
-                if (elGeo) elGeo.innerText = geoCnt;
-                const elAi = document.getElementById('cntLogAi');
-                if (elAi) elAi.innerText = aiCnt;
-                const elRej = document.getElementById('cntLogRejected');
-                if (elRej) elRej.innerText = rejCnt;
-                const elErr = document.getElementById('cntLogError');
-                if (elErr) elErr.innerText = errCnt;
+            const elAll = document.getElementById('cntLogAll');
+            if (elAll) elAll.innerText = allCnt;
+            const elSucc = document.getElementById('cntLogSuccess');
+            if (elSucc) elSucc.innerText = succCnt;
+            const elGeo = document.getElementById('cntLogGeo');
+            if (elGeo) elGeo.innerText = geoCnt;
+            const elAi = document.getElementById('cntLogAi');
+            if (elAi) elAi.innerText = aiCnt;
+            const elRej = document.getElementById('cntLogRejected');
+            if (elRej) elRej.innerText = rejCnt;
+            const elErr = document.getElementById('cntLogError');
+            if (elErr) elErr.innerText = errCnt;
 
-                let filteredLogs = st.logs;
-                if (currentLogFilter === 'success') {
-                    filteredLogs = st.logs.filter(l => l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐'))));
-                } else if (currentLogFilter === 'geo') {
-                    filteredLogs = st.logs.filter(l => l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]'))));
-                } else if (currentLogFilter === 'ai') {
-                    filteredLogs = st.logs.filter(isAi);
-                } else if (currentLogFilter === 'rejected') {
-                    filteredLogs = st.logs.filter(l => l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]')));
-                } else if (currentLogFilter === 'error') {
-                    filteredLogs = st.logs.filter(l => l.category === 'error' || l.level === 'error' || l.level === 'warning' || l.category === 'warning');
-                }
+            let filteredLogs = allLogs;
+            if (currentLogFilter === 'success') {
+                filteredLogs = allLogs.filter(isLogSuccess);
+            } else if (currentLogFilter === 'geo') {
+                filteredLogs = allLogs.filter(isLogGeo);
+            } else if (currentLogFilter === 'ai') {
+                filteredLogs = allLogs.filter(isLogAi);
+            } else if (currentLogFilter === 'rejected') {
+                filteredLogs = allLogs.filter(isLogRejected);
+            } else if (currentLogFilter === 'error') {
+                filteredLogs = allLogs.filter(isLogError);
+            }
 
-                const logsHtml = filteredLogs.map(formatLogEntry).join('');
-                const logBox = document.getElementById('progLogs');
-                if (logBox) {
-                    logBox.innerHTML = logsHtml || '<div class="log-row" style="color:var(--text-muted);font-style:italic;padding:4px 0;">Brak zdarzeń w tej kategorii.</div>';
-                    logBox.scrollTop = logBox.scrollHeight;
-                }
+            const logsHtml = filteredLogs.map(formatLogEntry).join('');
+            const logBox = document.getElementById('progLogs');
+            if (logBox) {
+                logBox.innerHTML = logsHtml || '<div class="log-row" style="color:var(--text-muted);font-style:italic;padding:4px 0;">Brak zdarzeń w tej kategorii.</div>';
+                logBox.scrollTop = logBox.scrollHeight;
             }
 
             if (btnCancel) {
