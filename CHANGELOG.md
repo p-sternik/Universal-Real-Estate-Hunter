@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.6.4 (2026-09-11)
+
+### Bug Fixes
+
+- Enforce profile isolation, dynamic city analytics, and multi-provider llm configuration
+  ([`cc74ac6`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/cc74ac61dad781ba771cebf8aaa1c2fcb9cd133c))
+
+
 ## v1.6.3 (2026-09-10)
 
 ### Bug Fixes
