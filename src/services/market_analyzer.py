@@ -425,7 +425,44 @@ def haversine_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     return round(radius_km * c, 2)
 
 
-def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> dict[str, Any]:
+def _resolve_capex_settings(capex: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Resolves CAPEX assumptions: explicit override > global SearchConfig > hardcoded defaults."""
+    defaults: dict[str, Any] = {
+        "developer_rate": 1800.0,
+        "renovation_rate": 2200.0,
+        "agency_fee_pct": 2.0,
+        "pcc_exempt_first_home": False,
+    }
+    if capex is not None:
+        merged = dict(defaults)
+        merged.update({k: v for k, v in capex.items() if v is not None})
+        return merged
+    try:
+        from src.services.config_manager import config_manager
+
+        cap = config_manager.get_config().capex
+        return {
+            "developer_rate": float(cap.developer_rate),
+            "renovation_rate": float(cap.renovation_rate),
+            "agency_fee_pct": float(cap.agency_fee_pct),
+            "pcc_exempt_first_home": bool(cap.pcc_exempt_first_home),
+        }
+    except Exception:
+        return defaults
+
+
+def calculate_tco_audit(
+    listing: Any,
+    market_median_m2: float | None = None,
+    capex: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    _ = market_median_m2
+    capex_cfg = _resolve_capex_settings(capex)
+    developer_rate = float(capex_cfg.get("developer_rate", 1800.0) or 1800.0)
+    renovation_rate = float(capex_cfg.get("renovation_rate", 2200.0) or 2200.0)
+    agency_fee_pct = float(capex_cfg.get("agency_fee_pct", 2.0) or 0.0)
+    pcc_exempt = bool(capex_cfg.get("pcc_exempt_first_home", False))
+
     price = float(_prop(listing, "price", 0.0) or 0.0)
     area = float(_prop(listing, "area_home", 0.0) or _prop(listing, "area_plot", 0.0) or 100.0)
     market = str(_prop(listing, "market", "") or "").lower()
@@ -435,15 +472,15 @@ def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> 
     sewerage = str(_prop(listing, "sewerage", "") or "").lower().replace("_", " ")
     road = str(_prop(listing, "access_road_type", "") or "").lower().replace("_", " ")
 
-    # 1. Finishing cost estimation
+    # 1. Finishing cost estimation (rates configurable in Settings → Koszty CAPEX)
     if "deweloperski" in clean_finish or "do wykończenia" in clean_finish:
-        rate = 1800
+        rate = developer_rate
         finishing_cost = round(area * rate)
-        finish_label = f"Stan deweloperski — adaptacja i wykończenie ({area:.0f} m² × 1 800 zł/m²)"
+        finish_label = f"Stan deweloperski — adaptacja i wykończenie ({area:.0f} m² × {rate:,.0f} zł/m²)"
     elif "do remontu" in clean_finish:
-        rate = 2200
+        rate = renovation_rate
         finishing_cost = round(area * rate)
-        finish_label = f"Do remontu generalnego — instalacje i wykończenie ({area:.0f} m² × 2 200 zł/m²)"
+        finish_label = f"Do remontu generalnego — instalacje i wykończenie ({area:.0f} m² × {rate:,.0f} zł/m²)"
     elif "do zamieszkania" in clean_finish:
         rate = 0
         finishing_cost = 0
@@ -453,10 +490,13 @@ def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> 
         finishing_cost = round(area * rate)
         finish_label = f"Stan nieokreślony — bufor ostrożnościowy na odświeżenie ({area:.0f} m² × 800 zł/m²)"
 
-    # 2. PCC Tax (2% on secondary market, 0% on primary developer market)
+    # 2. PCC Tax (2% on secondary market, 0% on primary developer market or first-home exemption)
     if "pierwotny" in market or ("deweloper" in market):
         pcc_tax = 0.0
         pcc_label = "Rynek pierwotny — faktura VAT (0% PCC)"
+    elif pcc_exempt:
+        pcc_tax = 0.0
+        pcc_label = "Zwolnienie z PCC (zakup pierwszego mieszkania/domu) — 0% PCC"
     else:
         pcc_tax = round(price * 0.02)
         pcc_label = "Rynek wtórny — podatek od czynności cywilnoprawnych (2% PCC)"
@@ -465,13 +505,16 @@ def calculate_tco_audit(listing: Any, market_median_m2: float | None = None) -> 
     notary_fee = calculate_notary_and_court_fee(price)
     notary_label = "Taksa notarialna (MS) + 23% VAT + opłaty sądowe (KW, wpis hipoteki)"
 
-    # 4. Agency fee
+    # 4. Agency fee (configurable % in Settings → Koszty CAPEX)
     if is_private is True:
         agency_fee = 0.0
         agency_label = "Oferta bezpośrednia od właściciela (0% prowizji agencji)"
+    elif agency_fee_pct <= 0:
+        agency_fee = 0.0
+        agency_label = "Prowizja agencji wyłączona w ustawieniach CAPEX (0%)"
     else:
-        agency_fee = round(price * 0.02)
-        agency_label = "Pośrednik / Agencja — szacowana prowizja kupującego (~2% brutto)"
+        agency_fee = round(price * agency_fee_pct / 100.0)
+        agency_label = f"Pośrednik / Agencja — szacowana prowizja kupującego (~{agency_fee_pct:g}% brutto)"
 
     # 5. Infrastructure extra cost (sewerage/road)
     infra_cost = 0.0
@@ -1293,7 +1336,10 @@ def _calculate_gesut_descriptive(listing: Any) -> dict[str, Any]:
     }
 
 
-def analyze_land_and_utilities(listing: Any, market_median_m2: float | None = None) -> dict[str, Any]:
+def analyze_land_and_utilities(
+    listing: Any,
+    market_median_m2: float | None = None,
+) -> dict[str, Any]:
     """
     Automated high-ROI intelligence synthesis (100% automated, zero manual lookups):
     1. TCO & True Acquisition Cost Calculator (finishing, PCC, notary, agency, infrastructure)

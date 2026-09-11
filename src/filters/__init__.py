@@ -33,6 +33,7 @@ class QualificationEngine:
         self.stage1 = Stage1Filter()
         self.stage2 = Stage2SemanticFilter()
         self.llm = LLMAnalyzer(enabled=llm_enabled)
+        self.llm_calls = 0
 
     async def evaluate_listing(
         self,
@@ -159,6 +160,7 @@ class QualificationEngine:
                 category="ai",
             )
             t_llm_start = time.perf_counter()
+            self.llm_calls += 1
             llm_insights = await self.llm.analyze_description(listing)
             t_llm_sec = time.perf_counter() - t_llm_start
             if llm_insights:

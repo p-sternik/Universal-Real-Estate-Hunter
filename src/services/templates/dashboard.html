@@ -147,6 +147,8 @@
                     <option value="area_desc">Metraż (od największego)</option>
                     <option value="price_m2_asc">Cena / m² (najniższa)</option>
                     <option value="created_desc">Data dodania (najnowsze)</option>
+                    <option value="deal_desc">Największe okazje (% poniżej mediany)</option>
+                    <option value="drop_desc">Największe obniżki cen (PLN)</option>
                 </select>
             </div>
 
@@ -250,6 +252,21 @@
                         <option value="miejskie">Miejskie</option>
                     </select>
                 </div>
+                <div class="field-group">
+                    <label for="filterMinRooms">Min. liczba pokoi</label>
+                    <input type="number" id="filterMinRooms" placeholder="np. 3" min="1" max="10" oninput="debouncedApplyFilters()">
+                </div>
+                <div class="field-group">
+                    <label for="filterMinYear">Rok budowy (od roku)</label>
+                    <input type="number" id="filterMinYear" placeholder="np. 2010" min="1800" max="2100" oninput="debouncedApplyFilters()">
+                </div>
+                <div class="field-group">
+                    <label for="filterExactLoc">Dokładność lokalizacji</label>
+                    <select id="filterExactLoc" onchange="applyFilters()">
+                        <option value="ALL">Wszystkie</option>
+                        <option value="EXACT">Tylko dokładny punkt / działka</option>
+                    </select>
+                </div>
             </div>
         </div>
         </section>
@@ -265,6 +282,11 @@
                     Zatrzymaj
                 </button>
                 <span id="progPercent" class="progress-pct">0%</span>
+                <button class="btn btn-sm btn-ghost progress-collapse-btn" id="btnCollapseProgress" onclick="toggleProgressPanel()" title="Zwiń / rozwiń szczegóły" aria-expanded="true" aria-controls="progressPanel">
+                    <svg id="progressCollapseIcon" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="m18 15-6-6-6 6"></path>
+                    </svg>
+                </button>
             </div>
             <div class="prog-bar-track">
                 <div id="progBar" class="prog-bar-fill"></div>
@@ -281,6 +303,7 @@
                     <button type="button" class="log-filter-btn active" data-filter="all" onclick="setLogFilter('all', this)">Wszystkie (<span id="cntLogAll">0</span>)</button>
                     <button type="button" class="log-filter-btn" data-filter="success" onclick="setLogFilter('success', this)">Zakwalifikowane (<span id="cntLogSuccess">0</span>)</button>
                     <button type="button" class="log-filter-btn" data-filter="geo" onclick="setLogFilter('geo', this)">Geoportal / Rejestry (<span id="cntLogGeo">0</span>)</button>
+                    <button type="button" class="log-filter-btn" data-filter="ai" onclick="setLogFilter('ai', this)">AI Audit (<span id="cntLogAi">0</span>)</button>
                     <button type="button" class="log-filter-btn" data-filter="rejected" onclick="setLogFilter('rejected', this)">Odrzucone (<span id="cntLogRejected">0</span>)</button>
                     <button type="button" class="log-filter-btn" data-filter="error" onclick="setLogFilter('error', this)">Błędy / Uwagi (<span id="cntLogError">0</span>)</button>
                 </div>
@@ -396,6 +419,7 @@
 
             <div class="config-tabs">
                 <button type="button" class="config-tab-btn active" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
+                <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty (CAPEX)</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Scrapery i portale</button>
                 <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">Harmonogram</button>
                 <button type="button" class="config-tab-btn" id="tabBtnAi" onclick="switchConfigTab('ai')">Analiza AI</button>
@@ -652,6 +676,23 @@
                     </div>
 
                     <div class="config-field">
+                        <label>Filtry bezpieczeństwa — rejestry publiczne (twarde odrzucenie):</label>
+                        <div class="checkbox-group">
+                            <label class="check-item"><input type="checkbox" id="cfgRejectFlood"> Odrzucaj tereny zalewowe ISOK</label>
+                            <label class="check-item"><input type="checkbox" id="cfgRejectLandslide"> Odrzucaj strefy osuwiskowe SOPO</label>
+                            <label class="check-item"><input type="checkbox" id="cfgRejectHV"> Odrzucaj sąsiedztwo linii WN</label>
+                        </div>
+                    </div>
+
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgMinFront">Min. front działki (m, np. 16):</label>
+                            <input type="number" id="cfgMinFront" placeholder="Bez limitu" step="0.5" min="0">
+                        </div>
+                        <div></div>
+                    </div>
+
+                    <div class="config-field">
                         <label for="cfgBlacklist">Wykluczone słowa (Blacklist, oddzielone przecinkami):</label>
                         <textarea id="cfgBlacklist" rows="2" placeholder="Wpisz opcjonalne słowa do wykluczenia (np. zalewowe, tory... - domyślnie puste)"></textarea>
                     </div>
@@ -659,6 +700,46 @@
                     <div class="config-field">
                         <label for="cfgDiscordWebhook">Dedykowany Webhook Discord (opcjonalny dla profilu):</label>
                         <input type="url" id="cfgDiscordWebhook" placeholder="https://discord.com/api/webhooks/...">
+                    </div>
+                </div>
+
+                <!-- TAB: CAPEX ASSUMPTIONS -->
+                <div id="configTabCapex" style="display:none;">
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                        Założenia kalkulatora kosztów całkowitych (CAPEX). Stosowane do wszystkich ofert
+                        w raporcie Due Diligence (Drawer) oraz na kartach (CAPEX ~…).
+                    </div>
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgCapexDeveloper">Wykończenie deweloperskiego (zł/m²):</label>
+                            <input type="number" id="cfgCapexDeveloper" placeholder="1800" step="50" min="0" value="1800">
+                        </div>
+                        <div class="config-field">
+                            <label for="cfgCapexRenovation">Remont generalny (zł/m²):</label>
+                            <input type="number" id="cfgCapexRenovation" placeholder="2200" step="50" min="0" value="2200">
+                        </div>
+                    </div>
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgCapexAgency">Prowizja agencji (%):</label>
+                            <select id="cfgCapexAgency">
+                                <option value="0">0% (bez prowizji)</option>
+                                <option value="1.5">1.5%</option>
+                                <option value="2" selected>2% (standard)</option>
+                                <option value="2.5">2.5%</option>
+                                <option value="3">3%</option>
+                            </select>
+                        </div>
+                        <div class="config-field">
+                            <label class="check-item" style="margin-top:22px;">
+                                <input type="checkbox" id="cfgCapexPccExempt"> Zwolnienie z PCC 2% (pierwsze mieszkanie/dom)
+                            </label>
+                        </div>
+                    </div>
+                    <div class="hint-box" style="margin-top:12px;">
+                        Stawki służą do szacowania nakładów na wykończenie / remont w TCO.
+                        Prowizja nie dotyczy ofert bezpośrednio od właściciela. Zwolnienie z PCC
+                        zeruje podatek 2% także na rynku wtórnym (pierwsze lokum).
                     </div>
                 </div>
 

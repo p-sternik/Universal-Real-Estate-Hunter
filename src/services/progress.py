@@ -110,9 +110,12 @@ class ProgressTracker:
         self._rich_progress: Progress | None = None
         self._task_id: Any | None = None
         self._session_started_at: datetime | None = None
-        self._total_steps = 1
-        self._portal_base_pct: float = 0.0
-        self._portal_share: float = 85.0
+        # Progress phase windows: init 0-5, parallel scrape 5-60,
+        # sequential listing analysis 60-95, wrap-up 95-100.
+        self._parallel_total = 1
+        self._parallel_done = 0
+        self._proc_base: float = 60.0
+        self._proc_share: float = 35.0
 
     def _sync_shared_status(self) -> None:
         try:
@@ -132,9 +135,10 @@ class ProgressTracker:
         self.percentage = 5
         self.logs = []
         self._session_started_at = datetime.now(UTC)
-        self._total_steps = max(total_portals, 1)
-        self._portal_share = 85 / self._total_steps
-        self._portal_base_pct = 0
+        self._parallel_total = max(total_portals, 1)
+        self._parallel_done = 0
+        self._proc_base = 60.0
+        self._proc_share = 35.0 / self._parallel_total
         self.add_log("🚀 Rozpoczęto cykl scrapingu i analizy ofert.")
         self._sync_shared_status()
 
@@ -162,13 +166,21 @@ class ProgressTracker:
             )
 
     def update_portal(self, portal_name: str, current_page: int, total_pages: int, percent: int):
+        _ = percent  # historical sequential offset; parallel scrape uses record_portal_done instead
         self.current_portal = portal_name
         self.current_page = current_page
         self.total_pages = total_pages
-        self._portal_base_pct = percent
-        self.percentage = min(95, max(self.percentage, percent))
+        self.percentage = min(60, max(self.percentage, 5))
         self.current_step = f"Pobieranie {portal_name} (strona {current_page}/{total_pages})..."
         self.add_log(f"[{portal_name}] Pobieranie strony {current_page}/{total_pages}...")
+        self._refresh_rich()
+        self._sync_shared_status()
+
+    def record_portal_done(self) -> None:
+        """Mark one parallel scrape worker finished (scrape window 5-60, monotonic)."""
+        self._parallel_done = min(self._parallel_total, self._parallel_done + 1)
+        candidate = 5.0 + (self._parallel_done / self._parallel_total) * 55.0
+        self.percentage = int(min(60, max(self.percentage, candidate)))
         self._refresh_rich()
         self._sync_shared_status()
 
@@ -186,7 +198,10 @@ class ProgressTracker:
         frac = (page - 1) / self.total_pages
         if phase == "detail" and items_total > 0:
             frac += (items_done / items_total) / self.total_pages
-        self.percentage = int(min(95, self._portal_base_pct + int(frac * self._portal_share)))
+        frac = min(1.0, max(0.0, frac))
+        # Completed workers + in-flight fraction; max() keeps parallel writers monotonic.
+        candidate = 5.0 + ((self._parallel_done + frac) / self._parallel_total) * 55.0
+        self.percentage = int(min(60, max(self.percentage, candidate)))
 
         if phase == "detail":
             self.current_step = (
@@ -200,10 +215,27 @@ class ProgressTracker:
         self._refresh_rich()
         self._sync_shared_status()
 
+    def begin_processing_step(self, step_idx: int, total_steps: int) -> None:
+        """Anchor the analysis window (60-95) for one sequential batch."""
+        total = max(total_steps, 1)
+        self._proc_base = 60.0 + ((step_idx - 1) / total) * 35.0
+        self._proc_share = 35.0 / total
+        self._refresh_rich()
+        self._sync_shared_status()
+
+    def finish_processing_step(self, step_idx: int, total_steps: int) -> None:
+        """Snap to the end of one sequential batch (never backwards)."""
+        total = max(total_steps, 1)
+        end = 60.0 + (step_idx / total) * 35.0
+        self.percentage = int(min(95, max(self.percentage, end)))
+        self._refresh_rich()
+        self._sync_shared_status()
+
     def update_processing(self, done: int, total: int) -> None:
         """Progress during qualification/analysis of scraped listings."""
+        frac = min(1.0, max(0.0, done / max(total, 1)))
         self.current_step = f"Analiza ofert ({self.current_portal}): {done}/{total}..."
-        self.percentage = int(min(95, self._portal_base_pct + int(self._portal_share)))
+        self.percentage = int(min(95, max(self.percentage, self._proc_base + frac * self._proc_share)))
         self._refresh_rich()
         self._sync_shared_status()
 
@@ -234,7 +266,7 @@ class ProgressTracker:
 
         entry = {"time": now_str, "message": message, "level": level, "category": cat}
         self.logs.append(entry)
-        if len(self.logs) > 300:
+        if len(self.logs) > 500:
             self.logs.pop(0)
         self._sync_shared_status()
 
@@ -273,9 +305,16 @@ class ProgressTracker:
         clear_shared_cancellation()
         self.percentage = 100
         self.current_step = "Zakończono pomyślnie!"
+        if summary.get("llm_enabled", True):
+            ai_part = (
+                f", AI LLM: {summary.get('llm_calls', 0)} analiz "
+                f"(pominięto {summary.get('llm_skipped', 0)} — opis bez zmian lub reguły)"
+            )
+        else:
+            ai_part = ", AI LLM: wyłączona w konfiguracji"
         self.add_log(
             f"✅ Cykl zakończony. Pobrane: {summary.get('total_scraped', 0)}, "
-            f"Nowe: {summary.get('new_listings', 0)}, Zakwalifikowane: {summary.get('qualified', 0)}"
+            f"Nowe: {summary.get('new_listings', 0)}, Zakwalifikowane: {summary.get('qualified', 0)}{ai_part}"
         )
 
         if self._rich_progress and self._task_id is not None:
@@ -304,7 +343,7 @@ class ProgressTracker:
             "items_scraped": self.items_scraped,
             "items_qualified": self.items_qualified,
             "duplicates_found": self.duplicates_found,
-            "logs": self.logs[-150:],
+            "logs": self.logs[-250:],
         }
 
 

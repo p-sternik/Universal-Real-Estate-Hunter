@@ -477,6 +477,7 @@ class LiveDashboardServer:
                         "walkability_pka_dist_m": item.walkability_pka_dist_m,
                         "walkability_pka_name": item.walkability_pka_name,
                         "power_lines_risk": item.power_lines_risk,
+                        "gesut_networks": item.gesut_networks_data,
                         "user_status": item.user_status or "NEW",
                         "user_notes": item.user_notes or "",
                         "access_road_type": item.access_road_type,

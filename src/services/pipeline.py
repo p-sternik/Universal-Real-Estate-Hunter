@@ -62,6 +62,7 @@ class ScraperPipeline:
             "price_changed": False,
             "qualified": False,
             "notified": False,
+            "llm_skipped": False,
         }
 
         if profile:
@@ -215,7 +216,10 @@ class ScraperPipeline:
                     from src.services.geoportal import geoportal_service
 
                     geo_audit = await geoportal_service.audit_location(
-                        listing.coordinates[0], listing.coordinates[1], radius_meters=120
+                        listing.coordinates[0],
+                        listing.coordinates[1],
+                        radius_meters=120,
+                        category=getattr(listing, "category", "dom"),
                     )
                     if geo_audit.get("main_parcel_id"):
                         listing.parcel_id = geo_audit["main_parcel_id"]
@@ -280,6 +284,7 @@ class ScraperPipeline:
             )
             if desc_unchanged and (existing_model.ai_summary or existing_model.ai_questions):
                 skip_llm = True
+        result["llm_skipped"] = skip_llm
 
         # 2. Run two-stage qualification engine (LLM now receives spatial context in listing!)
         filter_result = await self.engine.evaluate_listing(listing, profile=profile, skip_llm=skip_llm)
@@ -544,13 +549,18 @@ class ScraperPipeline:
 
         if not filter_result.is_qualified:
             reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
-            reason_str = "; ".join(reasons)[:60] if reasons else "Odrzucono przez reguły"
+            if reasons:
+                reason_str = reasons[0]
+                if len(reasons) > 1:
+                    reason_str += f" (+{len(reasons) - 1} więcej)"
+            else:
+                reason_str = "Odrzucono przez reguły"
             global_tracker.add_log(
-                f"❌ [Odrzucono] {listing.title[:35]}: {reason_str}",
+                f"❌ [Odrzucono] {listing.title[:60]}: {reason_str}",
                 level="warning",
                 category="rejected",
             )
-            logger.info(f"[Pipeline] Odrzucono '{listing.title[:40]}': {reason_str}")
+            logger.info(f"[Pipeline] Odrzucono '{listing.title[:60]}': {reason_str}")
         else:
             global_tracker.add_log(
                 f"⭐ [Zakwalifikowano] {listing.title[:35]} ({listing.price:,.0f} zł) — Wynik: {filter_result.score:.0f} pkt",
@@ -650,6 +660,7 @@ class ScraperPipeline:
         total_price_changes = 0
         total_qualified = 0
         total_notified = 0
+        total_llm_skipped = 0
 
         if self._custom_scrapers:
             execution_plan: list[tuple[SearchProfile | None, list[BaseScraper]]] = [(None, self.scrapers)]
@@ -741,6 +752,7 @@ class ScraperPipeline:
             finally:
                 elapsed = time.perf_counter() - t_start
                 scrape_portal_times.append((scraper.name, elapsed))
+                global_tracker.record_portal_done()
                 logger.info(f"[Pipeline] [{scraper.name} - {prof_name}] scrape took {elapsed:.1f}s.")
                 try:
                     await scraper.close()
@@ -764,7 +776,7 @@ class ScraperPipeline:
 
             step_idx += 1
             total_scraped += len(listings)
-            base_pct = int(((step_idx - 1) / total_steps) * 85)
+            global_tracker.begin_processing_step(step_idx, total_steps)
 
             if not listings:
                 continue
@@ -813,6 +825,8 @@ class ScraperPipeline:
                     total_qualified += 1
                 if res["notified"]:
                     total_notified += 1
+                if res.get("llm_skipped"):
+                    total_llm_skipped += 1
 
                 global_tracker.record_items(
                     count=1,
@@ -820,8 +834,7 @@ class ScraperPipeline:
                     duplicates=1 if res["is_duplicate_fingerprint"] else 0,
                 )
 
-            step_pct = base_pct + int((step_idx / total_steps) * 85)
-            global_tracker.percentage = step_pct
+            global_tracker.finish_processing_step(step_idx, total_steps)
 
         # Backfill spatial audit for existing database listings missing new metrics
         if not global_tracker.is_cancelled():
@@ -851,6 +864,9 @@ class ScraperPipeline:
             "price_changes": total_price_changes,
             "qualified": total_qualified,
             "notified": total_notified,
+            "llm_calls": self.engine.llm_calls,
+            "llm_skipped": total_llm_skipped,
+            "llm_enabled": self.llm_analysis_enabled,
             "cancelled": global_tracker.is_cancelled(),
         }
 
@@ -864,7 +880,8 @@ class ScraperPipeline:
         logger.info(
             f"=== Cycle Finished ===\n"
             f"Scraped: {total_scraped} | New: {total_new} | Duplicates: {total_duplicates} | "
-            f"Price changes: {total_price_changes} | Qualified: {total_qualified} | Notified: {total_notified}"
+            f"Price changes: {total_price_changes} | Qualified: {total_qualified} | Notified: {total_notified} | "
+            f"LLM: {self.engine.llm_calls} analiz, {total_llm_skipped} pominiętych"
         )
         return summary
 
@@ -927,7 +944,12 @@ class ScraperPipeline:
         for item in items:
             try:
                 assert item.latitude is not None and item.longitude is not None
-                geo_audit = await geoportal_service.audit_location(item.latitude, item.longitude, radius_meters=120)
+                geo_audit = await geoportal_service.audit_location(
+                    item.latitude,
+                    item.longitude,
+                    radius_meters=120,
+                    category=getattr(item, "category", "dom"),
+                )
                 if not geo_audit:
                     continue
 

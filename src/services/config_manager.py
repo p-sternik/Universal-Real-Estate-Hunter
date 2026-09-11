@@ -239,6 +239,15 @@ class SchedulerSettings(BaseModel):
             return max(1, self.interval_minutes)
 
 
+class CapexSettings(BaseModel):
+    """Configurable assumptions for the CAPEX / TCO calculator (editable in Settings)."""
+
+    developer_rate: float = 1800.0
+    renovation_rate: float = 2200.0
+    agency_fee_pct: float = 2.0
+    pcc_exempt_first_home: bool = False
+
+
 class SearchProfile(BaseModel):
     id: str = "default"
     name: str = "Domy Rzeszów"
@@ -272,6 +281,11 @@ class SearchProfile(BaseModel):
     enabled_portals: list[str] | None = None
     discord_webhook_url: str | None = None
     otodom_path: str | None = None
+    # Safety filters based on public spatial registers (ISOK / SOPO / power lines / parcel geometry)
+    reject_flood_risk: bool = False
+    reject_landslide_risk: bool = False
+    reject_high_voltage: bool = False
+    min_parcel_front_m: float | None = None
 
     @property
     def city_slug(self) -> str:
@@ -444,6 +458,7 @@ class SearchConfig(BaseModel):
     llm_provider: str = Field(default="auto")
     ollama_model: str = Field(default_factory=lambda: settings.OLLAMA_MODEL)
     openrouter_model: str = Field(default_factory=lambda: settings.OPENROUTER_MODEL)
+    capex: CapexSettings = Field(default_factory=CapexSettings)
 
     def __getattr__(self, item: str) -> Any:
         # Transparent proxy to active/first profile for backward compatibility
@@ -457,6 +472,7 @@ class SearchConfig(BaseModel):
                 "llm_provider",
                 "ollama_model",
                 "openrouter_model",
+                "capex",
             )
             and hasattr(self, "profiles")
             and self.profiles
@@ -607,6 +623,10 @@ class ConfigManager:
             current_dict["scrapers"] = updates["scrapers"]
         if "scheduler" in updates:
             current_dict["scheduler"] = updates["scheduler"]
+        if "capex" in updates and isinstance(updates["capex"], dict):
+            merged = dict(current_dict.get("capex") or {})
+            merged.update(updates["capex"])
+            current_dict["capex"] = merged
         if "llm_analysis_enabled" in updates:
             current_dict["llm_analysis_enabled"] = bool(updates["llm_analysis_enabled"])
         if "llm_provider" in updates and updates["llm_provider"]:
@@ -625,6 +645,7 @@ class ConfigManager:
                 "profiles",
                 "scrapers",
                 "scheduler",
+                "capex",
                 "llm_analysis_enabled",
                 "llm_provider",
                 "ollama_model",

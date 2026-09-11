@@ -7,7 +7,7 @@ from .database import (
     safe_commit,
     verify_and_repair_sqlite_permissions,
 )
-from .models import Base, GeocacheModel, ListingModel, PriceHistoryModel
+from .models import Base, GeocacheModel, ListingModel, PriceHistoryModel, SpatialCacheModel
 from .repository import ListingRepository
 
 __all__ = [
@@ -15,6 +15,7 @@ __all__ = [
     "ListingModel",
     "PriceHistoryModel",
     "GeocacheModel",
+    "SpatialCacheModel",
     "ListingRepository",
     "get_engine",
     "get_session",

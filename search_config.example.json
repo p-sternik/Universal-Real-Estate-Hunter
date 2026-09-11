@@ -138,9 +138,19 @@
         "osuwisko"
       ],
       "enabled_portals": null,
-      "discord_webhook_url": null
+      "discord_webhook_url": null,
+      "reject_flood_risk": false,
+      "reject_landslide_risk": false,
+      "reject_high_voltage": false,
+      "min_parcel_front_m": null
     }
   ],
+  "capex": {
+    "developer_rate": 1800.0,
+    "renovation_rate": 2200.0,
+    "agency_fee_pct": 2.0,
+    "pcc_exempt_first_home": false
+  },
   "scrapers": {
     "otodom": {
       "enabled": true,

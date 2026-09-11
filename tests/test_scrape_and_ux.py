@@ -552,3 +552,42 @@ def test_config_manager_llm_settings_roundtrip():
     assert updated.llm_provider == "openrouter"
     assert updated.ollama_model == "llama3.1:8b"
     assert updated.openrouter_model == "google/gemini-2.5-flash-lite:nitro"
+
+
+@pytest.mark.asyncio
+async def test_live_dashboard_listings_endpoint_contains_full_data():
+    """Verify GET /api/listings returns full data including on-demand audit, arguments and description."""
+    await init_db()
+    server = LiveDashboardServer(port=8091)
+
+    listing = ListingSchema(
+        id="test-details-ux-1",
+        portal="Otodom",
+        title="Dom z działką i geometrią",
+        url="https://otodom.pl/test-details-ux-1",
+        price=750_000,
+        price_per_m2=6_000.0,
+        area_home=125.0,
+        area_plot=800.0,
+        location_raw="Rzeszów, Słocina",
+        parcel_id="186301_1.0001.123/4",
+        raw_description="Pełny opis forensic z analizą stanu prawnego i wykończenia.",
+    )
+
+    async with get_session() as session:
+        repo = ListingRepository(session)
+        filt = FilterResult(
+            is_qualified=True, status=QualificationStatus.QUALIFIED, passed_stage1=True, passed_stage2=True
+        )
+        await repo.save_or_update(listing, filt)
+
+    async with TestClient(TestServer(server.app)) as client:
+        resp = await client.get("/api/listings")
+        assert resp.status == 200
+        listings_data = await resp.json()
+        target = next((item for item in listings_data if item.get("portal_id") == "test-details-ux-1"), None)
+        assert target is not None
+        assert target["portal_id"] == "test-details-ux-1"
+        assert "land_audit" in target
+        assert "negotiation_arguments" in target
+        assert "fair_market_value" in target

@@ -79,6 +79,10 @@ class Stage1Filter:
         self.building_types = (
             building_types if building_types is not None else (getattr(cfg, "building_types", None) or [])
         )
+        self.reject_flood_risk = bool(getattr(cfg, "reject_flood_risk", False))
+        self.reject_landslide_risk = bool(getattr(cfg, "reject_landslide_risk", False))
+        self.reject_high_voltage = bool(getattr(cfg, "reject_high_voltage", False))
+        self.min_parcel_front_m = self._parse_front(getattr(cfg, "min_parcel_front_m", None))
 
     RE_NEGATION_PREFIX = re.compile(
         r"(?:bez|brak|woln[yae]\s+od|nie\s+ma|poza\s+terenem|nie\s+leży\s+na|nie\s+lezy\s+na|brak\s+ryzyka|nie\s+jest\s+to|nie\s+znajduje\s+się\s+na|działka\s+płaska\s*,?\s*bez)(?:\s+ryzyka)?(?:\s+\w+){0,3}\s*$",
@@ -141,6 +145,41 @@ class Stage1Filter:
                     return term
 
         return None
+
+    @staticmethod
+    def _parse_front(value: Any) -> float | None:
+        try:
+            return float(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def check_safety_filters(self, listing: ListingSchema, profile: Any | None = None) -> list[str]:
+        """Hard safety rejects based on public spatial registers. Unknown data never rejects."""
+        p = profile or self.profile
+        reject_flood = bool(getattr(p, "reject_flood_risk", self.reject_flood_risk) if p else self.reject_flood_risk)
+        reject_slide = bool(
+            getattr(p, "reject_landslide_risk", self.reject_landslide_risk) if p else self.reject_landslide_risk
+        )
+        reject_hv = bool(getattr(p, "reject_high_voltage", self.reject_high_voltage) if p else self.reject_high_voltage)
+        min_front_f = self._parse_front(
+            getattr(p, "min_parcel_front_m", self.min_parcel_front_m) if p else self.min_parcel_front_m
+        )
+
+        reasons: list[str] = []
+        if reject_flood and "POWODZ" in str(listing.flood_risk_zone or "").upper():
+            reasons.append("Odrzucono: teren zalewowy ISOK (strefa zagrożenia powodziowego)")
+        if reject_slide:
+            slide = str(listing.landslide_risk or "").upper()
+            if "OSUWISKO" in slide or "ZAGROŻENIE" in slide or "RYZYKO" in slide:
+                reasons.append("Odrzucono: strefa zagrożenia osuwiskowego SOPO (PIG-PIB)")
+        if reject_hv:
+            hv = str(listing.power_lines_risk or "").upper()
+            if any(k in hv for k in ("LINIA", "400KV", "220KV", "110KV", "WN", "WYSOKIEGO NAPIĘCIA")):
+                reasons.append("Odrzucono: bezpośrednie sąsiedztwo napowietrznej linii wysokiego napięcia")
+        front_f = self._parse_front(listing.parcel_front_width_m)
+        if min_front_f and min_front_f > 0 and front_f is not None and front_f < min_front_f:
+            reasons.append(f"Front działki {front_f:.1f} m węższy niż wymagane min. {min_front_f:.0f} m")
+        return reasons
 
     def check_whitelist(self, listing: ListingSchema, areas: list[dict] | None = None) -> str | None:
         """
@@ -306,6 +345,9 @@ class Stage1Filter:
             if max_plot and effective_plot > max_plot:
                 reasons.append(f"Powierzchnia działki {effective_plot:.0f} m² większa niż dopuszczalne {max_plot} m²")
 
+        # 6. Safety filters from public spatial registers (hard reject, unknown data never rejects)
+        reasons.extend(self.check_safety_filters(listing, profile=p))
+
         if reasons:
             return False, reasons, None
 
@@ -354,6 +396,10 @@ class Stage1Filter:
         borderline: list[str] = []
 
         if self.check_blacklist(listing, bl_words):
+            return []
+
+        # Safety rejects are never borderline — hard environmental failures stay rejected.
+        if self.check_safety_filters(listing, profile=p):
             return []
 
         if (min_p or 0) > 0 and listing.price < min_p:

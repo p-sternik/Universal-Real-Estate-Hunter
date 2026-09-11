@@ -329,6 +329,27 @@ async def _migrate_sqlite_columns(conn) -> None:
                     if col_name not in existing_cols:
                         logger.info(f"Migrating schema: adding '{col_name}' to listings table")
                         sync_conn.execute(text(f"ALTER TABLE listings ADD COLUMN {col_name} {col_type}"))
+
+                sync_conn.execute(
+                    text(
+                        """
+                        CREATE TABLE IF NOT EXISTS spatial_cache (
+                            cache_key VARCHAR(300) PRIMARY KEY,
+                            data_json TEXT NOT NULL,
+                            created_at DATETIME NOT NULL,
+                            expires_at DATETIME
+                        )
+                        """
+                    )
+                )
+                sync_conn.execute(
+                    text("CREATE INDEX IF NOT EXISTS ix_spatial_cache_expires ON spatial_cache (expires_at)")
+                )
+                sync_conn.execute(
+                    text(
+                        "CREATE INDEX IF NOT EXISTS ix_listings_perf ON listings (profile_id, is_qualified, qualification_score, created_at)"
+                    )
+                )
         except Exception as e:
             logger.warning(f"Schema migration note: {e}")
 

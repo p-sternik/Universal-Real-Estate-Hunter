@@ -611,6 +611,13 @@
             gap: 3px;
         }
 
+        .progress-collapse-btn { padding: 2px 6px; }
+        .progress-collapse-btn svg { display: block; transition: transform 0.15s ease; }
+        .progress-strip.collapsed .prog-metrics,
+        .progress-strip.collapsed .prog-logs-header,
+        .progress-strip.collapsed .prog-logs { display: none; }
+        .progress-strip.collapsed #progressCollapseIcon { transform: rotate(180deg); }
+
         .log-row { display: flex; align-items: baseline; gap: 8px; color: var(--text-secondary); }
         .log-time { color: var(--text-faint); flex: none; }
         .log-level-badge {

@@ -330,22 +330,19 @@
         // Configuration modal
         // ========================
         function switchConfigTab(tab) {
-            const btnP = document.getElementById('tabBtnProfiles');
-            const btnS = document.getElementById('tabBtnScrapers');
-            const btnSch = document.getElementById('tabBtnScheduler');
-            const btnAi = document.getElementById('tabBtnAi');
-            const tabP = document.getElementById('configTabProfiles');
-            const tabS = document.getElementById('configTabScrapers');
-            const tabSch = document.getElementById('configTabScheduler');
-            const tabAi = document.getElementById('configTabAi');
-            if (btnP) btnP.classList.toggle('active', tab === 'profiles');
-            if (btnS) btnS.classList.toggle('active', tab === 'scrapers');
-            if (btnSch) btnSch.classList.toggle('active', tab === 'scheduler');
-            if (btnAi) btnAi.classList.toggle('active', tab === 'ai');
-            if (tabP) tabP.style.display = (tab === 'profiles') ? 'block' : 'none';
-            if (tabS) tabS.style.display = (tab === 'scrapers') ? 'block' : 'none';
-            if (tabSch) tabSch.style.display = (tab === 'scheduler') ? 'block' : 'none';
-            if (tabAi) tabAi.style.display = (tab === 'ai') ? 'block' : 'none';
+            const tabs = [
+                ['tabBtnProfiles', 'configTabProfiles', 'profiles'],
+                ['tabBtnCapex', 'configTabCapex', 'capex'],
+                ['tabBtnScrapers', 'configTabScrapers', 'scrapers'],
+                ['tabBtnScheduler', 'configTabScheduler', 'scheduler'],
+                ['tabBtnAi', 'configTabAi', 'ai'],
+            ];
+            tabs.forEach(([btnId, tabId, name]) => {
+                const btn = document.getElementById(btnId);
+                if (btn) btn.classList.toggle('active', tab === name);
+                const tabEl = document.getElementById(tabId);
+                if (tabEl) tabEl.style.display = (tab === name) ? 'block' : 'none';
+            });
             if (tab === 'ai' && typeof checkLlmStatusIfEmpty === 'function') {
                 checkLlmStatusIfEmpty();
             }
@@ -477,6 +474,10 @@
             document.querySelectorAll('.cfg-heating').forEach(cb => { cb.checked = !heatingAll && heatingAllowed.includes(cb.value); });
             document.getElementById('cfgRejectSeptic').checked = !!p.reject_septic_tank;
             document.getElementById('cfgAllowVis').checked = p.allow_visualisations !== false;
+            if (document.getElementById('cfgRejectFlood')) document.getElementById('cfgRejectFlood').checked = !!p.reject_flood_risk;
+            if (document.getElementById('cfgRejectLandslide')) document.getElementById('cfgRejectLandslide').checked = !!p.reject_landslide_risk;
+            if (document.getElementById('cfgRejectHV')) document.getElementById('cfgRejectHV').checked = !!p.reject_high_voltage;
+            if (document.getElementById('cfgMinFront')) document.getElementById('cfgMinFront').value = (p.min_parcel_front_m !== null && p.min_parcel_front_m !== undefined) ? p.min_parcel_front_m : '';
 
             document.getElementById('cfgMinAreaHome').value = p.min_area_home || '';
             document.getElementById('cfgMaxAreaHome').value = p.max_area_home || '';
@@ -558,7 +559,11 @@
                 building_types: ["szeregowiec", "bliźniak", "wolnostojący", "inny"],
                 allowed_heating_types: ["all"],
                 allow_visualisations: true,
-                reject_septic_tank: false
+                reject_septic_tank: false,
+                reject_flood_risk: false,
+                reject_landslide_risk: false,
+                reject_high_voltage: false,
+                min_parcel_front_m: null
             };
             allProfiles.push(newP);
             currentProfileId = newId;
@@ -634,6 +639,11 @@
             p.allowed_heating_types = heatingSel.length > 0 ? heatingSel : ["all"];
             p.reject_septic_tank = document.getElementById('cfgRejectSeptic').checked;
             p.allow_visualisations = document.getElementById('cfgAllowVis').checked;
+            p.reject_flood_risk = !!document.getElementById('cfgRejectFlood')?.checked;
+            p.reject_landslide_risk = !!document.getElementById('cfgRejectLandslide')?.checked;
+            p.reject_high_voltage = !!document.getElementById('cfgRejectHV')?.checked;
+            const minFrontRaw = document.getElementById('cfgMinFront')?.value;
+            p.min_parcel_front_m = (minFrontRaw !== undefined && minFrontRaw !== null && String(minFrontRaw).trim() !== '') ? parseFloat(minFrontRaw) : null;
 
             if (cat === 'dom') {
                 p.min_area_home = parseFloat(document.getElementById('cfgMinAreaHome').value) || 0;
@@ -705,6 +715,20 @@
                 document.getElementById('cfgOpenRouterModel').value = activeConfig.openrouter_model || 'google/gemini-2.5-flash-lite:nitro';
             }
 
+            const capex = activeConfig.capex || {};
+            if (document.getElementById('cfgCapexDeveloper')) {
+                document.getElementById('cfgCapexDeveloper').value = capex.developer_rate ?? 1800;
+            }
+            if (document.getElementById('cfgCapexRenovation')) {
+                document.getElementById('cfgCapexRenovation').value = capex.renovation_rate ?? 2200;
+            }
+            if (document.getElementById('cfgCapexAgency')) {
+                document.getElementById('cfgCapexAgency').value = String(capex.agency_fee_pct ?? 2);
+            }
+            if (document.getElementById('cfgCapexPccExempt')) {
+                document.getElementById('cfgCapexPccExempt').checked = !!capex.pcc_exempt_first_home;
+            }
+
             if (!currentProfileId && allProfiles.length > 0) {
                 currentProfileId = allProfiles[0].id;
             }
@@ -756,10 +780,18 @@
                 night_interval_minutes: parseInt(document.getElementById('cfgNightIntervalMinutes')?.value) || 60
             };
 
+            const capexPayload = {
+                developer_rate: parseFloat(document.getElementById('cfgCapexDeveloper')?.value) || 1800,
+                renovation_rate: parseFloat(document.getElementById('cfgCapexRenovation')?.value) || 2200,
+                agency_fee_pct: parseFloat(document.getElementById('cfgCapexAgency')?.value ?? '2') || 0,
+                pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked
+            };
+
             const payload = {
                 profiles: allProfiles,
                 scrapers: scrapersPayload,
                 scheduler: schedulerPayload,
+                capex: capexPayload,
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
                 llm_provider: document.getElementById('cfgLlmProvider')?.value || 'auto',
                 ollama_model: document.getElementById('cfgOllamaModel')?.value?.trim() || 'llama3.1:8b',
@@ -960,6 +992,9 @@
             if (document.getElementById('filterVis')) document.getElementById('filterVis').value = 'ALL';
             if (document.getElementById('filterSewerage')) document.getElementById('filterSewerage').value = 'ALL';
             if (document.getElementById('filterHeating')) document.getElementById('filterHeating').value = 'ALL';
+            if (document.getElementById('filterMinRooms')) document.getElementById('filterMinRooms').value = '';
+            if (document.getElementById('filterMinYear')) document.getElementById('filterMinYear').value = '';
+            if (document.getElementById('filterExactLoc')) document.getElementById('filterExactLoc').value = 'ALL';
             if (document.getElementById('searchInput')) document.getElementById('searchInput').value = '';
             setFilter('ALL');
         }
@@ -979,6 +1014,9 @@
             const visVal = document.getElementById('filterVis')?.value || 'ALL';
             const sewerageVal = document.getElementById('filterSewerage')?.value || 'ALL';
             const heatingVal = document.getElementById('filterHeating')?.value || 'ALL';
+            const minRoomsVal = parseInt(document.getElementById('filterMinRooms')?.value) || null;
+            const minYearVal = parseInt(document.getElementById('filterMinYear')?.value) || null;
+            const exactLocVal = document.getElementById('filterExactLoc')?.value || 'ALL';
 
             const baseListings = getListingsForActiveProfile();
 
@@ -1010,6 +1048,9 @@
                 if (visVal === 'ONLY_VIS' && !item.has_visualisations) return false;
                 if (sewerageVal !== 'ALL' && item.sewerage !== sewerageVal) return false;
                 if (heatingVal !== 'ALL' && item.heating !== heatingVal) return false;
+                if (minRoomsVal && (item.rooms === null || item.rooms === undefined || item.rooms < minRoomsVal)) return false;
+                if (minYearVal && (item.year_built === null || item.year_built === undefined || item.year_built < minYearVal)) return false;
+                if (exactLocVal === 'EXACT' && !item.is_exact_coords) return false;
 
                 if (query) {
                     const haystack = [
@@ -1035,6 +1076,16 @@
                 filtered.sort((a, b) => a.price_per_m2 - b.price_per_m2);
             } else if (sortMode === 'created_desc') {
                 filtered.sort((a, b) => new Date(b.created_at || 0) - new Date(a.created_at || 0));
+            } else if (sortMode === 'deal_desc') {
+                const devOf = (i) => {
+                    const v = (i.price_deviation_adjusted_pct !== null && i.price_deviation_adjusted_pct !== undefined)
+                        ? i.price_deviation_adjusted_pct
+                        : i.price_deviation_pct;
+                    return (v === null || v === undefined) ? 9999 : v;
+                };
+                filtered.sort((a, b) => devOf(a) - devOf(b));
+            } else if (sortMode === 'drop_desc') {
+                filtered.sort((a, b) => (b.price_drop_amount || 0) - (a.price_drop_amount || 0));
             }
 
             return filtered;
@@ -1113,6 +1164,11 @@
             sel('filterVis', 'Zdjęcia');
             sel('filterSewerage', 'Ścieki');
             sel('filterHeating', 'Ogrzewanie');
+            const minRooms = parseInt(document.getElementById('filterMinRooms')?.value);
+            if (minRooms) add('filterMinRooms', 'Pokoje', `≥ ${minRooms}`);
+            const minYear = parseInt(document.getElementById('filterMinYear')?.value);
+            if (minYear) add('filterMinYear', 'Rok budowy', `≥ ${minYear}`);
+            sel('filterExactLoc', 'Lokalizacja');
 
             const xSvg = `<svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>`;
 
@@ -1586,23 +1642,80 @@
             const mpzpZoneText = item.mpzp_zone ? escapeHtml(item.mpzp_zone.length > 25 ? item.mpzp_zone.slice(0, 25) + '…' : item.mpzp_zone) : '';
             const floodWarn = item.flood_risk_zone === 'ZAGROZENIE_POWODZIOWE';
 
-            // Fixed 3×3 technical grid — always exactly 9 cells, '—' fallback for missing data
+            // Contextual 3×3 technical grid — always exactly 9 cells, '—' fallback for missing data
             const specCell = (label, value) => {
                 const has = value !== null && value !== undefined && String(value).trim() !== '';
                 return `<div class="spec-cell"><span class="spec-label">${label}</span><span class="spec-value${has ? '' : ' spec-value-empty'}">${has ? value : '—'}</span></div>`;
             };
 
-            const specsHtml = [
-                specCell('Dom', item.area_home > 0 ? `${item.area_home.toFixed(1)} m²` : ''),
-                specCell('Działka', plotText),
-                specCell('Zabudowa', item.building_type ? escapeHtml(item.building_type) : ''),
-                specCell('Rynek', marketText),
-                specCell('Stan', finishText),
-                specCell('Ogrzewanie', heatText),
-                specCell('Ścieki', sewText),
-                specCell('Dojazd', roadText),
-                specCell('MPZP', mpzpZoneText),
-            ].join('');
+            const yearText = item.year_built ? `${item.year_built}` : '';
+            const roomsText = (item.rooms !== null && item.rooms !== undefined) ? `${item.rooms}` : '';
+            const floorText = (item.floor !== null && item.floor !== undefined)
+                ? `${item.floor}${(item.floors_in_building !== null && item.floors_in_building !== undefined) ? '/' + item.floors_in_building : ''}`
+                : '';
+            const daysText = (item.days_on_market !== null && item.days_on_market !== undefined) ? `${item.days_on_market} dni` : '';
+            const mediaText = item.has_fiber
+                ? 'Światłowód'
+                : (item.broadband_status && item.broadband_status !== 'BRAK_ZASIĘGU' ? escapeHtml(item.broadband_status) : '');
+            const frontText = item.parcel_front_width_m
+                ? `${item.parcel_front_width_m} m${item.parcel_length_m ? ` × ~${item.parcel_length_m} m` : ''}`
+                : '';
+            const shapeText = item.parcel_shape_type
+                ? `${escapeHtml(item.parcel_shape_type)}${item.parcel_aspect_ratio ? ` (1:${item.parcel_aspect_ratio})` : ''}`
+                : '';
+            const roadMpzpText = [roadText, mpzpZoneText].filter(Boolean).join(' · ');
+            let gesutText = '';
+            try {
+                const gn = item.gesut_networks;
+                const nets = gn && gn.networks ? gn.networks : (gn && typeof gn === 'object' && !gn.coverage ? gn : null);
+                if (nets && typeof nets === 'object') {
+                    const short = { woda: 'w', kanalizacja: 'k', gaz: 'g', prad: 'e', cieplo: 'c', telekomunikacja: 't' };
+                    const present = Object.keys(short).filter(k => nets[k]);
+                    if (present.length > 0) gesutText = present.map(k => short[k]).join(' · ');
+                }
+            } catch (e) { gesutText = ''; }
+
+            let specsHtml = '';
+            if (cat === 'mieszkanie') {
+                specsHtml = [
+                    specCell('Metraż', item.area_home > 0 ? `${item.area_home.toFixed(1)} m²` : ''),
+                    specCell('Pokoje', roomsText),
+                    specCell('Piętro', floorText),
+                    specCell('Rok budowy', yearText),
+                    specCell('Rynek', marketText),
+                    specCell('Stan', finishText),
+                    specCell('Ogrzewanie', heatText),
+                    specCell('Media', mediaText),
+                    specCell('Na rynku', daysText),
+                ].join('');
+            } else if (cat === 'dzialka') {
+                const plotFull = item.area_plot
+                    ? `${Math.round(item.area_plot)} m²`
+                    : (item.area_home > 0 ? `${Math.round(item.area_home)} m²` : '');
+                specsHtml = [
+                    specCell('Powierzchnia', plotFull),
+                    specCell('Front / Wymiary', frontText),
+                    specCell('Kształt', shapeText),
+                    specCell('Dojazd', roadText),
+                    specCell('MPZP', mpzpZoneText),
+                    specCell('Media GESUT', gesutText),
+                    specCell('Rynek', marketText),
+                    specCell('Na rynku', daysText),
+                    specCell('Ścieki', sewText),
+                ].join('');
+            } else {
+                specsHtml = [
+                    specCell('Dom', item.area_home > 0 ? `${item.area_home.toFixed(1)} m²` : ''),
+                    specCell('Działka', plotText),
+                    specCell('Rok budowy', yearText),
+                    specCell('Zabudowa', item.building_type ? escapeHtml(item.building_type) : ''),
+                    specCell('Rynek', marketText),
+                    specCell('Stan', finishText),
+                    specCell('Ogrzewanie', heatText),
+                    specCell('Ścieki', sewText),
+                    specCell('Dojazd / MPZP', roadMpzpText),
+                ].join('');
+            }
 
             const floodHtml = floodWarn
                 ? `<div class="card-flood-warning">${svgIcon('alert-triangle')} Teren zalewowy — zagrożenie powodziowe (ISOK)</div>`
@@ -1651,6 +1764,18 @@
             const priceDropHtml = item.price_drop_amount
                 ? `<span class="price-drop num" title="Skumulowana obniżka ceny">−${item.price_drop_amount.toLocaleString('pl-PL')} zł (${item.price_drop_pct}%)</span>`
                 : '';
+
+            // Days on market badge (e.g. "14 dni") — always visible on the card
+            const daysBadge = (item.days_on_market !== null && item.days_on_market !== undefined)
+                ? `<span class="market-delta dev-fair" title="Liczba dni od pierwszego wykrycia oferty">⏱ ${item.days_on_market} dni</span>`
+                : '';
+
+            // Price per ar (for plots and houses with land) next to price per m²
+            let priceArHtml = '';
+            if (item.area_plot && item.area_plot >= 100 && item.price > 0) {
+                const pricePerAr = Math.round(item.price / (item.area_plot / 100));
+                priceArHtml = `<span class="price-m2 num" title="Cena za ar działki (${Math.round(item.area_plot)} m²)">${pricePerAr.toLocaleString('pl-PL')} zł/ar</span>`;
+            }
 
             const tcoSub = (item.land_audit && item.land_audit.tco_audit)
                 ? `<span class="card-action-sub num">CAPEX ~${formatPrice(item.land_audit.tco_audit.total_acquisition_cost)}</span>`
@@ -1714,7 +1839,9 @@
                     <div class="card-price-row">
                         <span class="price-main">${Math.round(item.price).toLocaleString('pl-PL')} zł</span>
                         <span class="price-m2">${Math.round(item.price_per_m2).toLocaleString('pl-PL')} zł/m²</span>
+                        ${priceArHtml}
                         ${devBadge}
+                        ${daysBadge}
                         ${priceDropHtml}
                     </div>
 
@@ -1894,6 +2021,11 @@
             }
 
             let escapedMsg = escapeHtml(msgText);
+            // No emoji in the panel (badges + SVG carry the meaning) — keep tag text like [AI Audit].
+            escapedMsg = escapedMsg
+                .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}\u{FE0F}]/gu, '')
+                .replace(/\s{2,}/g, ' ')
+                .trim();
             escapedMsg = escapedMsg.replace(/(\d[\d\s,.]*\s*(?:zł|PLN|m²|m2))/g, '<strong>$1</strong>');
 
             return `
@@ -1932,6 +2064,8 @@
                 const allCnt = st.logs.length;
                 const succCnt = st.logs.filter(l => l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐')))).length;
                 const geoCnt = st.logs.filter(l => l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]')))).length;
+                const isAi = (l) => l.category === 'ai' || l.level === 'ai' || (l.message && l.message.includes('[AI Audit]'));
+                const aiCnt = st.logs.filter(isAi).length;
                 const rejCnt = st.logs.filter(l => l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]'))).length;
                 const errCnt = st.logs.filter(l => l.category === 'error' || l.level === 'error' || l.level === 'warning' || l.category === 'warning').length;
 
@@ -1941,6 +2075,8 @@
                 if (elSucc) elSucc.innerText = succCnt;
                 const elGeo = document.getElementById('cntLogGeo');
                 if (elGeo) elGeo.innerText = geoCnt;
+                const elAi = document.getElementById('cntLogAi');
+                if (elAi) elAi.innerText = aiCnt;
                 const elRej = document.getElementById('cntLogRejected');
                 if (elRej) elRej.innerText = rejCnt;
                 const elErr = document.getElementById('cntLogError');
@@ -1951,6 +2087,8 @@
                     filteredLogs = st.logs.filter(l => l.category === 'success' || l.level === 'success' || (l.message && (l.message.includes('[Zakwalifikowano]') || l.message.includes('⭐'))));
                 } else if (currentLogFilter === 'geo') {
                     filteredLogs = st.logs.filter(l => l.category === 'geo' || l.level === 'geo' || (l.message && (l.message.includes('[Geokoder]') || l.message.includes('[Geoportal]') || l.message.includes('[Rejestry]') || l.message.includes('[Backfill]'))));
+                } else if (currentLogFilter === 'ai') {
+                    filteredLogs = st.logs.filter(isAi);
                 } else if (currentLogFilter === 'rejected') {
                     filteredLogs = st.logs.filter(l => l.category === 'rejected' || l.level === 'rejected' || (l.message && l.message.includes('[Odrzucono]')));
                 } else if (currentLogFilter === 'error') {
@@ -1989,6 +2127,24 @@
                     btnScrape.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="9" ry="3"></ellipse><path d="M3 5v14a9 3 0 0 0 18 0V5"></path><path d="M3 12a9 3 0 0 0 18 0"></path></svg><span class="btn-label">Synchronizuj bazę</span>';
                 }
             }
+        }
+
+        function toggleProgressPanel() {
+            const panel = document.getElementById('progressPanel');
+            if (!panel) return;
+            const collapsed = panel.classList.toggle('collapsed');
+            const btn = document.getElementById('btnCollapseProgress');
+            if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+            try { localStorage.setItem('hunter_progress_collapsed', collapsed ? '1' : '0'); } catch (e) {}
+        }
+
+        function applyProgressCollapsed() {
+            let collapsed = false;
+            try { collapsed = localStorage.getItem('hunter_progress_collapsed') === '1'; } catch (e) {}
+            const panel = document.getElementById('progressPanel');
+            if (panel) panel.classList.toggle('collapsed', collapsed);
+            const btn = document.getElementById('btnCollapseProgress');
+            if (btn) btn.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
         }
 
         function startScrapeMonitor() {
@@ -2142,6 +2298,50 @@
                 const isNarrow = item.parcel_front_width_m < 16.0;
                 legalRows += `<tr class="${isNarrow ? 'row-warn' : ''}"><th>Front działki</th><td class="value"><span class="num">${item.parcel_front_width_m} m</span> (${item.parcel_shape_type || 'regularna'}${item.parcel_length_m ? `, dł. ~${item.parcel_length_m} m` : ''})</td></tr>`;
             }
+            if (item.parcel_aspect_ratio || item.parcel_shape_type) {
+                const shape = (item.parcel_shape_type || '').toUpperCase();
+                const ratio = item.parcel_aspect_ratio || 0;
+                const isKiszka = shape.includes('SZNUROWKA') || shape.includes('WĄSKA') || ratio >= 4.0;
+                const shapeDesc = `${item.parcel_shape_type ? escapeHtml(item.parcel_shape_type) : '—'}${item.parcel_aspect_ratio ? ` (proporcje 1:${item.parcel_aspect_ratio})` : ''}`;
+                legalRows += `<tr class="${isKiszka ? 'row-warn' : ''}"><th>Proporcje działki</th><td class="value">${shapeDesc}${isKiszka ? ' — nieustawna „kiszka-działka”, utrudniona zabudowa' : ''}</td></tr>`;
+            }
+            if (item.egib_soil_class) {
+                const soil = String(item.egib_soil_class);
+                const isProtected = /(?:^|[^A-Za-z])(?:R|Ł|Ps|S)(?:I{1,3}[ab]?)(?:$|[^A-Za-z])/i.test(soil);
+                const isIndustrial = /(?:^|[^A-Za-z])(?:Ba|Bi)(?:$|[^A-Za-z])/.test(soil);
+                const cls = (isProtected || isIndustrial) ? 'row-warn' : '';
+                let hint = '';
+                if (isProtected) hint = ' — konieczność i koszt odrolnienia (klasy I–III)';
+                else if (isIndustrial) hint = ' — uciążliwe sąsiedztwo przemysłowe';
+                else if (/^B\b/i.test(soil.trim())) hint = ' — tereny mieszkaniowe';
+                legalRows += `<tr class="${cls}"><th>Klasa gruntu EGiB</th><td class="value">${escapeHtml(soil)}${hint}</td></tr>`;
+            }
+            if (item.egib_building_status) {
+                const st = String(item.egib_building_status).toUpperCase();
+                const cls = st === 'UJAWNIONY' ? 'row-ok' : (st === 'BRAK_W_EWIDENCJI' ? 'row-danger' : 'row-warn');
+                const desc = st === 'UJAWNIONY'
+                    ? 'budynek ujawniony w kartotece budynków (odbiór PINB)'
+                    : (st === 'BRAK_W_EWIDENCJI' ? 'brak w ewidencji — ryzyko samowoli / budowy w toku' : escapeHtml(item.egib_building_status));
+                legalRows += `<tr class="${cls}"><th>Status budynku EGiB</th><td class="value">${desc}</td></tr>`;
+            }
+            if (item.noise_level_db !== null && item.noise_level_db !== undefined || item.noise_zone) {
+                const db = (item.noise_level_db !== null && item.noise_level_db !== undefined) ? `${item.noise_level_db} dB Lden` : '';
+                const zone = item.noise_zone ? escapeHtml(item.noise_zone) : '';
+                const isHigh = (item.noise_level_db !== null && item.noise_level_db !== undefined && item.noise_level_db > 65) || /WYSOKI/i.test(item.noise_zone || '');
+                legalRows += `<tr class="${isHigh ? 'row-danger' : ''}"><th>Hałas GIOŚ</th><td class="value">${[db, zone].filter(Boolean).join(' · ') || '—'} (mapy akustyczne: drogi / tory / lotnisko)</td></tr>`;
+            }
+            if (item.nature_protected_zone) {
+                legalRows += `<tr class="row-warn"><th>Obszary chronione GDOŚ</th><td class="value">${escapeHtml(item.nature_protected_zone)} (Natura 2000 / park krajobrazowy — ograniczenia)</td></tr>`;
+            }
+            if (item.monument_zone) {
+                legalRows += `<tr class="row-danger"><th>Strefa konserwatorska NID</th><td class="value">${escapeHtml(item.monument_zone)} (restrykcje WKZ przy remontach)</td></tr>`;
+            }
+            if (item.cemetery_buffer_zone) {
+                const cz = String(item.cemetery_buffer_zone);
+                const cls = cz === '<50m' ? 'row-danger' : (cz === '50-150m' ? 'row-warn' : '');
+                const desc = cz === '<50m' ? 'ograniczenia sanitarne 50 m (zakaz zabudowy/okien)' : (cz === '50-150m' ? 'ograniczenia sanitarne 50–150 m (ujęcie wody)' : escapeHtml(cz));
+                legalRows += `<tr class="${cls}"><th>Strefa cmentarza</th><td class="value">${desc}</td></tr>`;
+            }
             if (item.terrain_slope_pct !== null && item.terrain_slope_pct !== undefined) {
                 const isSteep = item.terrain_slope_pct > 8.0;
                 legalRows += `<tr class="${isSteep ? 'row-warn' : ''}"><th>Nachylenie terenu (NMT)</th><td class="value"><span class="num">${item.terrain_slope_pct}%</span> (ekspozycja ${escapeHtml(item.terrain_aspect || 'płaska')})</td></tr>`;
@@ -2153,7 +2353,8 @@
                 legalRows += `<tr class="${cls}"><th>Światłowód (SIDUSIS)</th><td class="value">${escapeHtml(item.broadband_status)}${item.broadband_details ? ` — ${escapeHtml(item.broadband_details)}` : ''}</td></tr>`;
             }
             if (item.power_lines_risk) {
-                legalRows += `<tr class="row-danger"><th>Linie wysokiego napięcia</th><td class="value">${escapeHtml(item.power_lines_risk)}</td></tr>`;
+                const isHv = /(LINIA|400KV|220KV|110KV|WN)/i.test(String(item.power_lines_risk));
+                legalRows += `<tr class="${isHv ? 'row-danger' : 'row-ok'}"><th>Linie wysokiego napięcia</th><td class="value">${escapeHtml(item.power_lines_risk)}</td></tr>`;
             }
             if (item.walkability_pka_name) {
                 const distKm = (item.walkability_pka_dist_m / 1000).toFixed(1);
@@ -2577,59 +2778,19 @@
         }
 
         function buildBudgetTable(item) {
-            const price = item.price || 0;
-            const market = (item.market || '').toLowerCase();
-            const isPrimary = market.includes('pierwotny');
-            const pcc = isPrimary ? 0 : Math.round(price * 0.02);
-            const notaryBase = Math.min(10000, Math.max(100, Math.round(price * 0.005)));
-            const vatNotary = Math.round(notaryBase * 0.23);
-            const kwFee = 200;
-            const notaryTotal = notaryBase + vatNotary + kwFee;
-
-            let hiddenTotal = 0;
-            const hiddenItems = [];
-            (item.cons || []).forEach(c => {
-                if (c.includes('[Ukryty koszt]')) {
-                    const numMatch = c.match(/(\d[\d\s]*\d)\s*zł/);
-                    if (numMatch) {
-                        const val = parseInt(numMatch[1].replace(/\s/g, ''));
-                        hiddenTotal += val;
-                        hiddenItems.push({label: c.replace('[Ukryty koszt] ', ''), val});
-                    } else {
-                        hiddenItems.push({label: c.replace('[Ukryty koszt] ', ''), val: 0});
-                    }
-                }
-            });
-
-            const finish = (item.finish_condition || '').toLowerCase();
-            let finishCostPerM2 = 0;
-            let finishLabel = '';
-            if (finish.includes('deweloperski') || finish.includes('wykonczenia')) {
-                finishCostPerM2 = 1500;
-                finishLabel = 'Adaptacja — wykończenie (~1 500 zł/m²)';
-            } else if (finish.includes('surowy_zamkniety') || finish.includes('surowy zamknięty')) {
-                finishCostPerM2 = 2500;
-                finishLabel = 'Adaptacja — wykończenie od surowego (~2 500 zł/m²)';
-            } else if (finish.includes('surowy_otwarty') || finish.includes('surowy otwarty')) {
-                finishCostPerM2 = 3500;
-                finishLabel = 'Adaptacja — wykończenie od surowego otwartego (~3 500 zł/m²)';
-            }
-            const finishCost = Math.round(finishCostPerM2 * (item.area_home || 0));
-
-            const total = price + pcc + notaryTotal + hiddenTotal + finishCost;
-
-            let rows = `<tr><td><strong>Koszt zakupu (cena ofertowa)</strong></td><td class="amount">${price.toLocaleString('pl-PL')} zł</td><td class="note"></td></tr>`;
-            rows += `<tr><td><strong>Podatek PCC (2%)</strong></td><td class="amount">${pcc.toLocaleString('pl-PL')} zł</td><td class="note">${isPrimary ? 'Rynek pierwotny — zwolnienie' : 'Rynek wtórny'}</td></tr>`;
-            rows += `<tr><td><strong>Taksa notarialna + wpis KW</strong></td><td class="amount">${notaryTotal.toLocaleString('pl-PL')} zł</td><td class="note">Wycena szacunkowa</td></tr>`;
-            hiddenItems.forEach(h => {
-                rows += `<tr><td><strong>${escapeHtml(h.label)}</strong></td><td class="amount">${h.val ? h.val.toLocaleString('pl-PL') + ' zł' : '?'}</td><td class="note">Koszt ukryty w opisie</td></tr>`;
-            });
-            if (finishCost > 0) {
-                rows += `<tr><td><strong>${escapeHtml(finishLabel)}</strong></td><td class="amount">~${finishCost.toLocaleString('pl-PL')} zł</td><td class="note">Szacunek adaptacji</td></tr>`;
-            }
-            rows += `<tr class="total"><td>Suma nakładów kapitałowych (CAPEX)</td><td class="amount">~${total.toLocaleString('pl-PL')} zł</td><td class="note">Zakup + podatki + opłaty + adaptacja</td></tr>`;
-
-            document.getElementById('aiBudgetBody').innerHTML = rows;
+            // Server-side TCO only (respects Settings → Koszty CAPEX); backend always provides land_audit.
+            const tco = item.land_audit?.tco_audit;
+            const breakdown = (tco && Array.isArray(tco.breakdown)) ? tco.breakdown : [];
+            const rows = breakdown.map(b => `
+                <tr>
+                    <td><strong>${escapeHtml(b.item)}</strong></td>
+                    <td class="amount">${Math.round(b.amount || 0).toLocaleString('pl-PL')} zł</td>
+                    <td class="note">${escapeHtml(b.desc || '')}</td>
+                </tr>
+            `).join('');
+            const total = Math.round((tco && tco.total_acquisition_cost) || item.price || 0).toLocaleString('pl-PL');
+            document.getElementById('aiBudgetBody').innerHTML = rows +
+                `<tr class="total"><td>Suma nakładów kapitałowych (CAPEX)</td><td class="amount">~${total} zł</td><td class="note">Zakup + podatki + opłaty + adaptacja</td></tr>`;
         }
 
         function copyAiQuestions() {
@@ -3039,6 +3200,7 @@
         });
 
         window.addEventListener('DOMContentLoaded', async () => {
+            applyProgressCollapsed();
             await fetchConfig();
             const curProf = allProfiles.find(p => p.id === selectedProfileId) || allProfiles[0];
             const center = curProf ? getCityCenter(curProf.city) : [50.0375, 22.0047];

@@ -455,3 +455,43 @@ async def test_get_power_lines_risk():
     safe = await svc.get_power_lines_risk(client_mock, 50.0100, 22.1500, 730000.0, 250000.0)
     assert safe["risk"] == "BEZPIECZNIE"
     assert safe["distance_m"] is None
+
+
+@pytest.mark.asyncio
+async def test_audit_location_selective_for_flats():
+    svc = GeoportalService()
+
+    # Mock get_parcel_by_xy
+    svc.get_parcel_by_xy = AsyncMock(
+        return_value={"parcel_id": "181601_1.0001.100/1", "commune": "Rzeszów", "county": "rzeszowski"}
+    )  # type: ignore
+    svc.get_parcel_geometry_and_area = AsyncMock(  # type: ignore
+        return_value=(
+            850.0,
+            (720000.0, 260000.0),
+            {"front_width_m": 12.0, "length_m": 70.0, "aspect_ratio": 5.8, "shape_type": "WĄSKA_SZNUROWKA"},
+        )
+    )
+    svc.get_mpzp_info = AsyncMock(return_value={"zone": "MW: tereny mieszkaniowe", "status": "OBOWIĄZUJĄCY"})  # type: ignore
+    svc.get_flood_risk_isok = AsyncMock(return_value={"flood_zone": "BRAK"})  # type: ignore
+    svc.get_landslide_risk_sopo = AsyncMock(return_value={"risk": "BRAK"})  # type: ignore
+    svc.get_egib_full_audit = AsyncMock(
+        return_value={"building_status": "UJAWNIONY", "soil_class": None, "is_protected_soil": False}
+    )  # type: ignore
+    svc.get_gdos_protected_areas = AsyncMock(return_value={"is_protected": False})  # type: ignore
+    svc.get_nid_monuments = AsyncMock(return_value={"is_monument": False})  # type: ignore
+    svc.get_noise_level_audit = AsyncMock(
+        return_value={"noise_level_db": 45.0, "zone": "DOPUSZCZALNY", "exceeds_threshold": False}
+    )  # type: ignore
+    svc.get_gesut_networks = AsyncMock(return_value=None)  # type: ignore
+    svc.get_broadband_status = AsyncMock(return_value={"status": "FTTH"})  # type: ignore
+    svc.get_terrain_slope_and_aspect = AsyncMock(return_value={"slope_pct": 1.5, "aspect": "PŁASKI"})  # type: ignore
+    svc.get_power_lines_risk = AsyncMock(return_value={"risk": "BEZPIECZNIE"})  # type: ignore
+
+    # When auditing flat:
+    res = await svc.audit_location(50.04, 22.01, radius_meters=120, category="mieszkanie")
+    assert res["main_parcel_id"] == "181601_1.0001.100/1"
+    # For flats, surrounding parcels scan is skipped (surrounding_parcels_count == 0)
+    assert res["surrounding_parcels_count"] == 0
+    # For flats, narrow parcel penalty should not be flagged in surrounding_risks
+    assert not any("Wąska działka" in r for r in res["surrounding_risks"])

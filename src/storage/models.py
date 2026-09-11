@@ -223,3 +223,12 @@ class GeocacheModel(Base):
     longitude: Mapped[float] = mapped_column(Float, nullable=False)
     display_name: Mapped[str | None] = mapped_column(String(500), nullable=True)
     cached_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+
+
+class SpatialCacheModel(Base):
+    __tablename__ = "spatial_cache"
+
+    cache_key: Mapped[str] = mapped_column(String(300), primary_key=True)
+    data_json: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True, index=True)

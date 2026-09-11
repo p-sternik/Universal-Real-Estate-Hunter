@@ -1,12 +1,16 @@
 import asyncio
 import io
+import json
 import math
 import re
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
 from loguru import logger
 from PIL import Image
+
+from src.storage import SpatialCacheModel, get_session, safe_commit
 
 HIGH_VOLTAGE_CORRIDORS = [
     ("Linia 400 kV SE Widełka - Rzeszów", 50.2033, 21.9567),
@@ -66,6 +70,41 @@ class GeoportalService:
         self.timeout = request_timeout
         self.headers = {"User-Agent": "ApartmentHunter-Geoportal/1.0 (property-research-suite; contact@local)"}
         self._cache: dict[str, Any] = {}
+
+    async def _get_cached(self, key: str) -> Any | None:
+        if key in self._cache:
+            return self._cache[key]
+        try:
+            async with get_session() as session:
+                item = await session.get(SpatialCacheModel, key)
+                if item:
+                    now = datetime.now(UTC)
+                    exp = item.expires_at
+                    if exp and exp.tzinfo is None:
+                        exp = exp.replace(tzinfo=UTC)
+                    if exp is None or exp > now:
+                        val = json.loads(item.data_json)
+                        self._cache[key] = val
+                        return val
+        except Exception:
+            pass
+        return None
+
+    async def _set_cached(self, key: str, value: Any, ttl_days: int = 90) -> None:
+        self._cache[key] = value
+        try:
+            data_str = json.dumps(value, ensure_ascii=False)
+            exp = datetime.now(UTC) + timedelta(days=ttl_days)
+            async with get_session() as session:
+                existing = await session.get(SpatialCacheModel, key)
+                if existing:
+                    existing.data_json = data_str
+                    existing.expires_at = exp
+                else:
+                    session.add(SpatialCacheModel(cache_key=key, data_json=data_str, expires_at=exp))
+                await safe_commit(session)
+        except Exception:
+            pass
 
     @staticmethod
     def generate_gunb_url(parcel_id: str | None = None) -> str:
@@ -1167,16 +1206,23 @@ class GeoportalService:
         lat: float,
         lon: float,
         radius_meters: int = 120,
+        category: Any = "dom",
     ) -> dict[str, Any]:
         """
         Comprehensive spatial audit:
         1. Identifies the main parcel and computes exact cadastral area.
         2. Queries MPZP zoning and digital plan status (KI MPZP).
         3. Queries flood risk zones (ISOK Hydroportal).
-        4. Scans surrounding parcels within radius_meters in 8 cardinal directions.
+        4. Scans surrounding parcels within radius_meters in 8 cardinal directions (skipped for flats).
         5. Checks official EGiB contours for industrial (Ba), commercial (Bi), or railway (Tk) risks.
         6. Generates direct Geoportal link.
         """
+        cat_str = category.value if hasattr(category, "value") else str(category or "dom")
+        audit_cache_key = f"audit:{round(lat, 5)},{round(lon, 5)}:{cat_str.lower()}"
+        cached_audit = await self._get_cached(audit_cache_key)
+        if cached_audit and isinstance(cached_audit, dict):
+            return cached_audit
+
         result: dict[str, Any] = {
             "main_parcel_id": None,
             "main_parcel_number": None,
@@ -1235,7 +1281,9 @@ class GeoportalService:
             result["parcel_length_m"] = shape_metrics.get("length_m")
             result["parcel_aspect_ratio"] = shape_metrics.get("aspect_ratio")
             result["parcel_shape_type"] = shape_metrics.get("shape_type")
-            if shape_metrics.get("front_width_m") and shape_metrics["front_width_m"] < 16.0:
+
+            is_flat = cat_str.lower() in ("mieszkanie", "apartment", "flat")
+            if not is_flat and shape_metrics.get("front_width_m") and shape_metrics["front_width_m"] < 16.0:
                 result["surrounding_risks"].append(
                     f"Wąska działka: szerokość frontu {shape_metrics['front_width_m']:.1f} m (<16 m)"
                 )
@@ -1265,23 +1313,24 @@ class GeoportalService:
                 cy=main_centroid[1] if main_centroid else None,
             )
 
-            # Step 3: Surrounding search points (8 directions)
-            d_lat = radius_meters / 111139.0
-            d_lon = radius_meters / (111139.0 * math.cos(math.radians(lat)))
-            angles = [0, 45, 90, 135, 180, 225, 270, 315]
-            surround_coords = [
-                (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a))) for a in angles
-            ]
-
-            surround_tasks = [self.get_parcel_by_xy(client, pt_lat, pt_lon) for pt_lon, pt_lat in surround_coords]
-            surround_infos = await asyncio.gather(*surround_tasks, return_exceptions=True)
-
+            # Step 3: Surrounding search points (8 directions) - only for non-flats
             surround_pids: set[str] = set()
-            for r in surround_infos:
-                if isinstance(r, dict) and r.get("parcel_id"):
-                    pid = r["parcel_id"]
-                    if pid != main_pid:
-                        surround_pids.add(pid)
+            if not is_flat:
+                d_lat = radius_meters / 111139.0
+                d_lon = radius_meters / (111139.0 * math.cos(math.radians(lat)))
+                angles = [0, 45, 90, 135, 180, 225, 270, 315]
+                surround_coords = [
+                    (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a))) for a in angles
+                ]
+
+                surround_tasks = [self.get_parcel_by_xy(client, pt_lat, pt_lon) for pt_lon, pt_lat in surround_coords]
+                surround_infos = await asyncio.gather(*surround_tasks, return_exceptions=True)
+
+                for r in surround_infos:
+                    if isinstance(r, dict) and r.get("parcel_id"):
+                        pid = r["parcel_id"]
+                        if pid != main_pid:
+                            surround_pids.add(pid)
 
             result["surrounding_parcels_count"] = len(surround_pids)
 
@@ -1418,6 +1467,7 @@ class GeoportalService:
                         cemetery_info.get("description") or f"Strefa cmentarna ({cemetery_info.get('zone')})"
                     )
 
+        await self._set_cached(audit_cache_key, result)
         return result
 
 
