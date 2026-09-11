@@ -431,104 +431,45 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
 
         async_session_maker = async_sessionmaker(bind=pg_engine, expire_on_commit=False)
         async with async_session_maker() as session:
-            # 1. Migrate Listings
-            listings_rows = sync_conn.execute("SELECT * FROM listings").fetchall()
-            listing_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(listings)").fetchall()]
-            listing_models = []
-            for r in listings_rows:
-                row_dict = {k: r[k] for k in listing_col_names}
-                # Sanitize datetime strings to datetime objects if needed
-                for dt_col in ("created_at", "updated_at", "last_scraped_at", "notified_at"):
-                    val = row_dict.get(dt_col)
-                    if isinstance(val, str) and val:
-                        try:
-                            row_dict[dt_col] = datetime.fromisoformat(val)
-                        except Exception:
-                            row_dict[dt_col] = None
-                # Filter row_dict to only keys present in ListingModel table columns
-                valid_cols = {c.name for c in ListingModel.__table__.columns}
-                filtered_dict = {k: v for k, v in row_dict.items() if k in valid_cols}
-                listing_models.append(ListingModel(**filtered_dict))
-
-            if listing_models:
-                session.add_all(listing_models)
-                await session.flush()
-                logger.info(f"[Database] Zmigrowano {len(listing_models)} ogłoszeń do PostgreSQL.")
-
-            # 2. Migrate PriceHistory
-            if "price_history" in existing_tables:
-                ph_rows = sync_conn.execute("SELECT * FROM price_history").fetchall()
-                ph_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(price_history)").fetchall()]
-                valid_ph_cols = {c.name for c in PriceHistoryModel.__table__.columns}
-                ph_models = []
-                for r in ph_rows:
-                    row_dict = {k: r[k] for k in ph_col_names if k in valid_ph_cols}
-                    val = row_dict.get("recorded_at")
-                    if isinstance(val, str) and val:
-                        try:
-                            row_dict["recorded_at"] = datetime.fromisoformat(val)
-                        except Exception:
-                            row_dict["recorded_at"] = datetime.now(UTC)
-                    ph_models.append(PriceHistoryModel(**row_dict))
-                if ph_models:
-                    session.add_all(ph_models)
-                    await session.flush()
-                    logger.info(f"[Database] Zmigrowano {len(ph_models)} wpisów historii cen do PostgreSQL.")
-
-            # 3. Migrate Geocache
-            if "geocache" in existing_tables:
-                geo_rows = sync_conn.execute("SELECT * FROM geocache").fetchall()
-                geo_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(geocache)").fetchall()]
-                valid_geo_cols = {c.name for c in GeocacheModel.__table__.columns}
-                geo_models = []
-                for r in geo_rows:
-                    row_dict = {k: r[k] for k in geo_col_names if k in valid_geo_cols}
-                    val = row_dict.get("cached_at")
-                    if isinstance(val, str) and val:
-                        try:
-                            row_dict["cached_at"] = datetime.fromisoformat(val)
-                        except Exception:
-                            row_dict["cached_at"] = datetime.now(UTC)
-                    geo_models.append(GeocacheModel(**row_dict))
-                if geo_models:
-                    session.add_all(geo_models)
-                    await session.flush()
-                    logger.info(f"[Database] Zmigrowano {len(geo_models)} wpisów geocache do PostgreSQL.")
-
-            # 4. Migrate SpatialCache
-            if "spatial_cache" in existing_tables:
-                sp_rows = sync_conn.execute("SELECT * FROM spatial_cache").fetchall()
-                sp_col_names = [col[1] for col in sync_conn.execute("PRAGMA table_info(spatial_cache)").fetchall()]
-                valid_sp_cols = {c.name for c in SpatialCacheModel.__table__.columns}
-                sp_models = []
-                for r in sp_rows:
-                    row_dict = {k: r[k] for k in sp_col_names if k in valid_sp_cols}
-                    for dt_c in ("created_at", "expires_at"):
-                        val = row_dict.get(dt_c)
+            def _load_records(model_cls, table_name: str, dt_cols: tuple[str, ...]):
+                if table_name not in existing_tables:
+                    return []
+                rows = sync_conn.execute(f"SELECT * FROM {table_name}").fetchall()
+                col_names = [col[1] for col in sync_conn.execute(f"PRAGMA table_info({table_name})").fetchall()]
+                valid_cols = {c.name for c in model_cls.__table__.columns}
+                items = []
+                for r in rows:
+                    row_dict = {k: r[k] for k in col_names if k in valid_cols}
+                    for dt in dt_cols:
+                        val = row_dict.get(dt)
                         if isinstance(val, str) and val:
                             try:
-                                row_dict[dt_c] = datetime.fromisoformat(val)
+                                row_dict[dt] = datetime.fromisoformat(val)
                             except Exception:
-                                row_dict[dt_c] = None
-                    sp_models.append(SpatialCacheModel(**row_dict))
-                if sp_models:
-                    session.add_all(sp_models)
+                                row_dict[dt] = datetime.now(UTC) if dt in ("recorded_at", "cached_at") else None
+                    items.append(model_cls(**row_dict))
+                return items
+
+            for model_cls, tbl, dt_fields in (
+                (ListingModel, "listings", ("created_at", "updated_at", "last_scraped_at", "notified_at")),
+                (PriceHistoryModel, "price_history", ("recorded_at",)),
+                (GeocacheModel, "geocache", ("cached_at",)),
+                (SpatialCacheModel, "spatial_cache", ("created_at", "expires_at")),
+            ):
+                if records := _load_records(model_cls, tbl, dt_fields):
+                    session.add_all(records)
                     await session.flush()
-                    logger.info(f"[Database] Zmigrowano {len(sp_models)} wpisów spatial_cache do PostgreSQL.")
+                    logger.info(f"[Database] Zmigrowano {len(records)} wpisów z '{tbl}' do PostgreSQL.")
 
             await session.commit()
 
-        # Update PostgreSQL serial sequence for primary keys (if PostgreSQL)
+        # Update PostgreSQL serial sequences for tables with auto-increment IDs
         if pg_engine.dialect.name == "postgresql":
             async with pg_engine.begin() as conn:
-                await conn.execute(
-                    text("SELECT setval(pg_get_serial_sequence('listings', 'id'), coalesce(max(id), 1)) FROM listings;")
-                )
-                await conn.execute(
-                    text(
-                        "SELECT setval(pg_get_serial_sequence('price_history', 'id'), coalesce(max(id), 1)) FROM price_history;"
+                for tbl in ("listings", "price_history"):
+                    await conn.execute(
+                        text(f"SELECT setval(pg_get_serial_sequence('{tbl}', 'id'), coalesce(max(id), 1)) FROM {tbl};")
                     )
-                )
 
         sync_conn.close()
         logger.info("[Database] ✅ Automatyczna migracja ze SQLite do PostgreSQL zakończona pomyślnie!")
