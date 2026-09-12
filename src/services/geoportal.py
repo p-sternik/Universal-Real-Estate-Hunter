@@ -1223,6 +1223,8 @@ class GeoportalService:
         result: dict[str, Any] = {
             "main_parcel_id": None,
             "main_parcel_number": None,
+            "commune": None,
+            "county": None,
             "cadastral_area": None,
             "geoportal_url": self.generate_geoportal_url(lat=lat, lon=lon),
             "gunb_url": self.generate_gunb_url(),
@@ -1266,6 +1268,8 @@ class GeoportalService:
             main_pid = main_info["parcel_id"]
             result["main_parcel_id"] = main_pid
             result["main_parcel_number"] = main_pid.split(".")[-1]
+            result["commune"] = main_info.get("commune") or None
+            result["county"] = main_info.get("county") or None
             result["geoportal_url"] = self.generate_geoportal_url(parcel_id=main_pid)
             result["gunb_url"] = self.generate_gunb_url(parcel_id=main_pid)
             result["gesut_url"] = self.generate_geoportal_url(parcel_id=main_pid)

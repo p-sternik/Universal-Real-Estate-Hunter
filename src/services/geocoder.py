@@ -104,6 +104,10 @@ class NominatimGeocoder:
 
         return None
 
+    async def fetch_place(self, query: str) -> dict | None:
+        """Raw Nominatim record for an arbitrary query (rate-limited, no caching)."""
+        return await self._rate_limited_query(query)
+
     async def get_cached(self, session: AsyncSession | None, query_key: str) -> tuple[float, float, str] | None:
         if query_key in self._mem_cache:
             return self._mem_cache[query_key]

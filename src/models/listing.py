@@ -95,6 +95,8 @@ class ListingSchema(BaseModel):
     street: str | None = None
     district: str | None = None
     city: str | None = None
+    commune: str | None = None
+    county: str | None = None
     coordinates: tuple[float, float] | None = None
     access_road_type: RoadType = RoadType.NIEZNANA
     market: MarketType = MarketType.NIEOKRESLONY
