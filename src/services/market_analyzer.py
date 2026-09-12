@@ -571,14 +571,231 @@ def calculate_tco_audit(
     }
 
 
-def calculate_commute_audit(listing: Any) -> dict[str, Any]:
+def resolve_anchor_city(
+    profile_city: str | None,
+    listing_city: str,
+    district: str,
+    location_raw: str,
+    profile_coords: tuple[float, float] | None = None,
+) -> tuple[tuple[float, float] | None, str | None]:
+    """Resolve the commute anchor (city center) without ever faking a location.
+
+    Priority: explicit profile city (the buyer's search intent) -> listing city
+    -> unknown. Returns (coords, display_name); (None, None) when nothing
+    resolves instead of silently falling back to Rzeszów.
+    """
+    from src.services.config_manager import CITY_CENTROIDS, slugify_city
+
+    if profile_city and profile_city.strip():
+        name = profile_city.strip()
+        coords = profile_coords
+        if coords is None:
+            coords = CITY_CENTROIDS.get(slugify_city(name))
+        if coords is not None:
+            return (coords[0], coords[1]), name
+
+    city_slug = slugify_city(listing_city) if listing_city else ""
+    if city_slug in CITY_CENTROIDS:
+        return CITY_CENTROIDS[city_slug], listing_city
+    combined_loc = f"{listing_city} {district} {location_raw}"
+    for c_slug, coords in CITY_CENTROIDS.items():
+        if c_slug in slugify_city(combined_loc):
+            return coords, c_slug.capitalize()
+    return None, None
+
+
+# In-process cache of parsed Nominatim admin areas per city slug (DB geocache
+# covers coords; admin areas repeat across listings of the same town).
+_admin_area_cache: dict[str, dict[str, str]] = {}
+
+
+async def aresolve_admin_area(city: str | None) -> dict[str, str]:
+    """Best-effort {commune, county, state} for a city name via Nominatim addressdetails (mem-cached)."""
+    if not city or not city.strip():
+        return {}
+    from src.services.config_manager import slugify_city
+
+    key = slugify_city(city.strip())
+    if key in _admin_area_cache:
+        return _admin_area_cache[key]
+    res: dict[str, str] = {}
+    try:
+        from src.services.geocoder import geocoder
+
+        data = await geocoder.fetch_place(f"{city.strip()}, Polska")
+        addr = data.get("address", {}) if isinstance(data, dict) else {}
+        commune = addr.get("municipality") or addr.get("city") or addr.get("town") or ""
+        county = re.sub(r"(?i)^powiat\s+", "", addr.get("county") or "")
+        state = addr.get("state") or ""
+        res = {"commune": commune, "county": county, "state": state}
+    except Exception:
+        pass
+    _admin_area_cache[key] = res
+    return res
+
+
+def _norm_voivodeship(name: str) -> str:
+    from src.services.config_manager import slugify_city
+
+    s = slugify_city(name or "")
+    return s.replace("wojewodztwo-", "").replace("woj-", "")
+
+
+# Normalized voivodeship name -> (CITY_CENTROIDS slug, display name of the capital).
+_VOIVODESHIP_CAPITALS = {
+    "dolnoslaskie": ("wroclaw", "Wrocław"),
+    "kujawsko-pomorskie": ("bydgoszcz", "Bydgoszcz"),
+    "lubelskie": ("lublin", "Lublin"),
+    "lubuskie": ("gorzow-wielkopolski", "Gorzów Wielkopolski"),
+    "lodzkie": ("lodz", "Łódź"),
+    "malopolskie": ("krakow", "Kraków"),
+    "mazowieckie": ("warszawa", "Warszawa"),
+    "opolskie": ("opole", "Opole"),
+    "podkarpackie": ("rzeszow", "Rzeszów"),
+    "podlaskie": ("bialystok", "Białystok"),
+    "pomorskie": ("gdansk", "Gdańsk"),
+    "slaskie": ("katowice", "Katowice"),
+    "swietokrzyskie": ("kielce", "Kielce"),
+    "warminsko-mazurskie": ("olsztyn", "Olsztyn"),
+    "wielkopolskie": ("poznan", "Poznań"),
+    "zachodniopomorskie": ("szczecin", "Szczecin"),
+}
+
+
+def _match_voivodeship(state: str) -> str | None:
+    norm = _norm_voivodeship(state)
+    if norm in _VOIVODESHIP_CAPITALS:
+        return norm
+    for key in _VOIVODESHIP_CAPITALS:
+        if key in norm or norm in key:
+            return key
+    return None
+
+
+async def aresolve_commute_context(profile_city: str | None, listing: Any) -> dict[str, Any]:
+    """Async, cached resolution of all commute anchors for one listing.
+
+    Returns {"profile_city", "profile_coords", "commune", "county",
+    "seat_city", "seat_coords", "capital_city", "capital_coords"}.
+    Every step degrades gracefully to None — never a fake city.
+    """
+    from src.services.config_manager import CITY_CENTROIDS, slugify_city
+
+    ctx: dict[str, Any] = {
+        "profile_city": (profile_city or "").strip() or None,
+        "profile_coords": None,
+        "commune": "",
+        "county": "",
+        "seat_city": None,
+        "seat_coords": None,
+        "capital_city": None,
+        "capital_coords": None,
+    }
+
+    async def _geocode_city(name: str) -> tuple[float, float] | None:
+        try:
+            from src.services.geocoder import geocoder
+
+            lat, lon, _ = await geocoder.geocode(session=None, city=name)
+            if lat is not None and lon is not None:
+                return (lat, lon)
+        except Exception:
+            pass
+        return None
+
+    # 1. Profile city: table first, cached Nominatim fallback (small towns like Otwock).
+    if ctx["profile_city"]:
+        hit = CITY_CENTROIDS.get(slugify_city(ctx["profile_city"]))
+        if hit is not None:
+            ctx["profile_coords"] = (hit[0], hit[1])
+        else:
+            ctx["profile_coords"] = await _geocode_city(ctx["profile_city"])
+
+    # 2. Commune/county: listing fields (ULDK) first, Nominatim admin area fallback.
+    commune = str(_prop(listing, "commune", "") or "").strip()
+    county = str(_prop(listing, "county", "") or "").strip()
+    admin_state = ""
+    if not commune:
+        admin = await aresolve_admin_area(str(_prop(listing, "city", "") or ""))
+        commune, county, admin_state = admin.get("commune", ""), admin.get("county", ""), admin.get("state", "")
+    ctx["commune"], ctx["county"] = commune, county
+
+    # 3. Gmina seat coords: table first, cached Nominatim fallback.
+    if commune:
+        seat_hit = CITY_CENTROIDS.get(slugify_city(commune))
+        if seat_hit is not None:
+            ctx["seat_city"], ctx["seat_coords"] = commune, (seat_hit[0], seat_hit[1])
+        else:
+            seat_coords = await _geocode_city(commune)
+            ctx["seat_city"] = commune
+            ctx["seat_coords"] = seat_coords
+
+    # 4. Voivodeship capital: parcel TERYT prefix first, admin state fallback.
+    parcel_id = str(_prop(listing, "parcel_id", "") or "").strip()
+    voiv = TERYT_VOIVODESHIPS.get(parcel_id[:2]) if len(parcel_id) >= 2 else None
+    voiv_key = _norm_voivodeship(voiv) if voiv else None
+    if (not voiv_key or voiv_key not in _VOIVODESHIP_CAPITALS) and admin_state:
+        voiv_key = _match_voivodeship(admin_state)
+    if voiv_key and voiv_key in _VOIVODESHIP_CAPITALS:
+        slug, name = _VOIVODESHIP_CAPITALS[voiv_key]
+        hit = CITY_CENTROIDS.get(slug)
+        if hit is not None:
+            ctx["capital_city"], ctx["capital_coords"] = name, (hit[0], hit[1])
+
+    return ctx
+
+
+def resolve_reference_cities(listing: Any, commute_ctx: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """Ordered, deduplicated commute anchors: profile city, gmina seat, voivodeship capital."""
+    from src.services.config_manager import CITY_CENTROIDS, slugify_city
+
+    ctx = commute_ctx or {}
+    city = str(_prop(listing, "city", "") or "").strip()
+    district = str(_prop(listing, "district", "") or "").strip()
+    location_raw = str(_prop(listing, "location_raw", "") or "")
+
+    anchors: list[dict[str, Any]] = []
+    seen: set[str] = set()
+
+    def _add(kind: str, name: Any, coords: Any) -> None:
+        key = slugify_city(str(name or ""))
+        if not name or not key or not coords or key in seen:
+            return
+        seen.add(key)
+        anchors.append({"kind": kind, "name": str(name), "coords": (coords[0], coords[1])})
+
+    # A: profile city (search intent wins).
+    pname = ctx.get("profile_city")
+    pcoords = ctx.get("profile_coords")
+    if pname and not pcoords:
+        hit = CITY_CENTROIDS.get(slugify_city(pname))
+        if hit is not None:
+            pcoords = (hit[0], hit[1])
+    _add("profile", pname, pcoords)
+    # B: gmina seat.
+    _add("gmina", ctx.get("seat_city"), ctx.get("seat_coords"))
+    # C: voivodeship capital.
+    _add("capital", ctx.get("capital_city"), ctx.get("capital_coords"))
+
+    # Legacy sync fallback (no ctx): listing city via table, exactly like before.
+    if not anchors:
+        coords, display = resolve_anchor_city(None, city, district, location_raw)
+        if coords and display:
+            anchors.append({"kind": "profile", "name": display, "coords": coords})
+    return anchors
+
+
+def calculate_commute_audit(listing: Any, commute_ctx: dict[str, Any] | None = None) -> dict[str, Any]:
     lat = _prop(listing, "latitude", None)
     lon = _prop(listing, "longitude", None)
     city = str(_prop(listing, "city", "") or "").strip()
     district = str(_prop(listing, "district", "") or "").strip()
 
+    ctx = commute_ctx or {}
+    profile_city = ctx.get("profile_city")
+
     if lat is None or lon is None or (float(lat) == 0.0 and float(lon) == 0.0):
-        loc = f"{city} ({district})" if city and district else (city or "Okolice Rzeszowa")
+        loc = f"{city} ({district})" if city and district else (city or profile_city or "nieznana lokalizacja")
         return {
             "has_coords": False,
             "verdict": "LOKALIZACJA PRZYBLIŻONA",
@@ -601,26 +818,9 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
     flat = float(lat)
     flon = float(lon)
 
-    # 1. Resolve Target City Center
-    from src.services.config_manager import CITY_CENTROIDS, slugify_city
-
-    city_center_coords = RZESZOW_CENTER
-    city_display = city or "Rzeszów"
-
-    city_slug = slugify_city(city) if city else ""
-    if city_slug in CITY_CENTROIDS:
-        city_center_coords = CITY_CENTROIDS[city_slug]
-        city_display = city
-    else:
-        combined_loc = f"{city} {district} {_prop(listing, 'location_raw', '')}"
-        for c_slug, coords in CITY_CENTROIDS.items():
-            if c_slug in slugify_city(combined_loc):
-                city_center_coords = coords
-                city_display = c_slug.capitalize()
-                break
-
-    dist_center = haversine_km(flat, flon, city_center_coords[0], city_center_coords[1])
-    commute_min = max(5, round(dist_center * 1.5 + 4))
+    # 1. Resolve reference cities: profile city, gmina seat, voivodeship
+    # capital — ordered, deduplicated; unknown stays unknown (no fake Rzeszów).
+    anchors = resolve_reference_cities(listing, ctx)
 
     dist_to_rzeszow = haversine_km(flat, flon, RZESZOW_CENTER[0], RZESZOW_CENTER[1])
     is_podkarpacie = dist_to_rzeszow <= 60.0
@@ -643,35 +843,87 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
 
     findings: list[dict[str, str]] = []
 
-    # Center
-    center_label = f"Centrum ({city_display})" if city_display else "Centrum"
-    if dist_center <= 5.0:
+    from src.services.config_manager import slugify_city as _slugify
+
+    listing_slug = _slugify(city) if city else ""
+    # "Oferta w: X" instead of "Do: X" when the listing sits in the anchor city.
+    offer_suffix = f" Oferta zlokalizowana w: {city}." if city else ""
+
+    def _in_place(name: str) -> bool:
+        return bool(listing_slug) and _slugify(name) == listing_slug
+
+    if not anchors:
+        # No trustworthy anchor: report honestly instead of faking a city.
         findings.append(
             {
-                "badge": "🏙️ Blisko Centrum",
-                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów.",
-                "severity": "success",
-            }
-        )
-    elif dist_center <= 12.0:
-        findings.append(
-            {
-                "badge": "🚗 Strefa Podmiejska",
-                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe.",
+                "badge": "📍 Nieznane miasto",
+                "title": "Brak punktu odniesienia dojazdu",
+                "desc": "Nie rozpoznano miasta oferty ani miasta profilu — nie wyliczono odległości do centrum, żeby nie wprowadzać w błąd.",
                 "severity": "info",
             }
         )
+        dist_center = None
+        commute_min = None
     else:
-        findings.append(
-            {
-                "badge": "⏱️ Dłuższy Dojazd",
-                "title": f"{center_label}: {dist_center:.1f} km (~{commute_min} min)",
-                "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem.",
-                "severity": "warning",
-            }
-        )
+        for anchor in anchors:
+            name = anchor["name"]
+            alat, alon = anchor["coords"]
+            dist = haversine_km(flat, flon, alat, alon)
+            mins = max(5, round(dist * 1.5 + 4))
+            anchor["distance_km"] = dist
+            anchor["commute_min"] = mins
+            where = f" Oferta w: {name}." if _in_place(name) else offer_suffix
+            if anchor["kind"] == "profile":
+                center_label = f"Centrum ({name})"
+                if dist <= 5.0:
+                    findings.append(
+                        {
+                            "badge": "🏙️ Blisko Centrum",
+                            "title": f"{center_label}: {dist:.1f} km (~{mins} min)",
+                            "desc": "Doskonały czas dojazdu do śródmieścia, szkół i punktów usługowych bez konieczności długich dojazdów."
+                            + where,
+                            "severity": "success",
+                        }
+                    )
+                elif dist <= 12.0:
+                    findings.append(
+                        {
+                            "badge": "🚗 Strefa Podmiejska",
+                            "title": f"{center_label}: {dist:.1f} km (~{mins} min)",
+                            "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe." + where,
+                            "severity": "info",
+                        }
+                    )
+                else:
+                    findings.append(
+                        {
+                            "badge": "⏱️ Dłuższy Dojazd",
+                            "title": f"{center_label}: {dist:.1f} km (~{mins} min)",
+                            "desc": "Lokalizacja poza bezpośrednią aglomeracją miejską, wymagająca codziennego dłuższego dojazdu samochodem."
+                            + where,
+                            "severity": "warning",
+                        }
+                    )
+            elif anchor["kind"] == "gmina":
+                county = (ctx.get("county") or "").strip()
+                county_suffix = f" • powiat {county}" if county and _slugify(county) != _slugify(name) else ""
+                findings.append(
+                    {
+                        "badge": "🏛️ Gmina i powiat",
+                        "title": f"Gmina: {name} (siedziba ~{dist:.1f} km, ~{mins} min){county_suffix}",
+                        "desc": "Sprawy urzędowe, szkoła obwodowa i usługi gminne w siedzibie gminy." + where,
+                        "severity": "info",
+                    }
+                )
+            else:  # capital
+                findings.append(
+                    {
+                        "badge": "🌆 Stolica województwa",
+                        "title": f"Stolica województwa ({name}): {dist:.1f} km (~{mins} min)",
+                        "desc": "Szpitale specjalistyczne, uczelnie i dworce dalekobieżne w stolicy województwa." + where,
+                        "severity": "info",
+                    }
+                )
 
     # PKA (only for Podkarpacie region)
     if is_podkarpacie and nearest_pka_dist is not None and nearest_pka_name is not None:
@@ -724,7 +976,15 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
                 }
             )
 
-    if is_podkarpacie and nearest_pka_dist is not None:
+    main_dist = anchors[0]["distance_km"] if anchors else None
+    if main_dist is None:
+        commute_verdict = "BRAK PUNKTU ODNIESIENIA"
+        commute_sev = "info"
+        dist_center = None
+        commute_min = None
+    elif is_podkarpacie and nearest_pka_dist is not None:
+        dist_center = main_dist
+        commute_min = anchors[0]["commute_min"]
         if dist_center <= 6.0 and nearest_pka_dist <= 2.0:
             commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
             commute_sev = "success"
@@ -735,6 +995,8 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
             commute_verdict = "LOKALIZACJA WYMAGAJĄCA SAMOCHODU"
             commute_sev = "warning"
     else:
+        dist_center = main_dist
+        commute_min = anchors[0]["commute_min"]
         if dist_center <= 6.0:
             commute_verdict = "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
             commute_sev = "success"
@@ -745,12 +1007,28 @@ def calculate_commute_audit(listing: Any) -> dict[str, Any]:
             commute_verdict = "LOKALIZACJA WYMAGAJĄCA SAMOCHODU"
             commute_sev = "warning"
 
+    gmina_entry = next((a for a in anchors if a["kind"] == "gmina"), None)
+    capital_entry = next((a for a in anchors if a["kind"] == "capital"), None)
+
     return {
         "has_coords": True,
         "dist_center_km": dist_center,
         "commute_time_min": commute_min,
         "nearest_pka": {"name": nearest_pka_name, "distance_km": nearest_pka_dist} if nearest_pka_name else None,
         "nearest_expressway": {"name": nearest_hub_name, "distance_km": nearest_hub_dist} if nearest_hub_name else None,
+        "gmina": (
+            {
+                "commune": (ctx.get("commune") or ""),
+                "county": (ctx.get("county") or ""),
+                "seat": gmina_entry["name"],
+                "distance_km": gmina_entry["distance_km"],
+            }
+            if gmina_entry
+            else None
+        ),
+        "voivodeship_capital": (
+            {"name": capital_entry["name"], "distance_km": capital_entry["distance_km"]} if capital_entry else None
+        ),
         "verdict": commute_verdict,
         "severity": commute_sev,
         "findings": findings,
@@ -1334,7 +1612,8 @@ def _calculate_gesut_descriptive(listing: Any) -> dict[str, Any]:
 def analyze_land_and_utilities(
     listing: Any,
     market_median_m2: float | None = None,
-    gesut_networks: dict[str, Any] | None = None,
+    gesut_networks: dict | None = None,
+    commute_ctx: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """
     Automated high-ROI intelligence synthesis (100% automated, zero manual lookups):
@@ -1377,7 +1656,7 @@ def analyze_land_and_utilities(
     }
 
     tco = calculate_tco_audit(listing, market_median_m2=market_median_m2)
-    commute = calculate_commute_audit(listing)
+    commute = calculate_commute_audit(listing, commute_ctx=commute_ctx)
     risk = calculate_risk_shield(listing)
     gesut = calculate_gesut_audit(listing, gesut_networks=gesut_networks)
 
@@ -1473,6 +1752,7 @@ class PropertyValuationEngine:
         price_drop_pct: float = 0.0,
         price_history_count: int = 1,
         gesut_networks: dict[str, Any] | None = None,
+        commute_ctx: dict[str, Any] | None = None,
     ) -> PropertyValuationIntelligence:
         medians = market_medians if market_medians is not None else self.market_medians
         city = _prop(listing, "city", None)
@@ -1494,6 +1774,7 @@ class PropertyValuationEngine:
             listing=listing,
             market_median_m2=local_median,
             gesut_networks=gesut_networks,
+            commute_ctx=commute_ctx,
         )
 
         return PropertyValuationIntelligence(

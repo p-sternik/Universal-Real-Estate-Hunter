@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 
 import pytest
 
@@ -11,12 +12,15 @@ from src.services.market_analyzer import (
     PropertyValuationIntelligence,
     analyze_land_and_utilities,
     analyze_negotiation,
+    aresolve_admin_area,
+    aresolve_commute_context,
     calculate_commute_audit,
     calculate_gesut_audit,
     calculate_notary_and_court_fee,
     calculate_risk_shield,
     calculate_tco_audit,
     resolve_local_median,
+    resolve_reference_cities,
     valuation_engine,
 )
 from src.services.telegram_notifier import TelegramNotifier
@@ -732,3 +736,165 @@ def test_property_valuation_engine_custom_medians():
     engine = PropertyValuationEngine(market_medians={"krakow::mieszkanie": 15000.0})
     assert engine.resolve_median("Krakow", None, "mieszkanie") == 15000.0
     assert engine.resolve_median("Warszawa", None, "mieszkanie") is None
+
+
+def _empty_ctx(**overrides):
+    ctx = {
+        "profile_city": None,
+        "profile_coords": None,
+        "commune": "",
+        "county": "",
+        "seat_city": None,
+        "seat_coords": None,
+        "capital_city": None,
+        "capital_coords": None,
+    }
+    ctx.update(overrides)
+    return ctx
+
+
+def test_commute_profile_city_anchor_for_town_outside_table():
+    # Otwock is not in CITY_CENTROIDS: previously fell back to Rzeszów (~236 km).
+    listing = {"latitude": 52.1150, "longitude": 21.2640, "city": "Otwock", "district": ""}
+    ctx = _empty_ctx(profile_city="Warszawa", profile_coords=(52.2297, 21.0122))
+    commute = calculate_commute_audit(listing, commute_ctx=ctx)
+    assert commute["has_coords"] is True
+    assert commute["dist_center_km"] is not None
+    assert commute["dist_center_km"] < 40.0
+    blob = " ".join(f["title"] + f["desc"] for f in commute["findings"])
+    assert "Warszawa" in blob
+    assert "Rzesz" not in blob
+
+
+def test_commute_three_entries_profile_gmina_capital():
+    listing = {
+        "latitude": 50.2100,
+        "longitude": 22.3700,
+        "city": "Biedaczów",
+        "district": "",
+        "commune": "Leżajsk",
+        "county": "leżajski",
+        "parcel_id": "180801_2.0001.10/1",
+    }
+    ctx = _empty_ctx(
+        profile_city="Nowa Sarzyna",
+        profile_coords=(50.3220, 22.3260),
+        commune="Leżajsk",
+        county="leżajski",
+        seat_city="Leżajsk",
+        seat_coords=(50.2580, 22.4240),
+        capital_city="Rzeszów",
+        capital_coords=(50.0375, 22.0047),
+    )
+    commute = calculate_commute_audit(listing, commute_ctx=ctx)
+    titles = [f["title"] for f in commute["findings"]]
+    assert any("Nowa Sarzyna" in t for t in titles)
+    assert any("Gmina: Leżajsk" in t for t in titles)
+    assert any("leżajski" in t for t in titles)
+    assert any("Stolica województwa (Rzeszów)" in t for t in titles)
+    assert commute["gmina"] is not None and commute["gmina"]["seat"] == "Leżajsk"
+    assert commute["voivodeship_capital"] is not None and commute["voivodeship_capital"]["name"] == "Rzeszów"
+    assert "Rzeszów: 236" not in " ".join(titles)
+
+
+def test_commute_dedup_same_city_single_entry():
+    listing = {"latitude": 52.2300, "longitude": 21.0100, "city": "Warszawa", "district": "Śródmieście"}
+    ctx = _empty_ctx(profile_city="Warszawa", profile_coords=(52.2297, 21.0122))
+    commute = calculate_commute_audit(listing, commute_ctx=ctx)
+    assert len(commute["findings"]) == 1
+    assert "Warszawa" in commute["findings"][0]["title"]
+    assert commute["verdict"] == "WYBITNA KOMUNIKACJA I DOSTĘPNOŚĆ"
+
+
+def test_commute_unknown_city_without_ctx_is_neutral():
+    listing = {"latitude": 52.1150, "longitude": 21.2640, "city": "Nieistniejowo", "district": ""}
+    commute = calculate_commute_audit(listing)
+    assert commute["dist_center_km"] is None
+    assert commute["verdict"] == "BRAK PUNKTU ODNIESIENIA"
+    assert "Rzesz" not in str(commute)
+
+
+def test_resolve_reference_cities_dedup_profile_equals_capital():
+    listing = {"city": "Rzeszów", "district": "", "location_raw": "Rzeszów"}
+    ctx = _empty_ctx(
+        profile_city="Rzeszów",
+        profile_coords=(50.0375, 22.0047),
+        capital_city="Rzeszów",
+        capital_coords=(50.0375, 22.0047),
+    )
+    anchors = resolve_reference_cities(listing, ctx)
+    assert len(anchors) == 1
+    assert anchors[0]["kind"] == "profile"
+
+
+@pytest.mark.asyncio
+async def test_aresolve_commute_context_teryt_capital_offline(monkeypatch):
+    async def _boom(*args, **kwargs):
+        raise AssertionError("network must not be hit")
+
+    monkeypatch.setattr("src.services.geocoder.geocoder", SimpleNamespace(geocode=_boom, fetch_place=_boom))
+    listing = {"city": "Rzeszów", "commune": "Rzeszów", "county": "Rzeszów", "parcel_id": "186301_1.0001.5/2"}
+    ctx = await aresolve_commute_context("Rzeszów", listing)
+    assert ctx["profile_coords"] == (50.0375, 22.0047)
+    assert ctx["seat_coords"] == (50.0375, 22.0047)
+    assert ctx["capital_city"] == "Rzeszów"
+    assert ctx["capital_coords"] == (50.0375, 22.0047)
+
+
+@pytest.mark.asyncio
+async def test_aresolve_commute_context_geocodes_small_towns(monkeypatch):
+    coords_by_city = {"Otwock": (52.1150, 21.2640, False), "Leżajsk": (50.2580, 22.4240, False)}
+
+    class _FakeGeocoder:
+        async def geocode(self, **kwargs):
+            return coords_by_city.get(str(kwargs.get("city")), (None, None, False))
+
+        async def fetch_place(self, query):
+            return None
+
+    monkeypatch.setattr("src.services.geocoder.geocoder", _FakeGeocoder())
+    listing = {"city": "Otwock", "parcel_id": "141201_1.0001.5/2"}
+    ctx = await aresolve_commute_context("Otwock", listing)
+    assert ctx["profile_coords"] == (52.1150, 21.2640)
+    assert ctx["capital_city"] == "Warszawa"
+    assert ctx["capital_coords"] == (52.2297, 21.0122)
+
+
+@pytest.mark.asyncio
+async def test_aresolve_admin_area_parses_nominatim(monkeypatch):
+    class _FakeGeocoder:
+        async def fetch_place(self, query):
+            assert "Biedacz" in query
+            return {
+                "address": {
+                    "village": "Biedaczów",
+                    "municipality": "Leżajsk",
+                    "county": "powiat leżajski",
+                    "state": "podkarpackie",
+                }
+            }
+
+    monkeypatch.setattr("src.services.geocoder.geocoder", _FakeGeocoder())
+    admin = await aresolve_admin_area("Biedaczów")
+    assert admin == {"commune": "Leżajsk", "county": "leżajski", "state": "podkarpackie"}
+
+
+def test_evaluate_threads_commute_ctx():
+    listing = {
+        "city": "Otwock",
+        "district": "",
+        "category": "dom",
+        "price": 900_000,
+        "price_per_m2": 9_000,
+        "area_home": 100.0,
+        "finish_condition": "do_zamieszkania",
+        "latitude": 52.1150,
+        "longitude": 21.2640,
+        "access_road_type": "asfaltowa",
+        "sewerage": "miejska",
+    }
+    ctx = _empty_ctx(profile_city="Warszawa", profile_coords=(52.2297, 21.0122))
+    intel = valuation_engine.evaluate(listing=listing, market_medians={}, commute_ctx=ctx)
+    titles = " ".join(f["title"] for f in intel.commute_audit["findings"])
+    assert "Warszawa" in titles
+    assert "Rzesz" not in titles

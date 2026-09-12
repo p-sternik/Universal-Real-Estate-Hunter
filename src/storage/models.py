@@ -47,6 +47,8 @@ class ListingModel(Base):
     street: Mapped[str | None] = mapped_column(String(200), nullable=True)
     district: Mapped[str | None] = mapped_column(String(200), nullable=True)
     city: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    commune: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    county: Mapped[str | None] = mapped_column(String(200), nullable=True)
     latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
     longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
 

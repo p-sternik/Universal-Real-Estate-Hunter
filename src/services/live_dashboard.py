@@ -14,7 +14,7 @@ from sqlalchemy import desc, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.services.config_manager import config_manager
-from src.services.market_analyzer import valuation_engine
+from src.services.market_analyzer import aresolve_commute_context, valuation_engine
 from src.services.pipeline import ScraperPipeline
 from src.storage import ListingModel, ListingRepository, PriceHistoryModel, get_session, init_db, safe_commit
 
@@ -392,6 +392,9 @@ class LiveDashboardServer:
             repo = ListingRepository(session)
             market_medians = await self._get_market_medians_cached(repo)
 
+            # Profile cities for commute anchors (resolved once per profile).
+            profile_cities: dict[str, str | None] = {}
+
             now_utc = datetime.now(UTC)
             max_scraped_at = None
             for it in items:
@@ -441,12 +444,22 @@ class LiveDashboardServer:
                     )
                 )
 
+                prof_key = str(item.profile_id or item.profile_name or "")
+                if prof_key not in profile_cities:
+                    try:
+                        prof = config_manager.get_profile(item.profile_id or item.profile_name)
+                        profile_cities[prof_key] = (prof.city or "").strip() or None
+                    except Exception:
+                        profile_cities[prof_key] = None
+                commute_ctx = await aresolve_commute_context(profile_cities[prof_key], item)
+
                 valuation = valuation_engine.evaluate(
                     listing=item,
                     market_medians=market_medians,
                     price_drop_amount=float(price_drop_amount or 0.0),
                     price_drop_pct=float(price_drop_pct or 0.0),
                     price_history_count=len(ph),
+                    commute_ctx=commute_ctx,
                 )
 
                 data.append(
@@ -466,6 +479,8 @@ class LiveDashboardServer:
                         "street": item.street,
                         "district": item.district,
                         "city": item.city,
+                        "commune": item.commune,
+                        "county": item.county,
                         "latitude": item.latitude,
                         "longitude": item.longitude,
                         "is_exact_coords": item.is_exact_coords,
@@ -680,6 +695,8 @@ class LiveDashboardServer:
                 street=item.street,
                 district=item.district,
                 city=item.city,
+                commune=item.commune,
+                county=item.county,
                 coordinates=coords,
                 access_road_type=road_type,
                 market=market_type,

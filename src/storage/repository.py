@@ -201,6 +201,8 @@ class ListingRepository:
             if listing.gesut_networks:
                 existing.gesut_networks_data = listing.gesut_networks
             for f in (
+                "commune",
+                "county",
                 "landslide_risk",
                 "egib_building_status",
                 "egib_soil_class",
@@ -274,6 +276,8 @@ class ListingRepository:
             street=listing.street,
             district=listing.district,
             city=listing.city,
+            commune=listing.commune,
+            county=listing.county,
             latitude=lat,
             longitude=lon,
             is_exact_coords=is_exact_coords,

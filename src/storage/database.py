@@ -339,6 +339,8 @@ async def _migrate_sqlite_columns(conn) -> None:
                     logger.info("Migrating schema: adding 'gesut_networks' to listings table")
                     sync_conn.execute(text("ALTER TABLE listings ADD COLUMN gesut_networks TEXT"))
                 tier1_cols = [
+                    ("commune", "VARCHAR(200)"),
+                    ("county", "VARCHAR(200)"),
                     ("landslide_risk", "VARCHAR(100)"),
                     ("egib_building_status", "VARCHAR(100)"),
                     ("egib_soil_class", "VARCHAR(100)"),

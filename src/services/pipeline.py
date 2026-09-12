@@ -13,7 +13,7 @@ from src.models.listing import ListingSchema
 from src.scrapers import BaseScraper, MorizonScraper, NieruchomosciOnlineScraper, OLXScraper, OtodomScraper
 from src.services.config_manager import SearchProfile
 from src.services.discord_notifier import DiscordNotifier
-from src.services.market_analyzer import valuation_engine
+from src.services.market_analyzer import aresolve_commute_context, valuation_engine
 from src.services.progress import global_tracker
 from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
@@ -140,8 +140,14 @@ class ScraperPipeline:
                 listing.mpzp_status = getattr(existing_model, "mpzp_status", None)
                 listing.flood_risk_zone = getattr(existing_model, "flood_risk_zone", None)
                 listing.gesut_networks = getattr(existing_model, "gesut_networks_data", None)
+            if not listing.commune and getattr(existing_model, "commune", None):
+                listing.commune = existing_model.commune
+            if not listing.county and getattr(existing_model, "county", None):
+                listing.county = existing_model.county
 
             for sf in (
+                "commune",
+                "county",
                 "landslide_risk",
                 "egib_building_status",
                 "egib_soil_class",
@@ -236,6 +242,8 @@ class ScraperPipeline:
                         listing.mpzp_status = geo_audit.get("mpzp_status")
                         listing.flood_risk_zone = geo_audit.get("flood_risk_zone")
                     for k in (
+                        "commune",
+                        "county",
                         "landslide_risk",
                         "egib_building_status",
                         "egib_soil_class",
@@ -482,10 +490,12 @@ class ScraperPipeline:
             # Calculate market negotiation advice
             if market_medians is None:
                 market_medians = await repo.get_market_medians()
+            commute_ctx = await aresolve_commute_context(getattr(profile, "city", None), listing)
             valuation_intel = valuation_engine.evaluate(
                 listing=listing,
                 filter_result=filter_result,
                 market_medians=market_medians,
+                commute_ctx=commute_ctx,
             )
             advice = valuation_intel.negotiation
 
@@ -540,10 +550,12 @@ class ScraperPipeline:
                     (is_new and not res["is_duplicate_fingerprint"]) or price_changed
                 )
                 if should_notify and db_model.notified_at is None:
+                    commute_ctx = await aresolve_commute_context(getattr(profile, "city", None), listing)
                     valuation_intel = valuation_engine.evaluate(
                         listing=listing,
                         filter_result=filt,
                         market_medians=medians,
+                        commute_ctx=commute_ctx,
                     )
                     advice = valuation_intel.negotiation
                     notify_jobs.append(
@@ -969,6 +981,8 @@ class ScraperPipeline:
                     item.flood_risk_zone = geo_audit.get("flood_risk_zone")
 
                 for f in (
+                    "commune",
+                    "county",
                     "landslide_risk",
                     "egib_building_status",
                     "egib_soil_class",
