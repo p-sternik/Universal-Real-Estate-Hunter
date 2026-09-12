@@ -890,7 +890,8 @@ def calculate_commute_audit(listing: Any, commute_ctx: dict[str, Any] | None = N
                         {
                             "badge": "🚗 Strefa Podmiejska",
                             "title": f"{center_label}: {dist:.1f} km (~{mins} min)",
-                            "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe." + where,
+                            "desc": "Standardowy czas dojazdu w aglomeracji miejskiej. Dogodne połączenie drogowe."
+                            + where,
                             "severity": "info",
                         }
                     )
@@ -920,7 +921,8 @@ def calculate_commute_audit(listing: Any, commute_ctx: dict[str, Any] | None = N
                     {
                         "badge": "🌆 Stolica województwa",
                         "title": f"Stolica województwa ({name}): {dist:.1f} km (~{mins} min)",
-                        "desc": "Szpitale specjalistyczne, uczelnie i dworce dalekobieżne w stolicy województwa." + where,
+                        "desc": "Szpitale specjalistyczne, uczelnie i dworce dalekobieżne w stolicy województwa."
+                        + where,
                         "severity": "info",
                     }
                 )
