@@ -324,6 +324,7 @@ class LiveDashboardServer:
         self.app.router.add_post("/api/scheduler", self.handle_update_scheduler)
         self.app.router.add_get("/api/llm/status", self.handle_get_llm_status)
         self.app.router.add_post("/api/llm/test", self.handle_test_llm_connection)
+        self.app.router.add_post("/api/notifications/test", self.handle_test_notifications)
         self.app.router.add_post("/api/data/reset", self.handle_reset_data)
 
     async def handle_get_config(self, request: web.Request) -> web.Response:
@@ -722,6 +723,59 @@ class LiveDashboardServer:
         analyzer = LLMAnalyzer.from_config(cfg, **overrides)
         res = await analyzer.test_connection()
         return web.json_response(res)
+
+    async def handle_test_notifications(self, request: web.Request) -> web.Response:
+        data: dict[str, Any] = {}
+        if request.can_read_body and (request.content_length or 0) > 0:
+            try:
+                data = await request.json()
+            except Exception:
+                data = {}
+
+        channel = str(data.get("channel", "all")).lower().strip()
+        tg_token = data.get("telegram_bot_token")
+        tg_chat = data.get("telegram_chat_id")
+        dc_webhook = data.get("discord_webhook_url")
+
+        from src.services.discord_notifier import DiscordNotifier
+        from src.services.telegram_notifier import TelegramNotifier
+
+        results: dict[str, dict[str, Any]] = {}
+
+        if channel in ("telegram", "all"):
+            tg = TelegramNotifier(bot_token=tg_token, chat_id=tg_chat)
+            if not tg.is_configured():
+                results["telegram"] = {
+                    "ok": False,
+                    "message": "Brak podanego tokenu bota lub ID czatu Telegram.",
+                }
+            else:
+                ok = await tg.send_test_message(bot_token=tg_token, chat_id=tg_chat)
+                results["telegram"] = {
+                    "ok": ok,
+                    "message": "Pomyślnie wysłano wiadomość testową na Telegram."
+                    if ok
+                    else (tg.last_error or "Błąd wysyłania na Telegram."),
+                }
+
+        if channel in ("discord", "all"):
+            dc = DiscordNotifier(webhook_url=dc_webhook)
+            if not dc.is_configured():
+                results["discord"] = {
+                    "ok": False,
+                    "message": "Brak skonfigurowanego adresu webhooka Discord.",
+                }
+            else:
+                ok = await dc.send_test_message(webhook_url=dc_webhook)
+                results["discord"] = {
+                    "ok": ok,
+                    "message": "Pomyślnie wysłano wiadomość testową na Discord."
+                    if ok
+                    else (dc.last_error or "Błąd wysyłania na Discord."),
+                }
+
+        all_ok = all(r.get("ok", False) for r in results.values()) if results else False
+        return web.json_response({"success": all_ok, "results": results})
 
     async def handle_reset_data(self, request: web.Request) -> web.Response:
         data: dict[str, Any] = {}

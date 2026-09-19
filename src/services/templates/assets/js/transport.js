@@ -140,6 +140,10 @@
                     return await ensureOk('/api/llm/test', jsonOptions('POST', payload || {}));
                 },
 
+                async testNotifications(payload) {
+                    return await ensureOk('/api/notifications/test', jsonOptions('POST', payload || {}));
+                },
+
                 async generateAiAudit(listingId) {
                     return await ensureOk('/api/listings/' + encodeURIComponent(listingId) + '/ai-audit', jsonOptions('POST', {}));
                 }

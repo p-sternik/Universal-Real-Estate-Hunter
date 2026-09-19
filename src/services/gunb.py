@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 from typing import Any
@@ -39,7 +40,7 @@ class GunbService:
     RWDZ_WMS_URL = "https://mapy.geoportal.gov.pl/wss/ext/GlownyUrzadNadzoruBudowlanego/RWDZ-WMS"
     GUNB_BASE_URL = "https://wyszukiwarka.gunb.gov.pl/"
 
-    def __init__(self, request_timeout: float = 6.0):
+    def __init__(self, request_timeout: float = 8.0):
         self.timeout = request_timeout
         self.headers = {"User-Agent": "ApartmentHunter-GUNB/1.0 (building-permit-auditor; contact@local)"}
 
@@ -248,44 +249,49 @@ class GunbService:
             "INFO_FORMAT": "text/html",
         }
 
+        http_client = client or httpx.AsyncClient()
         try:
-            if client is not None:
-                resp = await client.get(
-                    self.RWDZ_WMS_URL,
-                    params=params,
-                    headers=self.headers,
-                    timeout=self.timeout,
-                    follow_redirects=True,
-                )
-            else:
-                async with httpx.AsyncClient() as new_client:
-                    resp = await new_client.get(
+            for attempt in range(1, 3):
+                try:
+                    resp = await http_client.get(
                         self.RWDZ_WMS_URL,
                         params=params,
                         headers=self.headers,
                         timeout=self.timeout,
                         follow_redirects=True,
                     )
-            if resp.status_code == 200 and resp.text:
-                permits = self.parse_rwdz_payload(resp.text)
-                risk_flags = self.evaluate_neighborhood_risks(permits, parcel_id=parcel_id)
+                    if resp.status_code == 200 and resp.text:
+                        permits = self.parse_rwdz_payload(resp.text)
+                        risk_flags = self.evaluate_neighborhood_risks(permits, parcel_id=parcel_id)
 
-                status = "BEZPIECZNE"
-                if risk_flags:
-                    status = "RYZYKO_W_SĄSIEDZTWIE"
-                elif permits:
-                    status = "POZWOLENIA_STANDARDOWE"
+                        status = "BEZPIECZNE"
+                        if risk_flags:
+                            status = "RYZYKO_W_SĄSIEDZTWIE"
+                        elif permits:
+                            status = "POZWOLENIA_STANDARDOWE"
 
-                result = {
-                    "gunb_permits": permits,
-                    "gunb_risk_flags": risk_flags,
-                    "gunb_url": gunb_url,
-                    "gunb_status": status,
-                }
-                await set_spatial_cache(cache_key, result, ttl_days=30)
-                return result
-        except Exception as e:
-            logger.debug(f"[GUNB] RWDZ query note for ({cx}, {cy}): {e}")
+                        result = {
+                            "gunb_permits": permits,
+                            "gunb_risk_flags": risk_flags,
+                            "gunb_url": gunb_url,
+                            "gunb_status": status,
+                        }
+                        await set_spatial_cache(cache_key, result, ttl_days=30)
+                        return result
+                    if resp.status_code in (500, 502, 503, 504) and attempt < 2:
+                        await asyncio.sleep(1.0)
+                        continue
+                except (httpx.TimeoutException, httpx.NetworkError) as err:
+                    if attempt < 2:
+                        await asyncio.sleep(1.0)
+                        continue
+                    logger.debug(f"[GUNB] RWDZ query attempt {attempt} failed for ({cx}, {cy}): {err}")
+                except Exception as e:
+                    logger.debug(f"[GUNB] RWDZ query note for ({cx}, {cy}): {e}")
+                    break
+        finally:
+            if client is None:
+                await http_client.aclose()
 
         return default_res
 

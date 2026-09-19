@@ -26,8 +26,38 @@ from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
 
 
-def _should_notify(*, is_qualified: bool, is_new: bool, price_changed: bool) -> bool:
-    return is_qualified and (is_new or price_changed)
+def _should_notify(
+    *,
+    is_qualified: bool,
+    is_new: bool,
+    price_changed: bool,
+    score: float = 0.0,
+) -> bool:
+    if not is_qualified:
+        return False
+    if not (is_new or price_changed):
+        return False
+
+    try:
+        from src.services.config_manager import config_manager
+
+        cfg = config_manager.get_config()
+        notif = getattr(cfg, "notifications", None)
+        if notif:
+            if not notif.enabled:
+                return False
+            if notif.is_in_quiet_hours():
+                return False
+            if score < notif.min_score_threshold:
+                return False
+            if is_new and not notif.notify_on_new_qualified:
+                return False
+            if price_changed and not is_new and not notif.notify_on_price_drop:
+                return False
+    except Exception as e:
+        logger.debug(f"[Pipeline] Error checking notification settings: {e}")
+
+    return True
 
 
 def _get_configured_commute_destinations() -> list[dict[str, Any]]:
@@ -113,6 +143,17 @@ async def audit_and_apply_spatial_data(target: Any, client: httpx.AsyncClient | 
     )
 
     geo_audit: dict[str, Any] | None = None
+    target_ident = getattr(target, "title", None) or getattr(target, "url", "ogłoszenia")
+    for err, label in (
+        (geo_res, "Geoportal spatial"),
+        (aq_res, "Air quality"),
+        (commute_res, "Commute"),
+        (dev_res, "Developer"),
+        (vision_res, "Vision AI"),
+    ):
+        if isinstance(err, Exception):
+            logger.warning(f"[Pipeline] {label} audit failed for '{target_ident}': {err}")
+
     if isinstance(geo_res, dict):
         geo_audit = geo_res
         main_pid = geo_audit.get("main_parcel_id")
@@ -605,6 +646,7 @@ class ScraperPipeline:
             is_qualified=filter_result.is_qualified,
             is_new=is_new,
             price_changed=price_changed,
+            score=filter_result.score,
         )
 
         if should_notify and db_model.notified_at is None:
@@ -665,6 +707,7 @@ class ScraperPipeline:
                     is_qualified=filt.is_qualified,
                     is_new=is_new,
                     price_changed=price_changed,
+                    score=filt.score,
                 )
                 if should_notify and db_model.notified_at is None:
                     valuation_intel = valuation_engine.evaluate(
@@ -717,12 +760,28 @@ class ScraperPipeline:
             f"[Pipeline] Alerting on qualified offer: {listing.title} "
             f"[{filter_result.status.value}] (Score: {filter_result.score:.1f})"
         )
-        discord_ok = await self.discord.send_notification(
-            listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice, client=client
-        )
-        telegram_ok = await self.telegram.send_notification(
-            listing, filter_result, negotiation_advice=advice, client=client
-        )
+        send_discord = True
+        send_telegram = True
+        try:
+            from src.services.config_manager import config_manager
+
+            notif = getattr(config_manager.get_config(), "notifications", None)
+            if notif:
+                send_discord = notif.discord_enabled
+                send_telegram = notif.telegram_enabled
+        except Exception:
+            pass
+
+        discord_ok = False
+        telegram_ok = False
+        if send_discord:
+            discord_ok = await self.discord.send_notification(
+                listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice, client=client
+            )
+        if send_telegram:
+            telegram_ok = await self.telegram.send_notification(
+                listing, filter_result, negotiation_advice=advice, client=client
+            )
         return bool(discord_ok or telegram_ok)
 
     async def run_cycle(self, target_profile: str | None = None) -> dict:
@@ -754,6 +813,32 @@ class ScraperPipeline:
 
         try:
             return await self._do_run_cycle(target_profile=target_profile)
+        except Exception as e:
+            try:
+                from src.services.config_manager import config_manager
+
+                notif = getattr(config_manager.get_config(), "notifications", None)
+                if notif and notif.enabled and notif.notify_on_errors and not notif.is_in_quiet_hours():
+                    msg = f"Krytyczny błąd w cyklu scrapingu ({target_profile or 'wszystkie profile'}): {e}"
+                    err_coros = [
+                        call()
+                        for enabled, call in (
+                            (
+                                notif.discord_enabled,
+                                lambda: self.discord.send_system_alert("Błąd cyklu scrapingu", msg, level="error"),
+                            ),
+                            (
+                                notif.telegram_enabled,
+                                lambda: self.telegram.send_system_alert("Błąd cyklu scrapingu", msg, level="error"),
+                            ),
+                        )
+                        if enabled
+                    ]
+                    if err_coros:
+                        await asyncio.gather(*err_coros, return_exceptions=True)
+            except Exception:
+                pass
+            raise
         finally:
             try:
                 from src.services.geocoder import geocoder
@@ -899,7 +984,14 @@ class ScraperPipeline:
                 except Exception:
                     pass
 
-        scrape_results = await asyncio.gather(*[scrape_portal(p, pn, sc) for p, pn, sc in flat_scrapers])
+        max_concurrent_portals = min(4, max(2, getattr(settings, "CONCURRENT_REQUESTS", 4)))
+        portal_sem = asyncio.Semaphore(max_concurrent_portals)
+
+        async def bounded_scrape_portal(prof: Any, prof_name: str, scraper: Any) -> tuple[Any, str, str, list, Any]:
+            async with portal_sem:
+                return await scrape_portal(prof, prof_name, scraper)
+
+        scrape_results = await asyncio.gather(*[bounded_scrape_portal(p, pn, sc) for p, pn, sc in flat_scrapers])
         t_scrape = time.perf_counter() - cycle_started - t_medians
         logger.info(f"[Pipeline] Scraping stage took {t_scrape:.1f}s total.")
 
@@ -1062,6 +1154,39 @@ class ScraperPipeline:
             f"{self.engine.llm_failures} nieudanych), pominiętych: {total_llm_skipped} "
             f"(błędy providera: {total_llm_failed}, cache/reguły: {total_llm_skipped - total_llm_failed})"
         )
+
+        # Dispatch cycle summary notification if configured
+        try:
+            from src.services.config_manager import config_manager
+
+            notif = getattr(config_manager.get_config(), "notifications", None)
+            if notif and notif.enabled and notif.notify_on_cycle_summary and not notif.is_in_quiet_hours():
+                has_activity = total_new > 0 or total_price_changes > 0 or total_qualified > 0
+                if not notif.notify_on_cycle_summary_only_if_changes or has_activity:
+                    elapsed_cycle = time.perf_counter() - cycle_started
+                    coros = [
+                        call()
+                        for enabled, call in (
+                            (
+                                notif.discord_enabled,
+                                lambda: self.discord.send_cycle_summary(
+                                    summary, elapsed_cycle, profile_name=target_profile
+                                ),
+                            ),
+                            (
+                                notif.telegram_enabled,
+                                lambda: self.telegram.send_cycle_summary(
+                                    summary, elapsed_cycle, profile_name=target_profile
+                                ),
+                            ),
+                        )
+                        if enabled
+                    ]
+                    if coros:
+                        await asyncio.gather(*coros, return_exceptions=True)
+        except Exception as e:
+            logger.debug(f"[Pipeline] Cycle summary notification error: {e}")
+
         return summary
 
     async def backfill_existing_spatial_data(

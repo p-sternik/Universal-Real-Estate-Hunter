@@ -451,6 +451,8 @@ class OLXScraper(BaseScraper):
                 semaphore = asyncio.Semaphore(settings.CONCURRENT_REQUESTS)
 
                 async def parse_card(card, sem=semaphore):
+                    if self.is_cancelled:
+                        return None
                     try:
                         link_tag = card.select_one("a")
                         title_tag = card.select_one("h6") or card.select_one("h4")

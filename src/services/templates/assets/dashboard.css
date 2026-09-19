@@ -1962,25 +1962,71 @@
             flex-shrink: 0;
         }
 
-        /* 2. Top Tabs with Horizontal Scroll & Edge Mask */
+        /* 2. Top Tabs with Horizontal Scroll & Navigation Buttons */
+        .config-tabs-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+            background: #11141c;
+            border-bottom: 1px solid var(--border);
+            width: 100%;
+            min-width: 0;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .config-tabs-scroll-btn {
+            display: none;
+            align-items: center;
+            justify-content: center;
+            width: 28px;
+            height: 100%;
+            min-height: 44px;
+            flex-shrink: 0;
+            background: #11141c;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            z-index: 3;
+            transition: color 0.15s ease, background 0.15s ease, opacity 0.15s ease;
+            padding: 0;
+        }
+        .config-tabs-scroll-btn:hover:not(:disabled) {
+            color: var(--text-primary);
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .config-tabs-scroll-btn:disabled {
+            opacity: 0.2;
+            cursor: default;
+            pointer-events: none;
+        }
         .config-tabs {
             display: flex;
             flex-wrap: nowrap;
             gap: 4px;
-            padding: 0 16px;
-            border-bottom: 1px solid var(--border);
+            padding: 0 8px;
             overflow-x: auto;
             overflow-y: hidden;
             white-space: nowrap;
-            scrollbar-width: none;
-            -ms-overflow-style: none;
+            scrollbar-width: thin;
+            scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
+            -ms-overflow-style: auto;
             -webkit-overflow-scrolling: touch;
-            flex-shrink: 0;
-            background: #11141c;
-            mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
-            -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
+            scroll-behavior: smooth;
+            flex: 1 1 auto;
+            min-width: 0;
+            background: transparent;
         }
-        .config-tabs::-webkit-scrollbar { display: none; }
+        .config-tabs::-webkit-scrollbar {
+            height: 3px;
+            display: block;
+        }
+        .config-tabs::-webkit-scrollbar-thumb {
+            background: rgba(255, 255, 255, 0.2);
+            border-radius: 3px;
+        }
+        .config-tabs::-webkit-scrollbar-track {
+            background: transparent;
+        }
         .config-tab-btn {
             background: transparent;
             border: none;
@@ -2092,12 +2138,23 @@
         }
         .config-field input:focus, .config-field select:focus, .config-field textarea:focus,
         .config-body input[type="text"]:focus,
+        .config-body input[type="password"]:focus,
         .config-body input[type="number"]:focus,
         .config-body input[type="search"]:focus,
         .config-body select:focus,
         .config-body textarea:focus { border-color: var(--border-active); }
         .config-field textarea { resize: vertical; }
         .config-field select { cursor: pointer; }
+
+        .config-field input:disabled, .config-field select:disabled, .config-field textarea:disabled,
+        .config-body input:disabled, .config-body select:disabled, .config-body textarea:disabled,
+        .config-body button:disabled {
+            opacity: 0.45 !important;
+            cursor: not-allowed !important;
+            background: rgba(255, 255, 255, 0.03) !important;
+            border-color: rgba(255, 255, 255, 0.08) !important;
+            color: var(--text-muted) !important;
+        }
 
         .check-item { display: inline-flex; align-items: center; gap: 8px; font-size: var(--font-size-sm); color: var(--text-secondary); cursor: pointer; }
         .check-item input { width: auto; accent-color: var(--blue); }
@@ -2901,12 +2958,10 @@
                 min-height: 44px;
             }
 
-            /* 2. Top Tabs: horizontal scroll with edge mask & WCAG touch target */
+            /* 2. Top Tabs: horizontal scroll with WCAG touch target */
             .config-tabs {
-                padding: 0 10px;
-                background: #11141c;
-                mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
-                -webkit-mask-image: linear-gradient(to right, black calc(100% - 32px), transparent 100%);
+                padding: 0 6px;
+                background: transparent;
             }
             .config-tab-btn {
                 padding: 10px 14px;

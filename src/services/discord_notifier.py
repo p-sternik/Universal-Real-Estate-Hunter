@@ -24,7 +24,28 @@ class DiscordNotifier:
     COLOR_DEFAULT = 0x95A5A6  # Gray
 
     def __init__(self, webhook_url: str | None = None):
-        self.webhook_url = webhook_url or settings.DISCORD_WEBHOOK_URL
+        self._webhook_url = webhook_url
+        self.last_error: str | None = None
+
+    @property
+    def webhook_url(self) -> str | None:
+        return self._webhook_url or self.get_effective_webhook_url()
+
+    def get_effective_webhook_url(self) -> str:
+        if self._webhook_url:
+            return self._webhook_url
+        try:
+            from src.services.config_manager import config_manager
+
+            val = getattr(getattr(config_manager.get_config(), "notifications", None), "discord_webhook_url", None)
+            if val:
+                return str(val)
+        except Exception:
+            pass
+        return settings.DISCORD_WEBHOOK_URL or ""
+
+    def is_configured(self) -> bool:
+        return bool(self.get_effective_webhook_url())
 
     def _get_color_for_status(self, status: QualificationStatus) -> int:
         if status == QualificationStatus.QUALIFIED_WHITELIST:
@@ -284,26 +305,17 @@ class DiscordNotifier:
 
         return embed
 
-    async def send_notification(
+    async def _post_webhook(
         self,
-        listing: ListingSchema,
-        filter_result: FilterResult,
+        payload: dict[str, Any],
         webhook_url: str | None = None,
-        negotiation_advice: NegotiationAdvice | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> bool:
-        """Send rich Discord notification."""
         target_webhook = webhook_url or self.webhook_url
         if not target_webhook:
-            logger.warning("[DiscordNotifier] Webhook URL not configured. Skipping Discord alert.")
+            self.last_error = "Brak skonfigurowanego URL webhooka Discord."
+            logger.warning(f"[DiscordNotifier] {self.last_error}")
             return False
-
-        embed = self.format_embed(listing, filter_result, negotiation_advice=negotiation_advice)
-        payload = {
-            "username": "Real Estate Hunter",
-            "avatar_url": "https://img.icons8.com/fluency/96/real-estate.png",
-            "embeds": [embed],
-        }
 
         for attempt in range(1, 4):
             try:
@@ -313,23 +325,52 @@ class DiscordNotifier:
                     async with httpx.AsyncClient(timeout=15.0) as local_client:
                         resp = await local_client.post(target_webhook, json=payload)
                 if resp.status_code in (200, 204):
-                    logger.info(f"[DiscordNotifier] Alert sent successfully for: {listing.title[:50]}")
+                    self.last_error = None
                     return True
                 if resp.status_code == 429:
                     retry_after = resp.json().get("retry_after", 2.0)
                     logger.warning(f"[DiscordNotifier] Rate limited. Retrying after {retry_after}s...")
                     await asyncio.sleep(retry_after)
                 else:
-                    logger.error(f"[DiscordNotifier] Error {resp.status_code}: {resp.text}")
+                    err_msg = f"HTTP {resp.status_code}: {resp.text}"
+                    self.last_error = err_msg
+                    logger.error(f"[DiscordNotifier] Error {err_msg}")
             except Exception as e:
+                self.last_error = str(e)
                 logger.error(f"[DiscordNotifier] Failed sending webhook (attempt {attempt}/3): {e}")
                 await asyncio.sleep(1.5)
 
         return False
 
-    async def send_test_message(self) -> bool:
+    async def send_notification(
+        self,
+        listing: ListingSchema,
+        filter_result: FilterResult,
+        webhook_url: str | None = None,
+        negotiation_advice: NegotiationAdvice | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> bool:
+        """Send rich Discord notification for a qualified listing."""
+        embed = self.format_embed(listing, filter_result, negotiation_advice=negotiation_advice)
+        payload = {
+            "username": "Real Estate Hunter",
+            "avatar_url": "https://img.icons8.com/fluency/96/real-estate.png",
+            "embeds": [embed],
+        }
+        ok = await self._post_webhook(payload, webhook_url=webhook_url, client=client)
+        if ok:
+            logger.info(f"[DiscordNotifier] Alert sent successfully for: {listing.title[:50]}")
+        return ok
+
+    async def send_test_message(
+        self,
+        webhook_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> bool:
         """Sends a verification message to Discord."""
-        if not self.webhook_url:
+        target_webhook = webhook_url or self.webhook_url
+        if not target_webhook:
+            self.last_error = "Brak adresu URL webhooka Discord."
             logger.error("[DiscordNotifier] No webhook URL configured.")
             return False
 
@@ -347,10 +388,119 @@ class DiscordNotifier:
                 }
             ],
         }
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                res = await client.post(self.webhook_url, json=payload)
-                return res.status_code in (200, 204)
-        except Exception as e:
-            logger.error(f"[DiscordNotifier] Test message failed: {e}")
-            return False
+        return await self._post_webhook(payload, webhook_url=target_webhook, client=client)
+
+    async def send_cycle_summary(
+        self,
+        summary: dict[str, Any],
+        elapsed_seconds: float,
+        profile_name: str | None = None,
+        webhook_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> bool:
+        """Sends a scraping cycle summary embed to Discord."""
+        prof_title = f" • Profil: {profile_name}" if profile_name else ""
+        m, s = divmod(int(elapsed_seconds), 60)
+        elapsed_str = f"{m}m {s}s" if m > 0 else f"{elapsed_seconds:.1f}s"
+
+        total_scraped = summary.get("total_scraped", 0)
+        new_listings = summary.get("new_listings", 0)
+        price_changes = summary.get("price_changes", 0)
+        qualified = summary.get("qualified", 0)
+        notified = summary.get("notified", 0)
+        llm_success = summary.get("llm_successes", 0)
+        llm_calls = summary.get("llm_calls", 0)
+
+        color = self.COLOR_WHITELIST if qualified > 0 else self.COLOR_QUALIFIED
+
+        fields = [
+            {"name": "⏱️ Czas trwania", "value": f"**{elapsed_str}**", "inline": True},
+            {"name": "📊 Przeszukano", "value": f"**{total_scraped}** ofert", "inline": True},
+            {"name": "⭐ Zakwalifikowano", "value": f"**{qualified}**", "inline": True},
+            {"name": "🆕 Nowe oferty", "value": f"**{new_listings}**", "inline": True},
+            {"name": "📉 Zmiany cen", "value": f"**{price_changes}**", "inline": True},
+            {"name": "🔔 Wysłano powiadomień", "value": f"**{notified}**", "inline": True},
+        ]
+        if llm_calls > 0:
+            fields.append({"name": "🤖 Audyty AI", "value": f"{llm_success}/{llm_calls} udanych", "inline": True})
+
+        embed = {
+            "title": f"🏁 Podsumowanie cyklu scrapingu{prof_title}",
+            "color": color,
+            "fields": fields,
+            "footer": {
+                "text": f"Universal Real Estate Hunter • {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            },
+        }
+        payload = {
+            "username": "Real Estate Hunter",
+            "avatar_url": "https://img.icons8.com/fluency/96/real-estate.png",
+            "embeds": [embed],
+        }
+        return await self._post_webhook(payload, webhook_url=webhook_url, client=client)
+
+    async def send_price_drop(
+        self,
+        listing: ListingSchema,
+        old_price: float,
+        new_price: float,
+        webhook_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> bool:
+        """Sends an alert embed for a detected price drop."""
+        diff = old_price - new_price
+        pct = (diff / old_price) * 100 if old_price > 0 else 0.0
+        old_fmt = f"{old_price:,.0f} zł".replace(",", " ")
+        new_fmt = f"{new_price:,.0f} zł".replace(",", " ")
+        diff_fmt = f"{diff:,.0f} zł".replace(",", " ")
+
+        embed = {
+            "title": f"📉 OBNIŻKA CENY: {listing.title[:200]}",
+            "url": listing.url,
+            "color": 0xE67E22,  # Orange
+            "fields": [
+                {"name": "💰 Nowa cena", "value": f"**{new_fmt}** (było {old_fmt})", "inline": True},
+                {"name": "🔻 Obniżka", "value": f"**-{diff_fmt}** (-{pct:.1f}%)", "inline": True},
+                {"name": "📍 Lokalizacja", "value": listing.location_raw or "b/d", "inline": False},
+                {"name": "📐 Metraż", "value": f"{listing.area_home:.1f} m²", "inline": True},
+            ],
+            "footer": {
+                "text": f"Portal: {listing.portal} • {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            },
+        }
+        if listing.main_image_url and listing.main_image_url.startswith("http"):
+            embed["image"] = {"url": listing.main_image_url}
+
+        payload = {
+            "username": "Real Estate Hunter",
+            "avatar_url": "https://img.icons8.com/fluency/96/real-estate.png",
+            "embeds": [embed],
+        }
+        return await self._post_webhook(payload, webhook_url=webhook_url, client=client)
+
+    async def send_system_alert(
+        self,
+        title: str,
+        message: str,
+        level: str = "warning",
+        webhook_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
+    ) -> bool:
+        """Sends a system warning or error alert embed to Discord."""
+        color = 0xE74C3C if level == "error" else 0xF39C12
+        icon = "🚨" if level == "error" else "⚠️"
+
+        embed = {
+            "title": f"{icon} Alert systemowy: {title}",
+            "description": message[:2048],
+            "color": color,
+            "footer": {
+                "text": f"Universal Real Estate Hunter • {datetime.now().strftime('%Y-%m-%d %H:%M')}",
+            },
+        }
+        payload = {
+            "username": "Real Estate Hunter (System Alert)",
+            "avatar_url": "https://img.icons8.com/fluency/96/warning.png",
+            "embeds": [embed],
+        }
+        return await self._post_webhook(payload, webhook_url=webhook_url, client=client)
