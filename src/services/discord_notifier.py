@@ -290,6 +290,7 @@ class DiscordNotifier:
         filter_result: FilterResult,
         webhook_url: str | None = None,
         negotiation_advice: NegotiationAdvice | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> bool:
         """Send rich Discord notification."""
         target_webhook = webhook_url or self.webhook_url
@@ -306,17 +307,20 @@ class DiscordNotifier:
 
         for attempt in range(1, 4):
             try:
-                async with httpx.AsyncClient(timeout=15.0) as client:
+                if client is not None:
                     resp = await client.post(target_webhook, json=payload)
-                    if resp.status_code in (200, 204):
-                        logger.info(f"[DiscordNotifier] Alert sent successfully for: {listing.title[:50]}")
-                        return True
-                    if resp.status_code == 429:
-                        retry_after = resp.json().get("retry_after", 2.0)
-                        logger.warning(f"[DiscordNotifier] Rate limited. Retrying after {retry_after}s...")
-                        await asyncio.sleep(retry_after)
-                    else:
-                        logger.error(f"[DiscordNotifier] Error {resp.status_code}: {resp.text}")
+                else:
+                    async with httpx.AsyncClient(timeout=15.0) as local_client:
+                        resp = await local_client.post(target_webhook, json=payload)
+                if resp.status_code in (200, 204):
+                    logger.info(f"[DiscordNotifier] Alert sent successfully for: {listing.title[:50]}")
+                    return True
+                if resp.status_code == 429:
+                    retry_after = resp.json().get("retry_after", 2.0)
+                    logger.warning(f"[DiscordNotifier] Rate limited. Retrying after {retry_after}s...")
+                    await asyncio.sleep(retry_after)
+                else:
+                    logger.error(f"[DiscordNotifier] Error {resp.status_code}: {resp.text}")
             except Exception as e:
                 logger.error(f"[DiscordNotifier] Failed sending webhook (attempt {attempt}/3): {e}")
                 await asyncio.sleep(1.5)

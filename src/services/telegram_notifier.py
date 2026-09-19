@@ -135,6 +135,7 @@ class TelegramNotifier:
         listing: ListingSchema,
         filter_result: FilterResult,
         negotiation_advice: NegotiationAdvice | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> bool:
         if not self.is_configured():
             return False
@@ -149,12 +150,15 @@ class TelegramNotifier:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            if client is not None:
                 res = await client.post(url, json=payload)
-                if res.status_code == 200:
-                    logger.info(f"[TelegramNotifier] Alert sent for: {listing.title[:40]}")
-                    return True
-                logger.error(f"[TelegramNotifier] Error {res.status_code}: {res.text}")
+            else:
+                async with httpx.AsyncClient(timeout=10.0) as local_client:
+                    res = await local_client.post(url, json=payload)
+            if res.status_code == 200:
+                logger.info(f"[TelegramNotifier] Alert sent for: {listing.title[:40]}")
+                return True
+            logger.error(f"[TelegramNotifier] Error {res.status_code}: {res.text}")
         except Exception as e:
             logger.error(f"[TelegramNotifier] Exception sending alert: {e}")
 

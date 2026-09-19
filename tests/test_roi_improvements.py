@@ -312,3 +312,95 @@ def test_geocoder_fallback_does_not_leak_rzeszow_to_other_cities():
     from src.services.geocoder import DISTRICT_CENTROIDS_BY_CITY
 
     assert res_slocina == DISTRICT_CENTROIDS_BY_CITY["rzeszow"]["słocina"]
+
+
+async def test_geocoder_client_session_reuse_and_close():
+    gc = geocoder_module.NominatimGeocoder()
+    assert gc._client is None
+
+    # Mock response
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = [{"lat": "50.0", "lon": "22.0", "display_name": "Test"}]
+
+    with patch("src.services.geocoder.httpx.AsyncClient") as mock_client_cls:
+        mock_instance = AsyncMock()
+        mock_instance.is_closed = False
+        mock_instance.get = AsyncMock(return_value=mock_resp)
+        mock_instance.aclose = AsyncMock()
+        mock_client_cls.return_value = mock_instance
+
+        res1 = await gc._rate_limited_query("Rzeszów")
+        assert res1 is not None
+        assert gc._client is mock_instance
+
+        res2 = await gc._rate_limited_query("Rzeszów")
+        assert res2 is not None
+        # Should NOT have instantiated a second AsyncClient
+        assert mock_client_cls.call_count == 1
+
+        await gc.close()
+        assert mock_instance.aclose.called
+        assert gc._client is None
+
+
+async def test_nieruchomosci_online_parse_tile_sets_skip_detail():
+    from bs4 import BeautifulSoup
+
+    from src.scrapers.nieruchomosci_online import NieruchomosciOnlineScraper
+
+    tile_html = """
+    <div class="tile">
+        <h2><a href="https://www.nieruchomosci-online.pl/dom-na-sprzedaz-12345.html">Dom testowy</a></h2>
+        <p class="primary-display">750 000 zł</p>
+        <span class="area">120 m²</span>
+        <p class="province">Rzeszów, Podkarpackie</p>
+    </div>
+    """
+    soup = BeautifulSoup(tile_html, "html.parser")
+    tile = soup.select_one("div.tile")
+
+    scraper = NieruchomosciOnlineScraper(
+        skip_detail_urls={"https://www.nieruchomosci-online.pl/dom-na-sprzedaz-12345.html"}
+    )
+    listing = scraper._parse_tile(tile)
+    assert listing is not None
+    assert listing.skip_detail is True
+
+    # Not in skip_detail_urls
+    scraper_no_skip = NieruchomosciOnlineScraper(skip_detail_urls=set())
+    listing2 = scraper_no_skip._parse_tile(tile)
+    assert listing2 is not None
+    assert listing2.skip_detail is False
+
+
+async def test_notifiers_accept_reusable_http_client():
+    listing = _listing(building_type=BuildingType.WOLNOSTOJACY)
+    from src.models.enums import QualificationStatus
+    from src.models.listing import FilterResult
+
+    result = FilterResult(
+        is_qualified=True,
+        status=QualificationStatus.QUALIFIED,
+        score=85.0,
+        passed_stage1=True,
+        passed_stage2=True,
+    )
+
+    mock_client = AsyncMock()
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_client.post = AsyncMock(return_value=mock_resp)
+
+    # Discord with shared client
+    discord = DiscordNotifier(webhook_url="https://discord.com/api/webhooks/test")
+    discord_ok = await discord.send_notification(listing, result, client=mock_client)
+    assert discord_ok is True
+    assert mock_client.post.called
+
+    # Telegram with shared client
+    mock_client.post.reset_mock()
+    telegram = TelegramNotifier(bot_token="test_token", chat_id="12345")
+    telegram_ok = await telegram.send_notification(listing, result, client=mock_client)
+    assert telegram_ok is True
+    assert mock_client.post.called
