@@ -1583,204 +1583,265 @@ class LiveDashboardServer:
         except (KeyError, ValueError):
             return web.json_response({"error": "Nieprawidłowy identyfikator oferty"}, status=400)
 
-        async with get_session() as session:
-            repo = ListingRepository(session)
-            item = await repo.get_by_id(listing_id)
-            if not item:
-                return web.json_response({"error": "Nie znaleziono oferty w bazie danych"}, status=404)
+        try:
+            async with get_session() as session:
+                repo = ListingRepository(session)
+                item = await repo.get_by_id(listing_id)
+                if not item:
+                    return web.json_response({"error": "Nie znaleziono oferty w bazie danych"}, status=404)
 
-            if not item.raw_description or not item.raw_description.strip():
-                return web.json_response({"error": "Oferta nie posiada opisu do analizy przez AI"}, status=400)
+                if not item.raw_description or not item.raw_description.strip():
+                    return web.json_response({"error": "Oferta nie posiada opisu do analizy przez AI"}, status=400)
 
-            from src.filters.llm_analyzer import LLMAnalyzer
-            from src.models.enums import (
-                BuildingType,
-                FinishCondition,
-                HeatingType,
-                MarketType,
-                PropertyCategory,
-                RoadType,
-                SegmentSubtype,
-                SewerageType,
-            )
-            from src.models.listing import ListingSchema
+                from src.filters.fingerprint import compute_desc_hash
+                from src.filters.llm_analyzer import LLMAnalyzer
+                from src.models.enums import (
+                    BuildingType,
+                    FinishCondition,
+                    HeatingType,
+                    MarketType,
+                    PropertyCategory,
+                    RoadType,
+                    SegmentSubtype,
+                    SewerageType,
+                )
+                from src.models.listing import ListingSchema, copy_spatial_fields
 
-            coords = (
-                (item.latitude, item.longitude) if item.latitude is not None and item.longitude is not None else None
-            )
-
-            finish_map = {
-                "do zamieszkania": FinishCondition.DO_ZAMIESZKANIA,
-                "pod_klucz": FinishCondition.DO_ZAMIESZKANIA,
-                "do wykończenia": FinishCondition.DO_WYKONCZENIA,
-                "do_wykonczenia": FinishCondition.DO_WYKONCZENIA,
-                "deweloperski": FinishCondition.DEWELOPERSKI,
-                "do remontu": FinishCondition.DO_REMONTU,
-                "do_remontu": FinishCondition.DO_REMONTU,
-                "surowy zamknięty": FinishCondition.SUROWY_ZAMKNIETY,
-                "surowy_zamkniety": FinishCondition.SUROWY_ZAMKNIETY,
-                "surowy otwarty": FinishCondition.SUROWY_OTWARTY,
-                "surowy_otwarty": FinishCondition.SUROWY_OTWARTY,
-            }
-            finish_condition_enum = finish_map.get(
-                str(item.finish_condition or "").lower(), FinishCondition.NIEOKRESLONY
-            )
-
-            try:
-                prop_category = PropertyCategory(item.category)
-            except (ValueError, TypeError):
-                prop_category = PropertyCategory.DOM
-
-            try:
-                market_type = MarketType(item.market)
-            except (ValueError, TypeError):
-                market_type = MarketType.NIEOKRESLONY
-
-            try:
-                b_type = BuildingType(item.building_type)
-            except (ValueError, TypeError):
-                b_type = BuildingType.INNY
-
-            try:
-                s_subtype = SegmentSubtype(item.segment_subtype)
-            except (ValueError, TypeError):
-                s_subtype = SegmentSubtype.NIEOKRESLONY
-
-            try:
-                road_type = RoadType(item.access_road_type)
-            except (ValueError, TypeError):
-                road_type = RoadType.NIEZNANA
-
-            try:
-                sewerage_type = SewerageType(item.sewerage)
-            except (ValueError, TypeError):
-                sewerage_type = SewerageType.NIEZNANA
-
-            try:
-                heating_type = HeatingType(item.heating)
-            except (ValueError, TypeError):
-                heating_type = HeatingType.NIEZNANE
-
-            schema = ListingSchema(
-                id=str(item.portal_id or item.id),
-                portal=item.portal,
-                title=item.title,
-                url=item.url,
-                price=item.price,
-                price_per_m2=item.price_per_m2,
-                area_home=item.area_home,
-                area_plot=item.area_plot,
-                category=prop_category,
-                rooms=item.rooms,
-                floor=item.floor,
-                floors_in_building=item.floors_in_building,
-                is_private_owner=item.is_private_owner,
-                building_type=b_type,
-                segment_subtype=s_subtype,
-                location_raw=item.location_raw or "",
-                street=item.street,
-                district=item.district,
-                city=item.city,
-                coordinates=coords,
-                access_road_type=road_type,
-                market=market_type,
-                finish_condition=finish_condition_enum,
-                has_visualisations=bool(item.has_visualisations),
-                sewerage=sewerage_type,
-                heating=heating_type,
-                has_fiber=bool(item.has_fiber),
-                year_built=item.year_built,
-                raw_description=item.raw_description,
-                main_image_url=item.main_image_url,
-                parcel_id=item.parcel_id,
-                cadastral_area=item.cadastral_area,
-                geoportal_url=item.geoportal_url,
-                mpzp_zone=item.mpzp_zone,
-                mpzp_status=item.mpzp_status,
-                flood_risk_zone=item.flood_risk_zone,
-            )
-
-            analyzer = LLMAnalyzer(enabled=True)
-            logger.info(f"[LiveDashboard] Generowanie audytu AI na żądanie dla #{item.id} '{item.title[:35]}'")
-            insights = await analyzer.analyze_description(schema)
-            if not insights:
-                return web.json_response(
-                    {
-                        "error": "Model AI nie zwrócił odpowiedzi. Sprawdź klucz API (np. OPENROUTER_API_KEY) lub Ollama."
-                    },
-                    status=502,
+                coords = (
+                    (item.latitude, item.longitude)
+                    if item.latitude is not None and item.longitude is not None
+                    else None
                 )
 
-            item.ai_summary = insights.get("summary")
-            item.ai_verdict = insights.get("verdict")
-            item.worth_interest = insights.get("worth_interest")
-            q_list = insights.get("questions_for_agent") or []
-            item._ai_questions = json.dumps(q_list, ensure_ascii=False)
-
-            sq_dict = insights.get("stakeholder_questions") or {}
-            item.stakeholder_questions = sq_dict
-            docs_list = insights.get("documents_to_obtain") or []
-            item.documents_to_obtain = docs_list
-            risks_list = insights.get("structured_risks") or []
-            item.structured_risks = risks_list
-
-            if insights.get("contact_phone") and not item.contact_phone:
-                item.contact_phone = str(insights.get("contact_phone"))
-            if insights.get("contact_person") and not item.contact_person:
-                item.contact_person = str(insights.get("contact_person"))
-
-            finish_raw = str(insights.get("finish_condition") or "").lower()
-            if finish_raw in finish_map:
-                item.finish_condition = finish_map[finish_raw].value
-
-            if insights.get("has_visualisations") is not None:
-                item.has_visualisations = bool(insights.get("has_visualisations"))
-
-            item_pros = list(item.pros or [])
-            for p in insights.get("pros") or []:
-                llm_p = f"[LLM] {p}" if not p.startswith("[LLM]") else p
-                if llm_p not in item_pros:
-                    item_pros.append(llm_p)
-            item.pros = item_pros
-
-            item_cons = list(item.cons or [])
-            for c in insights.get("cons") or []:
-                llm_c = f"[LLM] {c}" if not c.startswith("[LLM]") else c
-                if llm_c not in item_cons:
-                    item_cons.append(llm_c)
-            for c in insights.get("hidden_costs") or []:
-                cost_c = f"⚠️ [Ukryty koszt] {c}"
-                if cost_c not in item_cons:
-                    item_cons.append(cost_c)
-            for r in insights.get("legal_risks") or []:
-                risk_c = f"⚖️ [Ryzyko prawne] {r}"
-                if risk_c not in item_cons:
-                    item_cons.append(risk_c)
-            item.cons = item_cons
-
-            item.updated_at = datetime.now(UTC)
-            await safe_commit(session)
-
-            logger.info(f"[LiveDashboard] Pomyślnie zapisano audyt AI dla #{item.id}")
-
-            return web.json_response(
-                {
-                    "id": item.id,
-                    "ai_summary": item.ai_summary,
-                    "ai_verdict": item.ai_verdict,
-                    "worth_interest": item.worth_interest,
-                    "ai_questions": q_list,
-                    "stakeholder_questions": sq_dict,
-                    "documents_to_obtain": docs_list,
-                    "structured_risks": risks_list,
-                    "contact_phone": item.contact_phone,
-                    "contact_person": item.contact_person,
-                    "finish_condition": item.finish_condition,
-                    "has_visualisations": item.has_visualisations,
-                    "pros": item.pros,
-                    "cons": item.cons,
+                finish_map = {
+                    "do zamieszkania": FinishCondition.DO_ZAMIESZKANIA,
+                    "pod_klucz": FinishCondition.DO_ZAMIESZKANIA,
+                    "do wykończenia": FinishCondition.DO_WYKONCZENIA,
+                    "do_wykonczenia": FinishCondition.DO_WYKONCZENIA,
+                    "deweloperski": FinishCondition.DEWELOPERSKI,
+                    "do remontu": FinishCondition.DO_REMONTU,
+                    "do_remontu": FinishCondition.DO_REMONTU,
+                    "surowy zamknięty": FinishCondition.SUROWY_ZAMKNIETY,
+                    "surowy_zamkniety": FinishCondition.SUROWY_ZAMKNIETY,
+                    "surowy otwarty": FinishCondition.SUROWY_OTWARTY,
+                    "surowy_otwarty": FinishCondition.SUROWY_OTWARTY,
                 }
-            )
+                finish_condition_enum = finish_map.get(
+                    str(item.finish_condition or "").lower(), FinishCondition.NIEOKRESLONY
+                )
+
+                try:
+                    prop_category = PropertyCategory(item.category)
+                except (ValueError, TypeError):
+                    prop_category = PropertyCategory.DOM
+
+                try:
+                    market_type = MarketType(item.market)
+                except (ValueError, TypeError):
+                    market_type = MarketType.NIEOKRESLONY
+
+                try:
+                    b_type = BuildingType(item.building_type)
+                except (ValueError, TypeError):
+                    b_type = BuildingType.INNY
+
+                try:
+                    s_subtype = SegmentSubtype(item.segment_subtype)
+                except (ValueError, TypeError):
+                    s_subtype = SegmentSubtype.NIEOKRESLONY
+
+                try:
+                    road_type = RoadType(item.access_road_type)
+                except (ValueError, TypeError):
+                    road_type = RoadType.NIEZNANA
+
+                try:
+                    sewerage_type = SewerageType(item.sewerage)
+                except (ValueError, TypeError):
+                    sewerage_type = SewerageType.NIEZNANA
+
+                try:
+                    heating_type = HeatingType(item.heating)
+                except (ValueError, TypeError):
+                    heating_type = HeatingType.NIEZNANE
+
+                schema = ListingSchema(
+                    id=str(item.portal_id or item.id),
+                    portal=item.portal,
+                    title=item.title,
+                    url=item.url,
+                    price=item.price,
+                    price_per_m2=item.price_per_m2,
+                    area_home=item.area_home,
+                    area_plot=item.area_plot,
+                    category=prop_category,
+                    rooms=item.rooms,
+                    floor=item.floor,
+                    floors_in_building=item.floors_in_building,
+                    is_private_owner=item.is_private_owner,
+                    building_type=b_type,
+                    segment_subtype=s_subtype,
+                    location_raw=item.location_raw or "",
+                    street=item.street,
+                    district=item.district,
+                    city=item.city,
+                    coordinates=coords,
+                    access_road_type=road_type,
+                    market=market_type,
+                    finish_condition=finish_condition_enum,
+                    has_visualisations=bool(item.has_visualisations),
+                    sewerage=sewerage_type,
+                    heating=heating_type,
+                    has_fiber=bool(item.has_fiber),
+                    year_built=item.year_built,
+                    raw_description=item.raw_description,
+                    main_image_url=item.main_image_url,
+                    parcel_id=item.parcel_id,
+                    cadastral_area=item.cadastral_area,
+                    geoportal_url=item.geoportal_url,
+                    mpzp_zone=item.mpzp_zone,
+                    mpzp_status=item.mpzp_status,
+                    flood_risk_zone=item.flood_risk_zone,
+                )
+                copy_spatial_fields(schema, item)
+
+                analyzer = LLMAnalyzer.from_config(enabled=True)
+                logger.info(f"[LiveDashboard] Generowanie audytu AI na żądanie dla #{item.id} '{item.title[:35]}'")
+                insights = await analyzer.analyze_description(schema)
+                if not insights:
+                    return web.json_response(
+                        {
+                            "error": "Model AI nie zwrócił odpowiedzi. Sprawdź klucz API (np. OPENROUTER_API_KEY) lub Ollama."
+                        },
+                        status=502,
+                    )
+
+                item.ai_summary = insights.get("summary")
+                item.ai_verdict = insights.get("verdict")
+                item.worth_interest = insights.get("worth_interest")
+                q_list = insights.get("questions_for_agent") or []
+                item._ai_questions = json.dumps(q_list, ensure_ascii=False)
+
+                sq_dict = insights.get("stakeholder_questions") or {}
+                item.stakeholder_questions = sq_dict
+                docs_list = insights.get("documents_to_obtain") or []
+                item.documents_to_obtain = docs_list
+                risks_list = insights.get("structured_risks") or []
+                item.structured_risks = risks_list
+
+                # Update LLM cache and forensic metadata
+                item.llm_json_data = insights
+                item.desc_hash = compute_desc_hash(item.raw_description)
+                item.llm_prompt_version = getattr(analyzer, "last_prompt_version", None) or "v1.1"
+                item.llm_model = getattr(analyzer, "last_model", None) or analyzer.llm_provider
+
+                if insights.get("contact_phone") and not item.contact_phone:
+                    item.contact_phone = str(insights.get("contact_phone"))
+                if insights.get("contact_person") and not item.contact_person:
+                    item.contact_person = str(insights.get("contact_person"))
+
+                finish_raw = str(insights.get("finish_condition") or "").lower()
+                if finish_raw in finish_map:
+                    item.finish_condition = finish_map[finish_raw].value
+
+                if insights.get("has_visualisations") is not None:
+                    item.has_visualisations = bool(insights.get("has_visualisations"))
+
+                if insights.get("is_corner"):
+                    item.segment_subtype = SegmentSubtype.SKRAJNY.value
+                elif insights.get("is_middle"):
+                    item.segment_subtype = SegmentSubtype.SRODKOWY.value
+
+                if insights.get("extracted_plot_m2") and not item.area_plot:
+                    try:
+                        item.area_plot = float(insights["extracted_plot_m2"])
+                    except (ValueError, TypeError):
+                        pass
+
+                sewer_raw = str(insights.get("sewerage") or "").lower()
+                sewer_map = {
+                    "miejska": SewerageType.MIEJSKA,
+                    "szambo": SewerageType.SZAMBO,
+                    "oczyszczalnia": SewerageType.OCZYSZCZALNIA,
+                }
+                if sewer_raw in sewer_map:
+                    item.sewerage = sewer_map[sewer_raw].value
+
+                item_pros = list(item.pros or [])
+                for p in insights.get("pros") or []:
+                    llm_p = f"[LLM] {p}" if not p.startswith("[LLM]") else p
+                    if llm_p not in item_pros:
+                        item_pros.append(llm_p)
+
+                finish_note = str(insights.get("finish_note") or "").strip()
+                if finish_note:
+                    if item.finish_condition == FinishCondition.DO_ZAMIESZKANIA.value:
+                        fn_tag = f"✨ [Stan] {finish_note}"
+                        if fn_tag not in item_pros:
+                            item_pros.append(fn_tag)
+                    else:
+                        fn_tag = f"🔧 [LLM] Stan: {finish_note}"
+                        if fn_tag not in item_pros:
+                            item_pros.append(fn_tag)
+
+                item.pros = item_pros
+
+                item_cons = list(item.cons or [])
+                for c in insights.get("cons") or []:
+                    llm_c = f"[LLM] {c}" if not c.startswith("[LLM]") else c
+                    if llm_c not in item_cons:
+                        item_cons.append(llm_c)
+                for c in insights.get("hidden_costs") or []:
+                    cost_c = f"⚠️ [Ukryty koszt] {c}"
+                    if cost_c not in item_cons:
+                        item_cons.append(cost_c)
+                for r in insights.get("legal_risks") or []:
+                    risk_c = f"⚖️ [Ryzyko prawne] {r}"
+                    if risk_c not in item_cons:
+                        item_cons.append(risk_c)
+                for d in insights.get("discrepancies") or []:
+                    disc_c = f"🔍 [LLM] Rozbieżność portal vs opis: {d}"
+                    if disc_c not in item_cons:
+                        item_cons.append(disc_c)
+                if insights.get("terrain_risk"):
+                    tr_c = "⚠️ [LLM] Wykryto ryzyko ukształtowania terenu (skarpa / osuwisko / podmokłość)"
+                    if tr_c not in item_cons:
+                        item_cons.append(tr_c)
+                if sewer_raw == "brak":
+                    s_c = "⚠️ [LLM] Brak przyłącza kanalizacyjnego na działce / w budynku"
+                    if s_c not in item_cons:
+                        item_cons.append(s_c)
+
+                item.cons = item_cons
+
+                item.updated_at = datetime.now(UTC)
+                await safe_commit(session)
+
+                logger.info(f"[LiveDashboard] Pomyślnie zapisano audyt AI dla #{item.id}")
+
+                return web.json_response(
+                    {
+                        "id": item.id,
+                        "ai_summary": item.ai_summary,
+                        "ai_verdict": item.ai_verdict,
+                        "worth_interest": item.worth_interest,
+                        "ai_questions": q_list,
+                        "stakeholder_questions": sq_dict,
+                        "documents_to_obtain": docs_list,
+                        "structured_risks": risks_list,
+                        "contact_phone": item.contact_phone,
+                        "contact_person": item.contact_person,
+                        "finish_condition": item.finish_condition,
+                        "has_visualisations": item.has_visualisations,
+                        "pros": item.pros,
+                        "cons": item.cons,
+                    }
+                )
+        except web.HTTPException:
+            raise
+        except Exception as e:
+            logger.exception(f"[LiveDashboard] Błąd generowania audytu AI dla #{listing_id}: {e}")
+            return web.json_response({"error": f"Błąd generowania audytu AI: {e}"}, status=500)
 
     async def handle_geocode_query(self, request: web.Request) -> web.Response:
         """Forward-geocodes an arbitrary address string for the commute matrix editor."""

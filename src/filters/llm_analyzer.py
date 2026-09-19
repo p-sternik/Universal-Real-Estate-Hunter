@@ -1164,8 +1164,11 @@ class LLMAnalyzer:
                     desc_slice=desc_slice,
                 )
                 return prompt, prompt_version
-            except (KeyError, IndexError, ValueError):
-                pass
+            except (KeyError, IndexError, ValueError) as e:
+                logger.error(
+                    f"[LLMAnalyzer] Failed to format prompt template ({e.__class__.__name__}: {e}). "
+                    "Falling back to minimal prompt. Please check for unescaped braces in template."
+                )
         # Fallback: minimal prompt when template is missing/unformattable.
         prompt = (
             "Extract forensic factual state from the Polish listing below. Return valid JSON.\n"

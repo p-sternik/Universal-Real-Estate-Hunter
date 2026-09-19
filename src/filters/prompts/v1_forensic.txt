@@ -47,7 +47,7 @@ Finish note:
       * "municipality": [string] — questions for the local gmina/urząd (MPZP status, public access road status, planned nearby investments/roadworks).
     - "documents_to_obtain": 3-6 specific documents the buyer should demand before the preliminary contract (e.g. odpis z KW z ekw.ms.gov.pl, wypis/wyrys z MPZP lub WZ, świadectwo charakterystyki energetycznej, zaświadczenie o braku zaległości czynszowych/podatkowych, protokół odbioru technicznego).
     - "structured_risks": list of key risks categorized by severity:
-      * Each element: {"severity": "KRYTYCZNE" | "WYSOKIE" | "SREDNIE" | "NISKIE", "title": string, "description": string, "action": string}
+      * Each element: {{"severity": "KRYTYCZNE" | "WYSOKIE" | "SREDNIE" | "NISKIE", "title": string, "description": string, "action": string}}
       * "action" MUST be a concrete remediation step ("Co zrobić" — np. weryfikacja w urzędzie, żądanie dokumentu, zlecenie ekspertyzy).
 12. Contact: Extract the phone number (format +48XXXXXXXXX or 9 digits) and the contact person's name if present in the text; null otherwise.
 13. Plot area: If the text states the plot/garden area (e.g. "3.2 ara" -> 320.0), return it in m²; otherwise null.
