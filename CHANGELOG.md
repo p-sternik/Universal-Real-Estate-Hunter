@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.17.2 (2026-09-19)
+
+### Bug Fixes
+
+- **llm**: Fix prompt template formatting error and manual audit enrichment
+  ([`ac9a7e5`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/ac9a7e5a0ee8acc5a49db1075c011731d59b313e))
+
+
 ## v1.17.1 (2026-09-19)
 
 ### Performance Improvements
