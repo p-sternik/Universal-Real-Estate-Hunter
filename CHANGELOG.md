@@ -6,6 +6,29 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.17.0 (2026-09-19)
+
+### Bug Fixes
+
+- **ui**: Unify input backgrounds and borders in commute configuration
+  ([`7a85eb7`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/7a85eb718b1ae6f6159917a070ec6633f77a3834))
+
+### Features
+
+- **dashboard**: Add on-demand update check button and reduce background TTL to 2h
+  ([`c6cca2c`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/c6cca2cf7d47bef8940d7413aecf2158447f9c5b))
+
+### Performance Improvements
+
+- **pipeline,scrapers**: Optimize scraping throughput, fresh detail skipping and concurrent audits
+  ([`ea3e75d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/ea3e75d16a9659abc36f003535fd7984f247e5c7))
+
+### Refactoring
+
+- **ui**: Streamline elapsed time formatting and remove redundant CSS/globals
+  ([`3831bce`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3831bcef734ec3b89b561c42c7ae979637b2b0a9))
+
+
 ## v1.16.0 (2026-09-18)
 
 ### Features
