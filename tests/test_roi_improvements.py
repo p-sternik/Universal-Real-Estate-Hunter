@@ -71,6 +71,7 @@ def test_build_prompt_uses_template_and_version():
     prompt, version = analyzer.build_prompt(_listing())
     assert "Dom pod klucz z garażem" in prompt
     assert "<ogloszenie>" in prompt
+    assert "=== GROUND TRUTH HIERARCHY ===" in prompt
     assert isinstance(version, str) and len(version) > 0
 
 
