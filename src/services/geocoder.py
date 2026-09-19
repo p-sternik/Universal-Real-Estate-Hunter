@@ -112,6 +112,13 @@ class NominatimGeocoder:
         self._last_request_time = 0.0
         # In-memory cache for the current process/cycle (avoids repeat DB + HTTP hits).
         self._mem_cache: dict[str, tuple[float, float, str]] = {}
+        self._client: httpx.AsyncClient | None = None
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client session if open."""
+        if self._client and not self._client.is_closed:
+            await self._client.aclose()
+            self._client = None
 
     async def _rate_limited_query(self, query: str) -> dict | None:
         """Query OSM Nominatim respecting 1 req/sec rate limit."""
@@ -130,15 +137,16 @@ class NominatimGeocoder:
             }
 
             try:
-                async with httpx.AsyncClient(timeout=8.0) as client:
-                    resp = await client.get(self.base_url, params=params, headers=self.headers)
-                    self._last_request_time = time.time()
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        if data and isinstance(data, list) and len(data) > 0:
-                            return data[0]
-                    else:
-                        logger.warning(f"Nominatim returned status {resp.status_code} for query: {query}")
+                if self._client is None or self._client.is_closed:
+                    self._client = httpx.AsyncClient(timeout=8.0, headers=self.headers)
+                resp = await self._client.get(self.base_url, params=params)
+                self._last_request_time = time.time()
+                if resp.status_code == 200:
+                    data = resp.json()
+                    if data and isinstance(data, list) and len(data) > 0:
+                        return data[0]
+                else:
+                    logger.warning(f"Nominatim returned status {resp.status_code} for query: {query}")
             except Exception as e:
                 logger.warning(f"Nominatim query failed for '{query}': {e}")
                 self._last_request_time = time.time()

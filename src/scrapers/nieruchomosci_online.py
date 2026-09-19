@@ -412,6 +412,7 @@ class NieruchomosciOnlineScraper(BaseScraper):
                 main_image_url=main_image_url,
                 gallery_images=[main_image_url] if main_image_url else [],
                 physical_fingerprint=physical_fp,
+                skip_detail=url in self.skip_detail_urls,
                 created_at=datetime.now(UTC),
                 scraped_at=datetime.now(UTC),
             )

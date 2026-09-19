@@ -358,7 +358,76 @@ class AirQualityService:
 
         return heating_avg, summer_avg, smog_days_total, monthly_list
 
-    async def get_air_quality_audit(self, lat: float, lon: float, force_refresh: bool = False) -> dict[str, Any]:
+    async def _fetch_readings(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        audit_result: dict[str, Any],
+    ) -> None:
+        # 1. GIOŚ nearest station lookup
+        stations = await self.get_gios_stations(client)
+        nearest_st, dist_km = self.find_nearest_station(lat, lon, stations)
+        if nearest_st:
+            audit_result["air_gios_station"] = nearest_st["name"]
+            audit_result["air_gios_dist_km"] = dist_km
+            gios_idx = await self.get_gios_station_index(client, nearest_st["id"])
+            audit_result["air_gios_index"] = gios_idx.get("index_level_name")
+
+        # 2. Open-Meteo CAMS Air Quality API
+        # Query last 365 days for seasonal calculation + current readings
+        now_utc = datetime.now(UTC)
+        end_date = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d")
+        start_date = (now_utc - timedelta(days=365)).strftime("%Y-%m-%d")
+
+        params: dict[str, Any] = {
+            "latitude": round(lat, 4),
+            "longitude": round(lon, 4),
+            "current": "european_aqi,pm10,pm2_5",
+            "hourly": "pm2_5,pm10,european_aqi",
+            "start_date": start_date,
+            "end_date": end_date,
+            "timezone": "Europe/Warsaw",
+        }
+
+        try:
+            resp = await client.get(self.OPEN_METEO_AQ_URL, params=params)
+            if resp.status_code == 200:
+                data = resp.json()
+                current = data.get("current") or {}
+                hourly = data.get("hourly") or {}
+
+                aqi_val = current.get("european_aqi")
+                if aqi_val is not None:
+                    audit_result["air_aqi"] = int(round(aqi_val))
+                    audit_result["air_aqi_label"] = aqi_to_label(aqi_val)
+                    audit_result["air_aqi_color"] = aqi_to_color(aqi_val)
+
+                heating_avg, summer_avg, smog_days, monthly = self._compute_seasonal_metrics(hourly)
+                audit_result["air_pm25_heating_avg"] = heating_avg
+                audit_result["air_pm25_summer_avg"] = summer_avg
+                audit_result["air_smog_days"] = smog_days
+                audit_result["monthly_averages"] = monthly
+
+                # Risk assessment
+                if (heating_avg and heating_avg >= 35.0) or smog_days >= 35:
+                    audit_result["air_smog_risk"] = "WYSOKIE"
+                elif (heating_avg and heating_avg >= 25.0) or smog_days >= 20:
+                    audit_result["air_smog_risk"] = "PODWYŻSZONE"
+                elif heating_avg and heating_avg >= 15.0:
+                    audit_result["air_smog_risk"] = "UMIARKOWANE"
+                elif heating_avg:
+                    audit_result["air_smog_risk"] = "NISKIE"
+        except Exception as e:
+            logger.warning(f"[AirQuality] Open-Meteo request error for ({lat}, {lon}): {e}")
+
+    async def get_air_quality_audit(
+        self,
+        lat: float,
+        lon: float,
+        force_refresh: bool = False,
+        client: httpx.AsyncClient | None = None,
+    ) -> dict[str, Any]:
         """
         Executes a full air quality audit for given coordinates.
         Utilizes cache (SpatialCacheModel) rounded to 2 decimal places (~1.1 km).
@@ -388,62 +457,11 @@ class AirQualityService:
             "attribution": "Open-Meteo (CAMS Copernicus) + GIOŚ Państwowy Monitoring Środowiska",
         }
 
-        async with httpx.AsyncClient(headers=self.headers, timeout=self.timeout) as client:
-            # 1. GIOŚ nearest station lookup
-            stations = await self.get_gios_stations(client)
-            nearest_st, dist_km = self.find_nearest_station(lat, lon, stations)
-            if nearest_st:
-                audit_result["air_gios_station"] = nearest_st["name"]
-                audit_result["air_gios_dist_km"] = dist_km
-                gios_idx = await self.get_gios_station_index(client, nearest_st["id"])
-                audit_result["air_gios_index"] = gios_idx.get("index_level_name")
-
-            # 2. Open-Meteo CAMS Air Quality API
-            # Query last 365 days for seasonal calculation + current readings
-            now_utc = datetime.now(UTC)
-            end_date = (now_utc - timedelta(days=1)).strftime("%Y-%m-%d")
-            start_date = (now_utc - timedelta(days=365)).strftime("%Y-%m-%d")
-
-            params: dict[str, Any] = {
-                "latitude": round(lat, 4),
-                "longitude": round(lon, 4),
-                "current": "european_aqi,pm10,pm2_5",
-                "hourly": "pm2_5,pm10,european_aqi",
-                "start_date": start_date,
-                "end_date": end_date,
-                "timezone": "Europe/Warsaw",
-            }
-
-            try:
-                resp = await client.get(self.OPEN_METEO_AQ_URL, params=params)
-                if resp.status_code == 200:
-                    data = resp.json()
-                    current = data.get("current") or {}
-                    hourly = data.get("hourly") or {}
-
-                    aqi_val = current.get("european_aqi")
-                    if aqi_val is not None:
-                        audit_result["air_aqi"] = int(round(aqi_val))
-                        audit_result["air_aqi_label"] = aqi_to_label(aqi_val)
-                        audit_result["air_aqi_color"] = aqi_to_color(aqi_val)
-
-                    heating_avg, summer_avg, smog_days, monthly = self._compute_seasonal_metrics(hourly)
-                    audit_result["air_pm25_heating_avg"] = heating_avg
-                    audit_result["air_pm25_summer_avg"] = summer_avg
-                    audit_result["air_smog_days"] = smog_days
-                    audit_result["monthly_averages"] = monthly
-
-                    # Risk assessment
-                    if (heating_avg and heating_avg >= 35.0) or smog_days >= 35:
-                        audit_result["air_smog_risk"] = "WYSOKIE"
-                    elif (heating_avg and heating_avg >= 25.0) or smog_days >= 20:
-                        audit_result["air_smog_risk"] = "PODWYŻSZONE"
-                    elif heating_avg and heating_avg >= 15.0:
-                        audit_result["air_smog_risk"] = "UMIARKOWANE"
-                    elif heating_avg:
-                        audit_result["air_smog_risk"] = "NISKIE"
-            except Exception as e:
-                logger.warning(f"[AirQuality] Open-Meteo request error for ({lat}, {lon}): {e}")
+        if client is not None:
+            await self._fetch_readings(client, lat, lon, audit_result)
+        else:
+            async with httpx.AsyncClient(headers=self.headers, timeout=self.timeout) as local_client:
+                await self._fetch_readings(local_client, lat, lon, audit_result)
 
         # Persist in cache for 60 days
         if audit_result.get("air_aqi") is not None or audit_result.get("air_pm25_heating_avg") is not None:

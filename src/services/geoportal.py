@@ -1516,6 +1516,7 @@ out tags center 60;"""
         lon: float,
         radius_meters: int = 120,
         category: Any = "dom",
+        client: httpx.AsyncClient | None = None,
     ) -> dict[str, Any]:
         """
         Comprehensive spatial audit:
@@ -1575,242 +1576,250 @@ out tags center 60;"""
             "geology_risk_note": None,
         }
 
-        async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as client:
-            # Step 1: Main parcel
-            main_info = await self.get_parcel_by_xy(client, lat, lon)
-            if not main_info:
-                return result
-
-            main_pid = main_info["parcel_id"]
-            result["main_parcel_id"] = main_pid
-            result["main_parcel_number"] = main_pid.split(".")[-1]
-            result["geoportal_url"] = self.generate_geoportal_url(parcel_id=main_pid)
-            result["gunb_url"] = self.generate_gunb_url(parcel_id=main_pid)
-            result["gesut_url"] = self.generate_geoportal_url(parcel_id=main_pid)
-
-            main_area, main_centroid, shape_metrics = await self.get_parcel_geometry_and_area(
-                client, main_pid, return_details=True
+        if client is not None:
+            return await self._run_location_audit(client, lat, lon, radius_meters, cat_str, result, audit_cache_key)
+        async with httpx.AsyncClient(timeout=self.timeout, headers=self.headers) as local_client:
+            return await self._run_location_audit(
+                local_client, lat, lon, radius_meters, cat_str, result, audit_cache_key
             )
-            result["cadastral_area"] = main_area
-            result["parcel_front_width_m"] = shape_metrics.get("front_width_m")
-            result["parcel_length_m"] = shape_metrics.get("length_m")
-            result["parcel_aspect_ratio"] = shape_metrics.get("aspect_ratio")
-            result["parcel_shape_type"] = shape_metrics.get("shape_type")
 
-            is_flat = cat_str.lower() in ("mieszkanie", "apartment", "flat")
-            if not is_flat and shape_metrics.get("front_width_m") and shape_metrics["front_width_m"] < 16.0:
+    async def _run_location_audit(
+        self,
+        client: httpx.AsyncClient,
+        lat: float,
+        lon: float,
+        radius_meters: int,
+        cat_str: str,
+        result: dict[str, Any],
+        audit_cache_key: str,
+    ) -> dict[str, Any]:
+        # Step 1: Main parcel
+        main_info = await self.get_parcel_by_xy(client, lat, lon)
+        if not main_info:
+            return result
+
+        main_pid = main_info["parcel_id"]
+        result["main_parcel_id"] = main_pid
+        result["main_parcel_number"] = main_pid.split(".")[-1]
+        result["geoportal_url"] = self.generate_geoportal_url(parcel_id=main_pid)
+        result["gunb_url"] = self.generate_gunb_url(parcel_id=main_pid)
+        result["gesut_url"] = self.generate_geoportal_url(parcel_id=main_pid)
+
+        main_area, main_centroid, shape_metrics = await self.get_parcel_geometry_and_area(
+            client, main_pid, return_details=True
+        )
+        result["cadastral_area"] = main_area
+        result["parcel_front_width_m"] = shape_metrics.get("front_width_m")
+        result["parcel_length_m"] = shape_metrics.get("length_m")
+        result["parcel_aspect_ratio"] = shape_metrics.get("aspect_ratio")
+        result["parcel_shape_type"] = shape_metrics.get("shape_type")
+
+        is_flat = cat_str.lower() in ("mieszkanie", "apartment", "flat")
+        if not is_flat and shape_metrics.get("front_width_m") and shape_metrics["front_width_m"] < 16.0:
+            result["surrounding_risks"].append(
+                f"Wąska działka: szerokość frontu {shape_metrics['front_width_m']:.1f} m (<16 m)"
+            )
+
+        # Step 2: Environmental, Zoning, Broadband, Terrain & Utility queries (concurrent)
+        mpzp_task = self.get_mpzp_info(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        flood_task = self.get_flood_risk_isok(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        sopo_task = self.get_landslide_risk_sopo(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        egib_task = self.get_egib_full_audit(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        gdos_task = self.get_gdos_protected_areas(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        nid_task = self.get_nid_monuments(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        noise_task = self.get_noise_level_audit(client, lat, lon)
+        gesut_task = self.get_gesut_networks(client, lat, lon)
+        broadband_task = self.get_broadband_status(client, lat, lon)
+        terrain_task = (
+            self.get_terrain_slope_and_aspect(client, main_centroid[0], main_centroid[1]) if main_centroid else None
+        )
+        power_lines_task = self.get_power_lines_risk(
+            client,
+            lat,
+            lon,
+            cx=main_centroid[0] if main_centroid else None,
+            cy=main_centroid[1] if main_centroid else None,
+        )
+        solar_task = self.get_solar_potential(client, lat, lon)
+        poi_task = self.get_walkability_poi_audit(client, lat, lon)
+
+        # Step 3: Surrounding search points (8 directions) - only for non-flats.
+        # Coroutines are only created here; they run together with the env tasks
+        # in the single gather wave below (all inputs are already known —
+        # main_pid is only used to filter the results afterwards).
+        surround_tasks = []
+        if not is_flat:
+            d_lat = radius_meters / 111139.0
+            d_lon = radius_meters / (111139.0 * math.cos(math.radians(lat)))
+            angles = [0, 45, 90, 135, 180, 225, 270, 315]
+            surround_coords = [
+                (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a))) for a in angles
+            ]
+            surround_tasks = [self.get_parcel_by_xy(client, pt_lat, pt_lon) for pt_lon, pt_lat in surround_coords]
+
+        # Single concurrent wave: surrounding parcels + environmental/zoning tasks.
+        # Both gathers are created first and awaited together, so the I/O
+        # overlaps in one wave. Semantics unchanged: parcel-level failures stay
+        # non-fatal (inner return_exceptions=True, as before), env failures
+        # propagate exactly like the old standalone env gather.
+        surround_future = asyncio.gather(*surround_tasks, return_exceptions=True)
+        env_future = asyncio.gather(
+            mpzp_task or asyncio.sleep(0, result={}),
+            flood_task or asyncio.sleep(0, result={}),
+            sopo_task or asyncio.sleep(0, result={}),
+            egib_task or asyncio.sleep(0, result={}),
+            gdos_task or asyncio.sleep(0, result={}),
+            nid_task or asyncio.sleep(0, result={}),
+            noise_task,
+            gesut_task,
+            broadband_task,
+            terrain_task or asyncio.sleep(0, result={}),
+            power_lines_task,
+            solar_task,
+            poi_task,
+        )
+        surround_infos, env_results = await asyncio.gather(surround_future, env_future)
+        (
+            mpzp,
+            flood,
+            sopo,
+            egib,
+            gdos,
+            nid,
+            noise,
+            gesut,
+            broadband,
+            terrain,
+            power_lines,
+            solar,
+            poi,
+        ) = env_results
+
+        geology = await self.get_geology_audit(
+            client,
+            lat,
+            lon,
+            egib_soil=egib.get("soil_class"),
+            slope_pct=terrain.get("slope_pct"),
+        )
+        result["solar_hours_per_year"] = solar.get("solar_hours_per_year")
+        result["solar_energy_kwh_m2"] = solar.get("solar_energy_kwh_m2")
+        result["poi_counts"] = poi.get("poi_counts")
+        result["nearest_poi"] = poi.get("nearest_poi")
+        result["geology_formation"] = geology.get("geology_formation")
+        result["geology_risk_note"] = geology.get("geology_risk_note")
+        if geology.get("geology_risk_note") and "⚠️" in str(geology["geology_risk_note"]):
+            result["surrounding_risks"].append(geology["geology_risk_note"])
+
+        surround_pids: set[str] = set()
+        for r in surround_infos:
+            if isinstance(r, dict) and r.get("parcel_id"):
+                pid = r["parcel_id"]
+                if pid != main_pid:
+                    surround_pids.add(pid)
+
+        result["surrounding_parcels_count"] = len(surround_pids)
+
+        result["mpzp_zone"] = mpzp.get("zone")
+        result["mpzp_status"] = mpzp.get("status")
+        result["mpzp_plan_name"] = mpzp.get("plan_name")
+        result["flood_risk_zone"] = flood.get("flood_zone")
+        result["flood_risk_level"] = flood.get("risk_level")
+        result["flood_risk_desc"] = flood.get("description")
+        if flood.get("flood_zone") == "ZAGROŻENIE_POWODZIOWE":
+            result["surrounding_risks"].append(flood.get("description") or "Strefa zagrożenia powodziowego")
+
+        result["gesut_networks"] = gesut
+        result["landslide_risk"] = sopo.get("risk")
+        if sopo.get("risk") in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
+            result["surrounding_risks"].append(sopo.get("description") or "Obszar zagrożony osuwiskami (SOPO PIG-PIB)")
+
+        result["egib_building_status"] = egib.get("building_status")
+        result["egib_soil_class"] = egib.get("soil_class")
+        if egib.get("is_protected_soil") and egib.get("soil_class"):
+            result["surrounding_risks"].append(f"Gleba chroniona w EGiB ({egib.get('soil_class')})")
+
+        if gdos.get("is_protected"):
+            result["nature_protected_zone"] = gdos.get("zone_type")
+            result["surrounding_risks"].append(gdos.get("description") or "Obszar chroniony przyrodniczo (GDOŚ)")
+
+        if nid.get("is_monument"):
+            result["monument_zone"] = nid.get("name")
+            result["surrounding_risks"].append(nid.get("description") or "Zabytek / strefa konserwatorska (NID)")
+
+        result["noise_level_db"] = noise.get("noise_level_db")
+        result["noise_zone"] = noise.get("zone")
+        if noise.get("exceeds_threshold"):
+            result["surrounding_risks"].append(noise.get("description") or "Przekroczenie norm hałasu (>65 dB)")
+
+        result["broadband_status"] = broadband.get("status")
+        result["broadband_details"] = broadband.get("details")
+        if broadband.get("status") == "BRAK":
+            result["surrounding_risks"].append("Brak stacjonarnego internetu szerokopasmowego (SIDUSIS)")
+
+        result["terrain_slope_pct"] = terrain.get("slope_pct")
+        result["terrain_aspect"] = terrain.get("aspect")
+        if terrain.get("slope_pct") and terrain["slope_pct"] > 8.0:
+            result["surrounding_risks"].append(
+                terrain.get("description") or f"Stroma działka: nachylenie {terrain['slope_pct']}%"
+            )
+
+        result["power_lines_risk"] = power_lines.get("risk")
+        if power_lines.get("risk") and "LINIA_" in power_lines["risk"]:
+            result["surrounding_risks"].append(
+                power_lines.get("description") or "Linia elektroenergetyczna wysokiego napięcia w sąsiedztwie"
+            )
+
+        walkability = self.get_walkability_audit(lat, lon)
+        result["walkability_pka_dist_m"] = walkability.get("pka_dist_m")
+        result["walkability_pka_name"] = walkability.get("pka_name")
+
+        # Step 4: Check geometry and contours for surrounding parcels concurrently
+        all_contours: list[str] = []
+        if surround_pids:
+            geom_tasks = [self.get_parcel_geometry_and_area(client, pid) for pid in surround_pids]
+            geom_results = await asyncio.gather(*geom_tasks, return_exceptions=True)
+
+            kieg_tasks = []
+            pid_list = list(surround_pids)
+            for i, gr in enumerate(geom_results):
+                if isinstance(gr, tuple) and gr[1] is not None:
+                    cx, cy = gr[1]
+                    kieg_tasks.append((pid_list[i], self.get_parcel_contours_kieg(client, cx, cy)))
+
+            if kieg_tasks:
+                kieg_results = await asyncio.gather(*[t[1] for t in kieg_tasks], return_exceptions=True)
+                for j, contour in enumerate(kieg_results):
+                    pid = kieg_tasks[j][0]
+                    if isinstance(contour, str) and contour:
+                        all_contours.append(contour)
+                        short_nr = pid.split(".")[-1]
+                        contour_upper = contour.upper()
+                        if "BA" in contour_upper:
+                            result["surrounding_risks"].append(
+                                f"Działka {short_nr} ma przeznaczenie przemysłowe (Ba): {contour}"
+                            )
+                        elif "BI" in contour_upper:
+                            result["surrounding_risks"].append(
+                                f"Działka {short_nr} ma użytek komercyjny/składowy (Bi): {contour}"
+                            )
+                        elif "TK" in contour_upper:
+                            result["surrounding_risks"].append(f"Działka {short_nr} to tereny kolejowe (Tk): {contour}")
+
+        # Check cemetery proximity
+        if main_centroid:
+            cemetery_info = self.get_cemetery_proximity(
+                main_centroid[0],
+                main_centroid[1],
+                mpzp_zone=result.get("mpzp_zone"),
+                surrounding_risks=result.get("surrounding_risks"),
+                kieg_contours=all_contours,
+            )
+            result["cemetery_buffer_zone"] = cemetery_info.get("zone")
+            if cemetery_info.get("has_cemetery_risk"):
                 result["surrounding_risks"].append(
-                    f"Wąska działka: szerokość frontu {shape_metrics['front_width_m']:.1f} m (<16 m)"
+                    cemetery_info.get("description") or f"Strefa cmentarna ({cemetery_info.get('zone')})"
                 )
-
-            # Step 2: Environmental, Zoning, Broadband, Terrain & Utility queries (concurrent)
-            mpzp_task = self.get_mpzp_info(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            flood_task = self.get_flood_risk_isok(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            sopo_task = (
-                self.get_landslide_risk_sopo(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            )
-            egib_task = self.get_egib_full_audit(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            gdos_task = (
-                self.get_gdos_protected_areas(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            )
-            nid_task = self.get_nid_monuments(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            noise_task = self.get_noise_level_audit(client, lat, lon)
-            gesut_task = self.get_gesut_networks(client, lat, lon)
-            broadband_task = self.get_broadband_status(client, lat, lon)
-            terrain_task = (
-                self.get_terrain_slope_and_aspect(client, main_centroid[0], main_centroid[1]) if main_centroid else None
-            )
-            power_lines_task = self.get_power_lines_risk(
-                client,
-                lat,
-                lon,
-                cx=main_centroid[0] if main_centroid else None,
-                cy=main_centroid[1] if main_centroid else None,
-            )
-            solar_task = self.get_solar_potential(client, lat, lon)
-            poi_task = self.get_walkability_poi_audit(client, lat, lon)
-
-            # Step 3: Surrounding search points (8 directions) - only for non-flats.
-            # Coroutines are only created here; they run together with the env tasks
-            # in the single gather wave below (all inputs are already known —
-            # main_pid is only used to filter the results afterwards).
-            surround_tasks = []
-            if not is_flat:
-                d_lat = radius_meters / 111139.0
-                d_lon = radius_meters / (111139.0 * math.cos(math.radians(lat)))
-                angles = [0, 45, 90, 135, 180, 225, 270, 315]
-                surround_coords = [
-                    (lon + d_lon * math.cos(math.radians(a)), lat + d_lat * math.sin(math.radians(a))) for a in angles
-                ]
-                surround_tasks = [self.get_parcel_by_xy(client, pt_lat, pt_lon) for pt_lon, pt_lat in surround_coords]
-
-            # Single concurrent wave: surrounding parcels + environmental/zoning tasks.
-            # Both gathers are created first and awaited together, so the I/O
-            # overlaps in one wave. Semantics unchanged: parcel-level failures stay
-            # non-fatal (inner return_exceptions=True, as before), env failures
-            # propagate exactly like the old standalone env gather.
-            surround_future = asyncio.gather(*surround_tasks, return_exceptions=True)
-            env_future = asyncio.gather(
-                mpzp_task or asyncio.sleep(0, result={}),
-                flood_task or asyncio.sleep(0, result={}),
-                sopo_task or asyncio.sleep(0, result={}),
-                egib_task or asyncio.sleep(0, result={}),
-                gdos_task or asyncio.sleep(0, result={}),
-                nid_task or asyncio.sleep(0, result={}),
-                noise_task,
-                gesut_task,
-                broadband_task,
-                terrain_task or asyncio.sleep(0, result={}),
-                power_lines_task,
-                solar_task,
-                poi_task,
-            )
-            surround_infos, env_results = await asyncio.gather(surround_future, env_future)
-            (
-                mpzp,
-                flood,
-                sopo,
-                egib,
-                gdos,
-                nid,
-                noise,
-                gesut,
-                broadband,
-                terrain,
-                power_lines,
-                solar,
-                poi,
-            ) = env_results
-
-            geology = await self.get_geology_audit(
-                client,
-                lat,
-                lon,
-                egib_soil=egib.get("soil_class"),
-                slope_pct=terrain.get("slope_pct"),
-            )
-            result["solar_hours_per_year"] = solar.get("solar_hours_per_year")
-            result["solar_energy_kwh_m2"] = solar.get("solar_energy_kwh_m2")
-            result["poi_counts"] = poi.get("poi_counts")
-            result["nearest_poi"] = poi.get("nearest_poi")
-            result["geology_formation"] = geology.get("geology_formation")
-            result["geology_risk_note"] = geology.get("geology_risk_note")
-            if geology.get("geology_risk_note") and "⚠️" in str(geology["geology_risk_note"]):
-                result["surrounding_risks"].append(geology["geology_risk_note"])
-
-            surround_pids: set[str] = set()
-            for r in surround_infos:
-                if isinstance(r, dict) and r.get("parcel_id"):
-                    pid = r["parcel_id"]
-                    if pid != main_pid:
-                        surround_pids.add(pid)
-
-            result["surrounding_parcels_count"] = len(surround_pids)
-
-            result["mpzp_zone"] = mpzp.get("zone")
-            result["mpzp_status"] = mpzp.get("status")
-            result["mpzp_plan_name"] = mpzp.get("plan_name")
-            result["flood_risk_zone"] = flood.get("flood_zone")
-            result["flood_risk_level"] = flood.get("risk_level")
-            result["flood_risk_desc"] = flood.get("description")
-            if flood.get("flood_zone") == "ZAGROŻENIE_POWODZIOWE":
-                result["surrounding_risks"].append(flood.get("description") or "Strefa zagrożenia powodziowego")
-
-            result["gesut_networks"] = gesut
-            result["landslide_risk"] = sopo.get("risk")
-            if sopo.get("risk") in ("OSUWISKO", "ZAGROŻENIE_OSUWISKIEM"):
-                result["surrounding_risks"].append(
-                    sopo.get("description") or "Obszar zagrożony osuwiskami (SOPO PIG-PIB)"
-                )
-
-            result["egib_building_status"] = egib.get("building_status")
-            result["egib_soil_class"] = egib.get("soil_class")
-            if egib.get("is_protected_soil") and egib.get("soil_class"):
-                result["surrounding_risks"].append(f"Gleba chroniona w EGiB ({egib.get('soil_class')})")
-
-            if gdos.get("is_protected"):
-                result["nature_protected_zone"] = gdos.get("zone_type")
-                result["surrounding_risks"].append(gdos.get("description") or "Obszar chroniony przyrodniczo (GDOŚ)")
-
-            if nid.get("is_monument"):
-                result["monument_zone"] = nid.get("name")
-                result["surrounding_risks"].append(nid.get("description") or "Zabytek / strefa konserwatorska (NID)")
-
-            result["noise_level_db"] = noise.get("noise_level_db")
-            result["noise_zone"] = noise.get("zone")
-            if noise.get("exceeds_threshold"):
-                result["surrounding_risks"].append(noise.get("description") or "Przekroczenie norm hałasu (>65 dB)")
-
-            result["broadband_status"] = broadband.get("status")
-            result["broadband_details"] = broadband.get("details")
-            if broadband.get("status") == "BRAK":
-                result["surrounding_risks"].append("Brak stacjonarnego internetu szerokopasmowego (SIDUSIS)")
-
-            result["terrain_slope_pct"] = terrain.get("slope_pct")
-            result["terrain_aspect"] = terrain.get("aspect")
-            if terrain.get("slope_pct") and terrain["slope_pct"] > 8.0:
-                result["surrounding_risks"].append(
-                    terrain.get("description") or f"Stroma działka: nachylenie {terrain['slope_pct']}%"
-                )
-
-            result["power_lines_risk"] = power_lines.get("risk")
-            if power_lines.get("risk") and "LINIA_" in power_lines["risk"]:
-                result["surrounding_risks"].append(
-                    power_lines.get("description") or "Linia elektroenergetyczna wysokiego napięcia w sąsiedztwie"
-                )
-
-            walkability = self.get_walkability_audit(lat, lon)
-            result["walkability_pka_dist_m"] = walkability.get("pka_dist_m")
-            result["walkability_pka_name"] = walkability.get("pka_name")
-
-            # Step 4: Check geometry and contours for surrounding parcels concurrently
-            all_contours: list[str] = []
-            if surround_pids:
-                geom_tasks = [self.get_parcel_geometry_and_area(client, pid) for pid in surround_pids]
-                geom_results = await asyncio.gather(*geom_tasks, return_exceptions=True)
-
-                kieg_tasks = []
-                pid_list = list(surround_pids)
-                for i, gr in enumerate(geom_results):
-                    if isinstance(gr, tuple) and gr[1] is not None:
-                        cx, cy = gr[1]
-                        kieg_tasks.append((pid_list[i], self.get_parcel_contours_kieg(client, cx, cy)))
-
-                if kieg_tasks:
-                    kieg_results = await asyncio.gather(*[t[1] for t in kieg_tasks], return_exceptions=True)
-                    for j, contour in enumerate(kieg_results):
-                        pid = kieg_tasks[j][0]
-                        if isinstance(contour, str) and contour:
-                            all_contours.append(contour)
-                            short_nr = pid.split(".")[-1]
-                            contour_upper = contour.upper()
-                            if "BA" in contour_upper:
-                                result["surrounding_risks"].append(
-                                    f"Działka {short_nr} ma przeznaczenie przemysłowe (Ba): {contour}"
-                                )
-                            elif "BI" in contour_upper:
-                                result["surrounding_risks"].append(
-                                    f"Działka {short_nr} ma użytek komercyjny/składowy (Bi): {contour}"
-                                )
-                            elif "TK" in contour_upper:
-                                result["surrounding_risks"].append(
-                                    f"Działka {short_nr} to tereny kolejowe (Tk): {contour}"
-                                )
-
-            # Check cemetery proximity
-            if main_centroid:
-                cemetery_info = self.get_cemetery_proximity(
-                    main_centroid[0],
-                    main_centroid[1],
-                    mpzp_zone=result.get("mpzp_zone"),
-                    surrounding_risks=result.get("surrounding_risks"),
-                    kieg_contours=all_contours,
-                )
-                result["cemetery_buffer_zone"] = cemetery_info.get("zone")
-                if cemetery_info.get("has_cemetery_risk"):
-                    result["surrounding_risks"].append(
-                        cemetery_info.get("description") or f"Strefa cmentarna ({cemetery_info.get('zone')})"
-                    )
 
         await self._set_cached(audit_cache_key, result)
         return result

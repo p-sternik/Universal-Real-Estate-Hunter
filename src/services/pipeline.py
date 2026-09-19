@@ -3,6 +3,7 @@ import time
 from datetime import UTC, datetime
 from typing import Any
 
+import httpx
 from loguru import logger
 from sqlalchemy import select
 
@@ -46,7 +47,7 @@ def _get_configured_commute_destinations() -> list[dict[str, Any]]:
         return []
 
 
-async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
+async def audit_and_apply_spatial_data(target: Any, client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
     """Audit location via Geoportal and Air Quality, mapping returned fields onto target.
 
     Supports both ListingSchema and ListingModel objects.
@@ -76,12 +77,15 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         coords[1],
         radius_meters=120,
         category=category or "dom",
+        client=client,
     )
     aq_coro = air_quality_service.get_air_quality_audit(
         coords[0],
         coords[1],
+        client=client,
     )
     commute_coro = commute_service.audit_commute_and_pedestrian(
+        client=client,
         lat=coords[0],
         lon=coords[1],
         city=city,
@@ -91,12 +95,13 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
     seller_nip = getattr(target, "developer_nip", None)
     is_priv = getattr(target, "is_private_owner", None)
     dev_coro = developer_verifier.audit_developer(
+        client=client,
         description=raw_desc,
         seller_name=seller_name,
         explicit_nip=seller_nip,
         is_private_owner=is_priv,
     )
-    vision_coro = audit_vision_data(target)
+    vision_coro = audit_vision_data(target, client=client)
 
     geo_res: Any
     aq_res: Any
@@ -132,6 +137,7 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         cx, cy = geo_audit.get("centroid") or (None, None)
         try:
             gunb_res = await gunb_service.audit_gunb_permits(
+                client=client,
                 cx=cx,
                 cy=cy,
                 parcel_id=main_pid or getattr(target, "parcel_id", None),
@@ -162,7 +168,7 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
     return geo_audit
 
 
-async def audit_vision_data(target: Any) -> dict[str, Any] | None:
+async def audit_vision_data(target: Any, client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
     """Vision AI audit of listing photos (Living Quarters verification).
 
     Coordinate-independent: runs on gallery/main images alone. Gracefully
@@ -181,14 +187,20 @@ async def audit_vision_data(target: Any) -> dict[str, Any] | None:
         existing_finish = getattr(target, "vision_finish_condition", None)
         if existing_finish and existing_finish != "NIEZNANY":
             return None
-        import httpx
 
-        async with httpx.AsyncClient() as vision_client:
+        if client is not None:
             vision_res = await vision_analyzer.audit_images(
-                vision_client,
+                client,
                 image_urls=gallery[:6],
                 declared_finish=declared_finish_label(target),
             )
+        else:
+            async with httpx.AsyncClient() as vision_client:
+                vision_res = await vision_analyzer.audit_images(
+                    vision_client,
+                    image_urls=gallery[:6],
+                    declared_finish=declared_finish_label(target),
+                )
         if isinstance(vision_res, dict) and vision_res.get("audit_success", True):
             from src.models.listing import VISION_FIELDS
 
@@ -208,7 +220,7 @@ async def audit_vision_data(target: Any) -> dict[str, Any] | None:
     return None
 
 
-async def audit_developer_data(target: Any) -> dict[str, Any] | None:
+async def audit_developer_data(target: Any, client: httpx.AsyncClient | None = None) -> dict[str, Any] | None:
     """Audits seller/developer background via Biała Lista VAT and Open KRS API.
 
     Coordinate-independent: runs on seller metadata, tax IDs, and ad description.
@@ -227,6 +239,7 @@ async def audit_developer_data(target: Any) -> dict[str, Any] | None:
         is_priv = getattr(target, "is_private_owner", None)
 
         dev_res = await developer_verifier.audit_developer(
+            client=client,
             description=raw_desc,
             seller_name=seller_name,
             explicit_nip=seller_nip,
@@ -309,6 +322,7 @@ class ScraperPipeline:
         profile: Any | None = None,
         market_medians: dict[str, float] | None = None,
         defer_save: bool = False,
+        client: httpx.AsyncClient | None = None,
     ) -> dict[str, Any]:
         result: dict[str, Any] = {
             "is_new": False,
@@ -420,7 +434,7 @@ class ScraperPipeline:
             )
             if listing.coordinates and is_exact_coords and needs_spatial_audit:
                 try:
-                    geo_audit = await audit_and_apply_spatial_data(listing)
+                    geo_audit = await audit_and_apply_spatial_data(listing, client=client)
                     if geo_audit:
                         _log_spatial_summary(listing)
                 except Exception as e:
@@ -430,8 +444,8 @@ class ScraperPipeline:
                 # seller/developer even when location is approximate (concurrently).
                 try:
                     await asyncio.gather(
-                        audit_vision_data(listing),
-                        audit_developer_data(listing),
+                        audit_vision_data(listing, client=client),
+                        audit_developer_data(listing, client=client),
                         return_exceptions=True,
                     )
                 except Exception as e:
@@ -607,6 +621,7 @@ class ScraperPipeline:
                 filter_result=filter_result,
                 advice=valuation_intel.negotiation,
                 webhook_url=webhook_url,
+                client=client,
             )
             if notified:
                 await repo.mark_as_notified(db_model.id)
@@ -619,6 +634,7 @@ class ScraperPipeline:
         pending: list[tuple[Any, dict[str, Any]]],
         profile: Any | None,
         market_medians: dict[str, float] | None,
+        client: httpx.AsyncClient | None = None,
     ) -> None:
         """Persist one batch of analyzed listings with a single commit.
 
@@ -672,7 +688,7 @@ class ScraperPipeline:
         sent = await asyncio.gather(
             *[
                 self._send_listing_notifications(
-                    job["listing"], job["filt"], job["advice"], webhook_url=job["webhook_url"]
+                    job["listing"], job["filt"], job["advice"], webhook_url=job["webhook_url"], client=client
                 )
                 for job in notify_jobs
             ]
@@ -694,6 +710,7 @@ class ScraperPipeline:
         filter_result: Any,
         advice: Any,
         webhook_url: str | None = None,
+        client: httpx.AsyncClient | None = None,
     ) -> bool:
         """Deliver Discord + Telegram alerts for one qualified listing."""
         logger.info(
@@ -701,9 +718,11 @@ class ScraperPipeline:
             f"[{filter_result.status.value}] (Score: {filter_result.score:.1f})"
         )
         discord_ok = await self.discord.send_notification(
-            listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice
+            listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice, client=client
         )
-        telegram_ok = await self.telegram.send_notification(listing, filter_result, negotiation_advice=advice)
+        telegram_ok = await self.telegram.send_notification(
+            listing, filter_result, negotiation_advice=advice, client=client
+        )
         return bool(discord_ok or telegram_ok)
 
     async def run_cycle(self, target_profile: str | None = None) -> dict:
@@ -736,6 +755,12 @@ class ScraperPipeline:
         try:
             return await self._do_run_cycle(target_profile=target_profile)
         finally:
+            try:
+                from src.services.geocoder import geocoder
+
+                await geocoder.close()
+            except Exception:
+                pass
             lock.release()
 
     async def _do_run_cycle(self, target_profile: str | None = None) -> dict:
@@ -884,92 +909,98 @@ class ScraperPipeline:
 
         t_process_start = time.perf_counter()
         step_idx = 0
-        for prof, _prof_name, _sc_name, listings, _err in scrape_results:
-            if global_tracker.is_cancelled():
-                logger.info("[Pipeline] Cancellation detected before processing batch, breaking loop.")
-                break
-
-            step_idx += 1
-            total_scraped += len(listings)
-            global_tracker.set_processing_fraction(step_idx, total_steps)
-
-            if not listings:
-                continue
-
-            processed = 0
-
-            empty_cancel_res = {
-                "is_new": False,
-                "price_changed": False,
-                "qualified": False,
-                "notified": False,
-            }
-
-            async def safe_process(
-                item: Any,
-                prof: Any = prof,
-                total_listings: int = len(listings),
-                medians: dict[str, float] = cycle_medians,
-                cancel_res: dict[str, Any] = empty_cancel_res,
-                _step_idx: int = step_idx,
-                _total_steps: int = total_steps,
-            ) -> tuple[Any, dict[str, Any]]:
-                nonlocal processed
+        async with httpx.AsyncClient(timeout=25.0) as http_client:
+            for prof, _prof_name, _sc_name, listings, _err in scrape_results:
                 if global_tracker.is_cancelled():
-                    return item, cancel_res
-                async with sem:
+                    logger.info("[Pipeline] Cancellation detected before processing batch, breaking loop.")
+                    break
+
+                step_idx += 1
+                total_scraped += len(listings)
+                global_tracker.set_processing_fraction(step_idx, total_steps)
+
+                if not listings:
+                    continue
+
+                processed = 0
+
+                empty_cancel_res = {
+                    "is_new": False,
+                    "price_changed": False,
+                    "qualified": False,
+                    "notified": False,
+                }
+
+                async def safe_process(
+                    item: Any,
+                    prof: Any = prof,
+                    total_listings: int = len(listings),
+                    medians: dict[str, float] = cycle_medians,
+                    cancel_res: dict[str, Any] = empty_cancel_res,
+                    _step_idx: int = step_idx,
+                    _total_steps: int = total_steps,
+                ) -> tuple[Any, dict[str, Any]]:
+                    nonlocal processed
                     if global_tracker.is_cancelled():
                         return item, cancel_res
+                    async with sem:
+                        if global_tracker.is_cancelled():
+                            return item, cancel_res
+                        async with get_session() as session:
+                            repo = ListingRepository(session)
+                            res = await self.process_listing(
+                                item,
+                                repo,
+                                profile=prof,
+                                market_medians=medians,
+                                defer_save=True,
+                                client=http_client,
+                            )
+                        processed += 1
+                        if processed % 5 == 0 or processed == total_listings:
+                            global_tracker.set_processing_fraction(_step_idx, _total_steps, processed, total_listings)
+                        return item, res
+
+                results = await asyncio.gather(*[safe_process(item) for item in listings])
+
+                # Single-commit batch persist: 1 commit per batch instead of per listing.
+                # (Per-item sessions above are effectively read-only + geocoder cache.)
+                await self._persist_batch(list(results), prof, cycle_medians, client=http_client)
+
+                for _item, res in results:
+                    if res["is_new"]:
+                        total_new += 1
+                    if res["price_changed"]:
+                        total_price_changes += 1
+                    if res["qualified"]:
+                        total_qualified += 1
+                    if res["notified"]:
+                        total_notified += 1
+                    if res.get("llm_skipped"):
+                        total_llm_skipped += 1
+                        if res.get("llm_skip_reason") == "provider_error":
+                            total_llm_failed += 1
+
+                    global_tracker.record_items(
+                        count=1,
+                        qualified=1 if res["qualified"] and res["is_new"] else 0,
+                        duplicates=0,
+                    )
+
+                global_tracker.set_processing_fraction(step_idx, total_steps, 1, 1)
+
+            # Backfill spatial audit for existing database listings missing new metrics
+            if not global_tracker.is_cancelled():
+                try:
                     async with get_session() as session:
                         repo = ListingRepository(session)
-                        res = await self.process_listing(
-                            item, repo, profile=prof, market_medians=medians, defer_save=True
-                        )
-                    processed += 1
-                    if processed % 5 == 0 or processed == total_listings:
-                        global_tracker.set_processing_fraction(_step_idx, _total_steps, processed, total_listings)
-                    return item, res
-
-            results = await asyncio.gather(*[safe_process(item) for item in listings])
-
-            # Single-commit batch persist: 1 commit per batch instead of per listing.
-            # (Per-item sessions above are effectively read-only + geocoder cache.)
-            await self._persist_batch(list(results), prof, cycle_medians)
-
-            for _item, res in results:
-                if res["is_new"]:
-                    total_new += 1
-                if res["price_changed"]:
-                    total_price_changes += 1
-                if res["qualified"]:
-                    total_qualified += 1
-                if res["notified"]:
-                    total_notified += 1
-                if res.get("llm_skipped"):
-                    total_llm_skipped += 1
-                    if res.get("llm_skip_reason") == "provider_error":
-                        total_llm_failed += 1
-
-                global_tracker.record_items(
-                    count=1,
-                    qualified=1 if res["qualified"] and res["is_new"] else 0,
-                    duplicates=0,
-                )
-
-            global_tracker.set_processing_fraction(step_idx, total_steps, 1, 1)
-
-        # Backfill spatial audit for existing database listings missing new metrics
-        if not global_tracker.is_cancelled():
-            try:
-                async with get_session() as session:
-                    repo = ListingRepository(session)
-                    backfilled_cnt = await self.backfill_existing_spatial_data(session, repo)
-                    if backfilled_cnt > 0:
-                        logger.info(
-                            f"[Pipeline] Pomyślnie zaktualizowano dane przestrzenne dla {backfilled_cnt} istniejących ofert w bazie."
-                        )
-            except Exception as e:
-                logger.debug(f"[Pipeline] Spatial backfill error: {e}")
+                        backfilled_cnt = await self.backfill_existing_spatial_data(session, repo, client=http_client)
+                        if backfilled_cnt > 0:
+                            logger.info(
+                                f"[Pipeline] Pomyślnie zaktualizowano dane przestrzenne dla {backfilled_cnt} istniejących ofert w bazie."
+                            )
+                except Exception as e:
+                    logger.debug(f"[Pipeline] Spatial backfill error: {e}")
 
         # Passive delisting sweep: mark listings not seen on portals for > 7 days as DELISTED
         if not global_tracker.is_cancelled():
@@ -1038,6 +1069,7 @@ class ScraperPipeline:
         session: Any,
         repo: ListingRepository,
         limit: int = 200,
+        client: httpx.AsyncClient | None = None,
     ) -> int:
         """
         Enriches existing listings in the database with the latest spatial due diligence data
@@ -1123,7 +1155,7 @@ class ScraperPipeline:
             global_tracker._sync_shared_status()
 
             try:
-                geo_audit = await audit_and_apply_spatial_data(item) or {}
+                geo_audit = await audit_and_apply_spatial_data(item, client=client) or {}
 
                 score, item.pros, item.cons = self.engine.apply_spatial_findings(
                     listing=item,
