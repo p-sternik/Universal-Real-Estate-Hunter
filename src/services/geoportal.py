@@ -70,10 +70,47 @@ class GeoportalService:
     GESUT_MIN_PIXELS = 30
     GESUT_CHECK_RADIUS_M = 20.0
 
-    def __init__(self, request_timeout: float = 6.0):
+    def __init__(self, request_timeout: float = 8.0):
         self.timeout = request_timeout
         self.headers = {"User-Agent": "ApartmentHunter-Geoportal/1.0 (property-research-suite; contact@local)"}
         self._cache: dict[str, Any] = {}
+
+    async def _get_with_retry(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        max_attempts: int = 2,
+        follow_redirects: bool = False,
+    ) -> httpx.Response | None:
+        """Executes GET request with light retry for transient GUGiK/WMS timeouts and 50x errors."""
+        eff_timeout = timeout or self.timeout
+        for attempt in range(1, max_attempts + 1):
+            try:
+                resp = await client.get(
+                    url,
+                    params=params,
+                    headers=self.headers,
+                    timeout=eff_timeout,
+                    follow_redirects=follow_redirects,
+                )
+                if resp.status_code == 200:
+                    return resp
+                if resp.status_code in (500, 502, 503, 504) and attempt < max_attempts:
+                    await asyncio.sleep(1.0)
+                    continue
+                return resp
+            except (httpx.TimeoutException, httpx.NetworkError) as err:
+                if attempt < max_attempts:
+                    await asyncio.sleep(1.0)
+                    continue
+                logger.debug(f"[Geoportal] Request failed after {max_attempts} attempts for {url}: {err}")
+                return None
+            except Exception as err:
+                logger.debug(f"[Geoportal] Unexpected error for {url}: {err}")
+                return None
+        return None
 
     async def _get_cached(self, key: str) -> Any | None:
         try:
@@ -149,8 +186,8 @@ class GeoportalService:
 
         url = f"{self.ULDK_BASE}?request=GetParcelByXY&xy={lon:.6f},{lat:.6f},4326&result=id,teryt,commune,county,voivodship"
         try:
-            resp = await client.get(url, headers=self.headers, timeout=self.timeout)
-            if resp.status_code == 200:
+            resp = await self._get_with_retry(client, url)
+            if resp and resp.status_code == 200:
                 lines = [l.strip() for l in resp.text.strip().splitlines() if l.strip()]
                 if len(lines) >= 2 and lines[0] == "0":
                     parts = lines[1].split("|")
@@ -243,8 +280,8 @@ class GeoportalService:
 
         url = f"{self.ULDK_BASE}?request=GetParcelById&id={parcel_id}&result=geom_wkt&srid=2180"
         try:
-            resp = await client.get(url, headers=self.headers, timeout=self.timeout)
-            if resp.status_code == 200 and ("POLYGON" in resp.text):
+            resp = await self._get_with_retry(client, url)
+            if resp and resp.status_code == 200 and ("POLYGON" in resp.text):
                 m = re.search(r"\(\s*\(+([0-9\.\s,-]+?)\)", resp.text)
                 if m:
                     raw_coords = m.group(1).strip()
@@ -290,8 +327,8 @@ class GeoportalService:
             f"WIDTH=10&HEIGHT=10&LAYERS=dzialki&QUERY_LAYERS=dzialki&I=5&J=5&INFO_FORMAT=text/html"
         )
         try:
-            resp = await client.get(query_url, headers=self.headers, timeout=self.timeout)
-            if resp.status_code == 200:
+            resp = await self._get_with_retry(client, query_url)
+            if resp and resp.status_code == 200:
                 m = re.search(r"Oznaczenie konturu</td><td>(.*?)</td>", resp.text)
                 if m:
                     contour = m.group(1).strip()
@@ -312,7 +349,7 @@ class GeoportalService:
                 if alt.count("\ufffd") < text.count("\ufffd"):
                     text = alt
             return text
-        return resp.text or ""
+        return getattr(resp, "text", "") or ""
 
     @classmethod
     def _parse_mpzp_payload(cls, text: str) -> dict[str, str | None] | None:
@@ -422,8 +459,8 @@ class GeoportalService:
             f"WIDTH=10&HEIGHT=10&LAYERS=plany_granice,wektor-str&QUERY_LAYERS=plany_granice,wektor-str&I=5&J=5&INFO_FORMAT=text/html"
         )
         try:
-            resp = await client.get(query_url, headers=self.headers, timeout=self.timeout, follow_redirects=True)
-            if resp.status_code == 200:
+            resp = await self._get_with_retry(client, query_url, follow_redirects=True)
+            if resp and resp.status_code == 200:
                 text = self._decode_mpzp_text(resp)
                 parsed = self._parse_mpzp_payload(text)
                 if parsed:

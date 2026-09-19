@@ -456,6 +456,7 @@
                 ['tabBtnScrapers', 'configTabScrapers', 'scrapers'],
                 ['tabBtnScheduler', 'configTabScheduler', 'scheduler'],
                 ['tabBtnAi', 'configTabAi', 'ai'],
+                ['tabBtnNotifications', 'configTabNotifications', 'notifications'],
             ];
             tabs.forEach(([btnId, tabId, name]) => {
                 const btn = document.getElementById(btnId);
@@ -468,6 +469,7 @@
                 const tabEl = document.getElementById(tabId);
                 if (tabEl) tabEl.style.display = (tab === name) ? 'block' : 'none';
             });
+            setTimeout(updateConfigTabsScrollButtons, 150);
             if (tab === 'ai' && typeof checkLlmStatusIfEmpty === 'function') {
                 checkLlmStatusIfEmpty();
             }
@@ -502,6 +504,177 @@
                 interval.style.opacity = enabled ? '1' : '0.4';
                 interval.style.pointerEvents = enabled ? 'auto' : 'none';
             }
+        }
+
+        // ========================
+        // Configuration tabs scrolling
+        // ========================
+        function scrollConfigTabs(direction) {
+            const tabsEl = document.getElementById('configTabsBar');
+            if (!tabsEl) return;
+            tabsEl.scrollBy({ left: direction * 180, behavior: 'smooth' });
+            setTimeout(updateConfigTabsScrollButtons, 220);
+        }
+
+        function updateConfigTabsScrollButtons() {
+            const tabsEl = document.getElementById('configTabsBar');
+            const btnLeft = document.getElementById('cfgTabsScrollLeft');
+            const btnRight = document.getElementById('cfgTabsScrollRight');
+            if (!tabsEl || !btnLeft || !btnRight) return;
+            const scrollLeft = Math.round(tabsEl.scrollLeft);
+            const maxScroll = tabsEl.scrollWidth - tabsEl.clientWidth;
+            const hasOverflow = maxScroll > 4;
+            btnLeft.style.display = hasOverflow ? 'flex' : 'none';
+            btnRight.style.display = hasOverflow ? 'flex' : 'none';
+            btnLeft.disabled = scrollLeft <= 2;
+            btnRight.disabled = scrollLeft >= maxScroll - 2;
+        }
+
+        function initConfigTabsScroll() {
+            const tabsEl = document.getElementById('configTabsBar');
+            if (!tabsEl || tabsEl._hasScrollInit) return;
+            tabsEl._hasScrollInit = true;
+
+            tabsEl.addEventListener('wheel', (e) => {
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                    e.preventDefault();
+                    tabsEl.scrollLeft += e.deltaY;
+                    updateConfigTabsScrollButtons();
+                }
+            }, { passive: false });
+
+            tabsEl.addEventListener('scroll', () => {
+                updateConfigTabsScrollButtons();
+            }, { passive: true });
+
+            let isDown = false;
+            let startX = 0;
+            let scrollStart = 0;
+            tabsEl.addEventListener('mousedown', (e) => {
+                if (e.button !== 0) return;
+                isDown = true;
+                startX = e.pageX - tabsEl.offsetLeft;
+                scrollStart = tabsEl.scrollLeft;
+            });
+            window.addEventListener('mouseup', () => { isDown = false; });
+            tabsEl.addEventListener('mousemove', (e) => {
+                if (!isDown) return;
+                e.preventDefault();
+                const x = e.pageX - tabsEl.offsetLeft;
+                const walk = (x - startX) * 1.5;
+                tabsEl.scrollLeft = scrollStart - walk;
+                updateConfigTabsScrollButtons();
+            });
+        }
+
+        // ========================
+        // Notification controls toggling
+        // ========================
+        function toggleTelegramInputs(enabled) {
+            const master = document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true;
+            const effective = master && enabled;
+            const token = document.getElementById('cfgTelegramBotToken');
+            const chatId = document.getElementById('cfgTelegramChatId');
+            const btn = document.getElementById('btnTestTelegram');
+            const container = document.getElementById('telegramFieldsContainer');
+
+            [token, chatId, btn].forEach(el => {
+                if (el) el.disabled = !effective;
+            });
+            if (container) {
+                container.style.opacity = effective ? '1' : '0.4';
+                container.style.pointerEvents = effective ? 'auto' : 'none';
+            }
+        }
+
+        function toggleDiscordInputs(enabled) {
+            const master = document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true;
+            const effective = master && enabled;
+            const webhook = document.getElementById('cfgDiscordWebhookUrl');
+            const btn = document.getElementById('btnTestDiscord');
+            const container = document.getElementById('discordFieldsContainer');
+
+            [webhook, btn].forEach(el => {
+                if (el) el.disabled = !effective;
+            });
+            if (container) {
+                container.style.opacity = effective ? '1' : '0.4';
+                container.style.pointerEvents = effective ? 'auto' : 'none';
+            }
+        }
+
+        function toggleQuietHoursInputs(enabled) {
+            const master = document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true;
+            const effective = master && enabled;
+            const start = document.getElementById('cfgNotifyQuietStart');
+            const end = document.getElementById('cfgNotifyQuietEnd');
+            const row = document.getElementById('notifyQuietHoursRow');
+
+            [start, end].forEach(el => {
+                if (el) el.disabled = !effective;
+            });
+            if (row) {
+                row.style.opacity = effective ? '1' : '0.4';
+                row.style.pointerEvents = effective ? 'auto' : 'none';
+            }
+        }
+
+        function toggleCycleSummaryInputs(enabled) {
+            const master = document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true;
+            const effective = master && enabled;
+            const onlyChanges = document.getElementById('cfgNotifyCycleSummaryOnlyChanges');
+            const row = document.getElementById('cycleSummaryOnlyChangesRow');
+
+            if (onlyChanges) onlyChanges.disabled = !effective;
+            if (row) {
+                row.style.opacity = effective ? '1' : '0.4';
+                row.style.pointerEvents = effective ? 'auto' : 'none';
+            }
+        }
+
+        function toggleMasterNotificationInputs(masterEnabled) {
+            const container = document.getElementById('configTabNotifications');
+            if (!container) return;
+
+            const tgCheck = document.getElementById('cfgTelegramEnabled');
+            const dcCheck = document.getElementById('cfgDiscordEnabled');
+            if (tgCheck) tgCheck.disabled = !masterEnabled;
+            if (dcCheck) dcCheck.disabled = !masterEnabled;
+
+            const eventIds = [
+                'cfgNotifyNewQualified',
+                'cfgNotifyPriceDrop',
+                'cfgNotifyCycleSummary',
+                'cfgNotifyErrors',
+                'cfgNotifyMinScore',
+                'cfgNotifyQuietEnabled'
+            ];
+            eventIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.disabled = !masterEnabled;
+            });
+
+            const tgOn = tgCheck ? tgCheck.checked : true;
+            toggleTelegramInputs(tgOn);
+
+            const dcOn = dcCheck ? dcCheck.checked : true;
+            toggleDiscordInputs(dcOn);
+
+            const summaryOn = document.getElementById('cfgNotifyCycleSummary')?.checked ?? true;
+            toggleCycleSummaryInputs(summaryOn);
+
+            const quietOn = document.getElementById('cfgNotifyQuietEnabled')?.checked ?? false;
+            toggleQuietHoursInputs(quietOn);
+
+            const subCards = container.querySelectorAll('.notif-sub-card');
+            subCards.forEach(card => {
+                card.style.opacity = masterEnabled ? '1' : '0.4';
+            });
+        }
+
+        function updateAllNotificationInputs() {
+            const master = document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true;
+            toggleMasterNotificationInputs(master);
         }
 
         function onCategorySelectChange(cat) {
@@ -938,15 +1111,71 @@
                 : [];
             renderCommuteDestinations();
 
+            const notif = activeConfig.notifications || {};
+            if (document.getElementById('cfgNotifyMasterEnabled')) {
+                document.getElementById('cfgNotifyMasterEnabled').checked = notif.enabled !== false;
+            }
+            if (document.getElementById('cfgTelegramEnabled')) {
+                document.getElementById('cfgTelegramEnabled').checked = notif.telegram_enabled !== false;
+            }
+            if (document.getElementById('cfgTelegramBotToken')) {
+                document.getElementById('cfgTelegramBotToken').value = notif.telegram_bot_token || '';
+            }
+            if (document.getElementById('cfgTelegramChatId')) {
+                document.getElementById('cfgTelegramChatId').value = notif.telegram_chat_id || '';
+            }
+            if (document.getElementById('cfgDiscordEnabled')) {
+                document.getElementById('cfgDiscordEnabled').checked = notif.discord_enabled !== false;
+            }
+            if (document.getElementById('cfgDiscordWebhookUrl')) {
+                document.getElementById('cfgDiscordWebhookUrl').value = notif.discord_webhook_url || '';
+            }
+            if (document.getElementById('cfgNotifyNewQualified')) {
+                document.getElementById('cfgNotifyNewQualified').checked = notif.notify_on_new_qualified !== false;
+            }
+            if (document.getElementById('cfgNotifyPriceDrop')) {
+                document.getElementById('cfgNotifyPriceDrop').checked = notif.notify_on_price_drop !== false;
+            }
+            if (document.getElementById('cfgNotifyCycleSummary')) {
+                document.getElementById('cfgNotifyCycleSummary').checked = notif.notify_on_cycle_summary !== false;
+            }
+            if (document.getElementById('cfgNotifyCycleSummaryOnlyChanges')) {
+                document.getElementById('cfgNotifyCycleSummaryOnlyChanges').checked = !!notif.notify_on_cycle_summary_only_if_changes;
+            }
+            if (document.getElementById('cfgNotifyErrors')) {
+                document.getElementById('cfgNotifyErrors').checked = notif.notify_on_errors !== false;
+            }
+            if (document.getElementById('cfgNotifyMinScore')) {
+                document.getElementById('cfgNotifyMinScore').value = notif.min_score_threshold ?? 0;
+            }
+            if (document.getElementById('cfgNotifyQuietEnabled')) {
+                document.getElementById('cfgNotifyQuietEnabled').checked = !!notif.quiet_hours_enabled;
+            }
+            if (document.getElementById('cfgNotifyQuietStart')) {
+                document.getElementById('cfgNotifyQuietStart').value = notif.quiet_hours_start || '22:00';
+            }
+            if (document.getElementById('cfgNotifyQuietEnd')) {
+                document.getElementById('cfgNotifyQuietEnd').value = notif.quiet_hours_end || '07:00';
+            }
+            const tgStatus = document.getElementById('telegramTestStatus');
+            if (tgStatus) tgStatus.textContent = '';
+            const dcStatus = document.getElementById('discordTestStatus');
+            if (dcStatus) dcStatus.textContent = '';
+
             if (!currentProfileId && allProfiles.length > 0) {
                 currentProfileId = allProfiles[0].id;
             }
             refreshProfileSelect();
             loadProfileIntoForm(currentProfileId);
+            updateAllNotificationInputs();
 
             document.getElementById('configModal').classList.add('open');
             document.body.classList.add('config-open');
             closeProfileMenu();
+            setTimeout(() => {
+                initConfigTabsScroll();
+                updateConfigTabsScrollButtons();
+            }, 60);
         }
 
         function closeConfigModal(e) {
@@ -1166,6 +1395,7 @@
             if (/cfg(Pages|Scraper|RequestDelay)/.test(id)) return 'scrapers';
             if (/cfg(Scheduler|Interval|Night|Quiet)/.test(id)) return 'scheduler';
             if (/cfgCapex/.test(id)) return 'capex';
+            if (/cfg(Notify|Telegram|Discord)/.test(id)) return 'notifications';
             return 'ai';
         }
 
@@ -1183,6 +1413,9 @@
                 ['cfgCapexDeveloper', { min: 0 }],
                 ['cfgCapexRenovation', { min: 0 }],
                 ['cfgCapexAgency', { min: 0, max: 100 }],
+                ['cfgNotifyMinScore', { min: 0, max: 100 }],
+                ['cfgNotifyQuietStart', { pattern: /^\d{2}:\d{2}$/ }],
+                ['cfgNotifyQuietEnd', { pattern: /^\d{2}:\d{2}$/ }],
                 ['cfgLocalTimeout', { min: 1, max: 3600 }],
                 ['cfgOllamaTimeout', { min: 1, max: 3600 }],
                 ['cfgCloudTimeout', { min: 1, max: 600 }],
@@ -1264,10 +1497,29 @@
             const localPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
             const cloudTimeout = parseFloat(document.getElementById('cfgCloudTimeout')?.value) || 30;
 
+            const notificationsPayload = {
+                enabled: document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true,
+                telegram_enabled: document.getElementById('cfgTelegramEnabled')?.checked ?? true,
+                telegram_bot_token: document.getElementById('cfgTelegramBotToken')?.value?.trim() || '',
+                telegram_chat_id: document.getElementById('cfgTelegramChatId')?.value?.trim() || '',
+                discord_enabled: document.getElementById('cfgDiscordEnabled')?.checked ?? true,
+                discord_webhook_url: document.getElementById('cfgDiscordWebhookUrl')?.value?.trim() || '',
+                notify_on_new_qualified: document.getElementById('cfgNotifyNewQualified')?.checked ?? true,
+                notify_on_price_drop: document.getElementById('cfgNotifyPriceDrop')?.checked ?? true,
+                notify_on_cycle_summary: document.getElementById('cfgNotifyCycleSummary')?.checked ?? true,
+                notify_on_cycle_summary_only_if_changes: !!document.getElementById('cfgNotifyCycleSummaryOnlyChanges')?.checked,
+                notify_on_errors: document.getElementById('cfgNotifyErrors')?.checked ?? true,
+                min_score_threshold: parseFloat(document.getElementById('cfgNotifyMinScore')?.value) || 0.0,
+                quiet_hours_enabled: !!document.getElementById('cfgNotifyQuietEnabled')?.checked,
+                quiet_hours_start: document.getElementById('cfgNotifyQuietStart')?.value || '22:00',
+                quiet_hours_end: document.getElementById('cfgNotifyQuietEnd')?.value || '07:00'
+            };
+
             const payload = {
                 profiles: allProfiles,
                 scrapers: scrapersPayload,
                 scheduler: schedulerPayload,
+                notifications: notificationsPayload,
                 capex: capexPayload,
                 commute_destinations: commuteDestinationsPayload,
                 llm_analysis_enabled: document.getElementById('cfgLlmAnalysis')?.checked ?? false,
@@ -1332,6 +1584,51 @@
             } catch (e) {
                 console.error('Reset failed:', e);
                 showToast('Błąd resetu bazy danych.');
+            }
+        }
+
+        async function triggerTestNotification(channel) {
+            const btn = document.getElementById(channel === 'telegram' ? 'btnTestTelegram' : 'btnTestDiscord');
+            const statusEl = document.getElementById(channel === 'telegram' ? 'telegramTestStatus' : 'discordTestStatus');
+            if (btn) btn.disabled = true;
+            if (statusEl) {
+                statusEl.textContent = 'Wysyłanie testu…';
+                statusEl.style.color = 'var(--text-muted)';
+            }
+
+            const payload = {
+                channel: channel,
+                telegram_bot_token: document.getElementById('cfgTelegramBotToken')?.value?.trim() || '',
+                telegram_chat_id: document.getElementById('cfgTelegramChatId')?.value?.trim() || '',
+                discord_webhook_url: document.getElementById('cfgDiscordWebhookUrl')?.value?.trim() || ''
+            };
+
+            try {
+                const res = await Transport.testNotifications(payload);
+                const chanRes = (res.results && res.results[channel]) || {};
+                if (chanRes.ok) {
+                    if (statusEl) {
+                        statusEl.textContent = '✅ ' + (chanRes.message || 'Wysłano pomyślnie!');
+                        statusEl.style.color = 'var(--success-color, #2ecc71)';
+                    }
+                    showToast(`Wiadomość testowa ${channel === 'telegram' ? 'Telegram' : 'Discord'} wysłana pomyślnie!`);
+                } else {
+                    if (statusEl) {
+                        statusEl.textContent = '❌ ' + (chanRes.message || 'Błąd wysyłania');
+                        statusEl.style.color = 'var(--danger-color, #e74c3c)';
+                    }
+                    showToast(`Błąd testu ${channel === 'telegram' ? 'Telegram' : 'Discord'}: ${chanRes.message || 'Błąd połączenia'}`);
+                }
+            } catch (err) {
+                if (statusEl) {
+                    statusEl.textContent = '❌ ' + (err.message || 'Błąd');
+                    statusEl.style.color = 'var(--danger-color, #e74c3c)';
+                }
+                showToast(`Błąd testu: ${err.message || err}`);
+            } finally {
+                const masterOn = document.getElementById('cfgNotifyMasterEnabled')?.checked ?? true;
+                const channelOn = document.getElementById(channel === 'telegram' ? 'cfgTelegramEnabled' : 'cfgDiscordEnabled')?.checked ?? true;
+                if (btn) btn.disabled = !masterOn || !channelOn;
             }
         }
 
@@ -4257,4 +4554,10 @@
 
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden && Date.now() - lastFetchAt > 10000) fetchListings();
+        });
+
+        window.addEventListener('resize', () => {
+            if (typeof updateConfigTabsScrollButtons === 'function') {
+                updateConfigTabsScrollButtons();
+            }
         });

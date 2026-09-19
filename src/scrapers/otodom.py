@@ -288,13 +288,13 @@ class OtodomScraper(BaseScraper):
             # Fetch detail if enabled (skip when we have fresh data from a recent cycle)
             detail_skipped = False
             detail_data: dict[str, Any] = {}
-            if settings.FETCH_DETAILS and slug:
+            if settings.FETCH_DETAILS and (slug or url):
                 if url in self.skip_detail_urls:
                     detail_skipped = True
                 else:
                     async with semaphore:
                         await asyncio.sleep(self.delay(0.4))  # Politeness delay
-                        detail_data = await self.fetch_listing_detail(slug)
+                        detail_data = await self.fetch_listing_detail(slug or url)
 
                 if detail_data:
                     # Full description
@@ -597,24 +597,30 @@ class OtodomScraper(BaseScraper):
                 phase="search",
             )
 
-            tasks = [self.parse_search_item(item, semaphore) for item in items]
+            tasks = [asyncio.create_task(self.parse_search_item(item, semaphore)) for item in items]
             if settings.FETCH_DETAILS:
                 results = []
                 done = 0
-                for coro in asyncio.as_completed(tasks):
+                try:
+                    for coro in asyncio.as_completed(tasks):
+                        if self.is_cancelled:
+                            logger.info(f"[{self.name}] Przerwano pobieranie szczegółów - wykryto żądanie zatrzymania.")
+                            break
+                        results.append(await coro)
+                        done += 1
+                        if done % 3 == 0 or done == len(tasks):
+                            await self._emit_progress(
+                                page=page,
+                                total_pages=total_pages_hint,
+                                items_done=done,
+                                items_total=len(tasks),
+                                phase="detail",
+                            )
+                finally:
                     if self.is_cancelled:
-                        logger.info(f"[{self.name}] Przerwano pobieranie szczegółów - wykryto żądanie zatrzymania.")
-                        break
-                    results.append(await coro)
-                    done += 1
-                    if done % 3 == 0 or done == len(tasks):
-                        await self._emit_progress(
-                            page=page,
-                            total_pages=total_pages_hint,
-                            items_done=done,
-                            items_total=len(tasks),
-                            phase="detail",
-                        )
+                        for t in tasks:
+                            if not t.done():
+                                t.cancel()
             else:
                 results = await asyncio.gather(*tasks)
 

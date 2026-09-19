@@ -542,14 +542,27 @@
                 </button>
             </div>
 
-            <div class="config-tabs">
-                <button type="button" class="config-tab-btn active" id="tabBtnOverview" onclick="switchConfigTab('overview')">Podsumowanie</button>
-                <button type="button" class="config-tab-btn" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
-                <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty (CAPEX)</button>
-                <button type="button" class="config-tab-btn" id="tabBtnCommute" onclick="switchConfigTab('commute')">Dojazdy</button>
-                <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Scrapery i portale</button>
-                <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">Harmonogram</button>
-                <button type="button" class="config-tab-btn" id="tabBtnAi" onclick="switchConfigTab('ai')">Analiza AI</button>
+            <div class="config-tabs-wrapper">
+                <button type="button" class="config-tabs-scroll-btn left" id="cfgTabsScrollLeft" onclick="scrollConfigTabs(-1)" aria-label="Przewiń zakładki w lewo" title="Przewiń zakładki w lewo">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="15 18 9 12 15 6"></polyline>
+                    </svg>
+                </button>
+                <div class="config-tabs" id="configTabsBar">
+                    <button type="button" class="config-tab-btn active" id="tabBtnOverview" onclick="switchConfigTab('overview')">Podsumowanie</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty (CAPEX)</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnCommute" onclick="switchConfigTab('commute')">Dojazdy</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Scrapery i portale</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">Harmonogram</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnAi" onclick="switchConfigTab('ai')">Analiza AI</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnNotifications" onclick="switchConfigTab('notifications')">Powiadomienia</button>
+                </div>
+                <button type="button" class="config-tabs-scroll-btn right" id="cfgTabsScrollRight" onclick="scrollConfigTabs(1)" aria-label="Przewiń zakładki w prawo" title="Przewiń zakładki w prawo">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                </button>
             </div>
 
             <div class="config-body">
@@ -1224,6 +1237,139 @@
                     <div class="hint-box" style="margin-top:12px;">
                         <strong>Łańcuch awaryjny (fallback):</strong> OpenRouter &rarr; OpenAI &rarr; Lokalny OpenAI &rarr; Ollama &rarr; Reguły regex.<br>
                         Oferty z niezmienionym opisem i istniejącą analizą nie są ponownie wysyłane do LLM (oszczędność kosztów).
+                    </div>
+                </div>
+
+                <!-- TAB: NOTIFICATIONS -->
+                <div id="configTabNotifications" style="display:none;">
+                    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
+                        Zarządzanie kanałami powiadomień (Telegram Bot, Discord Webhook), filtrami scoringu oraz zdarzeniami rynkowymi.
+                    </div>
+
+                    <!-- Master switch -->
+                    <div style="margin-bottom:14px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;display:flex;align-items:center;justify-content:space-between;">
+                        <div>
+                            <strong style="font-size:13px;display:block;">Wszystkie powiadomienia</strong>
+                            <span style="font-size:11px;color:var(--text-muted);">Główny przełącznik wysyłania alertów i raportów</span>
+                        </div>
+                        <label class="check-item" style="margin:0;font-weight:600;">
+                            <input type="checkbox" id="cfgNotifyMasterEnabled" checked onchange="toggleMasterNotificationInputs(this.checked)"> Aktywne
+                        </label>
+                    </div>
+
+                    <!-- Telegram Card -->
+                    <div class="notification-card notif-sub-card" id="cardTelegram" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <span style="font-size:16px;">✈️</span>
+                                <strong style="font-size:13px;">Telegram Bot</strong>
+                            </div>
+                            <label class="check-item" style="margin:0;">
+                                <input type="checkbox" id="cfgTelegramEnabled" checked onchange="toggleTelegramInputs(this.checked)"> Włączony
+                            </label>
+                        </div>
+                        <div id="telegramFieldsContainer" style="transition:opacity 0.2s ease;">
+                            <div class="config-row2">
+                                <div class="config-field">
+                                    <label for="cfgTelegramBotToken">Bot Token (od @BotFather):</label>
+                                    <input type="password" id="cfgTelegramBotToken" placeholder="np. 123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ">
+                                </div>
+                                <div class="config-field">
+                                    <label for="cfgTelegramChatId">Chat ID (od @userinfobot lub grupy):</label>
+                                    <input type="text" id="cfgTelegramChatId" placeholder="np. 987654321 lub -100123456789">
+                                </div>
+                            </div>
+                            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;">
+                                <button type="button" class="btn btn-sm" id="btnTestTelegram" onclick="triggerTestNotification('telegram')">
+                                    <span>Wyślij test Telegram</span>
+                                </button>
+                                <span id="telegramTestStatus" style="font-size:11px;color:var(--text-muted);"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Discord Card -->
+                    <div class="notification-card notif-sub-card" id="cardDiscord" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                            <div style="display:flex;align-items:center;gap:8px;">
+                                <span style="font-size:16px;">💬</span>
+                                <strong style="font-size:13px;">Discord Webhook</strong>
+                            </div>
+                            <label class="check-item" style="margin:0;">
+                                <input type="checkbox" id="cfgDiscordEnabled" checked onchange="toggleDiscordInputs(this.checked)"> Włączony
+                            </label>
+                        </div>
+                        <div id="discordFieldsContainer" style="transition:opacity 0.2s ease;">
+                            <div class="config-field" style="margin-bottom:8px;">
+                                <label for="cfgDiscordWebhookUrl">Webhook URL (z ustawień kanału Discord):</label>
+                                <input type="text" id="cfgDiscordWebhookUrl" placeholder="https://discord.com/api/webhooks/...">
+                            </div>
+                            <div style="display:flex;gap:10px;align-items:center;margin-top:8px;">
+                                <button type="button" class="btn btn-sm" id="btnTestDiscord" onclick="triggerTestNotification('discord')">
+                                    <span>Wyślij test Discord</span>
+                                </button>
+                                <span id="discordTestStatus" style="font-size:11px;color:var(--text-muted);"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Typy i zdarzenia powiadomień -->
+                    <div class="notif-sub-card" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                        <strong style="font-size:13px;display:block;margin-bottom:10px;">Typy powiadomień i zdarzenia rynkowe</strong>
+                        <div style="display:flex;flex-direction:column;gap:10px;">
+                            <label class="check-item">
+                                <input type="checkbox" id="cfgNotifyNewQualified" checked>
+                                <span>⭐ <strong>Nowa zakwalifikowana oferta</strong> (spełniająca reguły i filtry profilu)</span>
+                            </label>
+                            <label class="check-item">
+                                <input type="checkbox" id="cfgNotifyPriceDrop" checked>
+                                <span>📉 <strong>Obniżka ceny</strong> w obserwowanej ofercie</span>
+                            </label>
+                            <label class="check-item">
+                                <input type="checkbox" id="cfgNotifyCycleSummary" checked onchange="toggleCycleSummaryInputs(this.checked)">
+                                <span>🏁 <strong>Podsumowanie każdego cyklu scrapingu</strong> (czas wykonania, przeszukane oferty, nowe okazje)</span>
+                            </label>
+                            <div id="cycleSummaryOnlyChangesRow" style="margin-left:24px;transition:opacity 0.2s ease;">
+                                <label class="check-item">
+                                    <input type="checkbox" id="cfgNotifyCycleSummaryOnlyChanges">
+                                    <span style="font-size:12px;color:var(--text-muted);">Wysyłaj podsumowanie tylko gdy wykryto zmiany (nowe oferty, obniżki cen lub kwalifikacje)</span>
+                                </label>
+                            </div>
+                            <label class="check-item">
+                                <input type="checkbox" id="cfgNotifyErrors" checked>
+                                <span>🚨 <strong>Alerty o błędach systemu</strong> (blokady IP/403, błędy bazy danych, awarie API)</span>
+                            </label>
+                        </div>
+
+                        <div class="config-row2" style="margin-top:14px;">
+                            <div class="config-field">
+                                <label for="cfgNotifyMinScore">Minimalny Score oferty dla alertu (0-100):</label>
+                                <input type="number" id="cfgNotifyMinScore" min="0" max="100" step="1" value="0" placeholder="0 = wszystkie zakwalifikowane">
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Godziny ciszy -->
+                    <div class="notif-sub-card" style="padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+                            <div>
+                                <strong style="font-size:13px;display:block;">Godziny ciszy (Quiet Hours)</strong>
+                                <span style="font-size:11px;color:var(--text-muted);">Wstrzymuje wysyłanie alertów w wybranym przedziale czasowym</span>
+                            </div>
+                            <label class="check-item" style="margin:0;">
+                                <input type="checkbox" id="cfgNotifyQuietEnabled" onchange="toggleQuietHoursInputs(this.checked)"> Włączone
+                            </label>
+                        </div>
+                        <div class="config-row2" id="notifyQuietHoursRow" style="transition:opacity 0.2s ease;">
+                            <div class="config-field">
+                                <label for="cfgNotifyQuietStart">Początek ciszy:</label>
+                                <input type="time" id="cfgNotifyQuietStart" value="22:00">
+                            </div>
+                            <div class="config-field">
+                                <label for="cfgNotifyQuietEnd">Koniec ciszy:</label>
+                                <input type="time" id="cfgNotifyQuietEnd" value="07:00">
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>

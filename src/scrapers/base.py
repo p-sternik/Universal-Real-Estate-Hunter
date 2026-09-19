@@ -36,6 +36,7 @@ class BaseScraper(ABC):
         self.proxy = settings.PROXY_URL
         self.progress_cb: Callable | None = None
         self._session: AsyncSession | None = None
+        self._session_lock = asyncio.Lock()
         self._throttle_multiplier = 1.0
 
     def _get_session(self) -> AsyncSession:
@@ -44,14 +45,19 @@ class BaseScraper(ABC):
             self._session = AsyncSession()
         return self._session
 
+    async def _reset_session(self) -> None:
+        """Safely close and reset the persistent session."""
+        async with self._session_lock:
+            if self._session is not None:
+                try:
+                    await self._session.close()
+                except Exception:
+                    pass
+                self._session = None
+
     async def close(self) -> None:
         """Close the persistent HTTP session (call when the scraper is done)."""
-        if self._session is not None:
-            try:
-                await self._session.close()
-            except Exception:
-                pass
-            self._session = None
+        await self._reset_session()
 
     def delay(self, base_delay: float) -> float:
         """Effective politeness delay including adaptive throttle multiplier."""
@@ -128,7 +134,8 @@ class BaseScraper(ABC):
 
             except Exception as curl_err:
                 logger.warning(f"[{self.name}] curl_cffi error ({attempt}/{self.max_retries}) on {url}: {curl_err}")
-                self._session = None  # Reset broken handle; recreate on next request
+                if attempt >= self.max_retries:
+                    await self._reset_session()
 
             delay = 1.5 * (2 ** (attempt - 1)) + random.uniform(0.5, 1.5)
             delay *= self._throttle_multiplier

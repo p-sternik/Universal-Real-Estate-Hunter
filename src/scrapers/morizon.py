@@ -423,11 +423,15 @@ class MorizonScraper(BaseScraper):
             semaphore = asyncio.Semaphore(settings.CONCURRENT_REQUESTS)
 
             async def process_card(card, sem=semaphore):
+                if self.is_cancelled:
+                    return None
                 item = self._parse_card(card)
                 if not item:
                     return None
                 if settings.FETCH_DETAILS and item.url not in self.skip_detail_urls:
                     async with sem:
+                        if self.is_cancelled:
+                            return None
                         await asyncio.sleep(self.delay(0.3))
                         try:
                             det = await self.fetch_listing_detail(item.url)

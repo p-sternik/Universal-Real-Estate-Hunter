@@ -517,20 +517,29 @@ class NieruchomosciOnlineScraper(BaseScraper):
 
             if settings.FETCH_DETAILS:
                 semaphore = asyncio.Semaphore(settings.CONCURRENT_REQUESTS)
-                tasks = [self._enrich_listing(i, semaphore) for i in items]
+                tasks = [asyncio.create_task(self._enrich_listing(i, semaphore)) for i in items]
                 enriched = []
                 done = 0
-                for coro in asyncio.as_completed(tasks):
-                    enriched.append(await coro)
-                    done += 1
-                    if done % 5 == 0 or done == len(tasks):
-                        await self._emit_progress(
-                            page=page,
-                            total_pages=self.max_pages,
-                            items_done=done,
-                            items_total=len(tasks),
-                            phase="detail",
-                        )
+                try:
+                    for coro in asyncio.as_completed(tasks):
+                        if self.is_cancelled:
+                            logger.info(f"[{self.name}] Przerwano pobieranie szczegółów - wykryto żądanie zatrzymania.")
+                            break
+                        enriched.append(await coro)
+                        done += 1
+                        if done % 5 == 0 or done == len(tasks):
+                            await self._emit_progress(
+                                page=page,
+                                total_pages=self.max_pages,
+                                items_done=done,
+                                items_total=len(tasks),
+                                phase="detail",
+                            )
+                finally:
+                    if self.is_cancelled:
+                        for t in tasks:
+                            if not t.done():
+                                t.cancel()
                 items = enriched
             listings.extend(items)
 

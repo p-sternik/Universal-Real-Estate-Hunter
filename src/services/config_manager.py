@@ -248,6 +248,39 @@ class CapexSettings(BaseModel):
     pcc_exempt_first_home: bool = False
 
 
+class NotificationSettings(BaseModel):
+    """Configuration for alert dispatchers (Telegram, Discord, triggers, quiet hours)."""
+
+    enabled: bool = True
+    telegram_enabled: bool = True
+    telegram_bot_token: str = Field(default_factory=lambda: settings.TELEGRAM_BOT_TOKEN or "")
+    telegram_chat_id: str = Field(default_factory=lambda: settings.TELEGRAM_CHAT_ID or "")
+    discord_enabled: bool = True
+    discord_webhook_url: str = Field(default_factory=lambda: settings.DISCORD_WEBHOOK_URL or "")
+    notify_on_new_qualified: bool = True
+    notify_on_price_drop: bool = True
+    notify_on_cycle_summary: bool = True
+    notify_on_cycle_summary_only_if_changes: bool = False
+    notify_on_errors: bool = True
+    min_score_threshold: float = 0.0
+    quiet_hours_enabled: bool = False
+    quiet_hours_start: str = "22:00"
+    quiet_hours_end: str = "07:00"
+
+    def is_in_quiet_hours(self) -> bool:
+        if not self.quiet_hours_enabled:
+            return False
+        try:
+            now = datetime.now().time()
+            start = datetime.strptime(self.quiet_hours_start, "%H:%M").time()
+            end = datetime.strptime(self.quiet_hours_end, "%H:%M").time()
+            if start <= end:
+                return start <= now <= end
+            return now >= start or now <= end
+        except Exception:
+            return False
+
+
 class CommuteDestination(BaseModel):
     """A user-defined commute anchor (e.g. workplace, school) used by the commute matrix."""
 
@@ -486,6 +519,7 @@ class SearchConfig(BaseModel):
     )
     capex: CapexSettings = Field(default_factory=CapexSettings)
     commute_destinations: list[CommuteDestination] = Field(default_factory=list)
+    notifications: NotificationSettings = Field(default_factory=NotificationSettings)
 
     @model_validator(mode="after")
     def _normalize_local_llm_url(self) -> "SearchConfig":
@@ -501,6 +535,7 @@ class SearchConfig(BaseModel):
                 "profiles",
                 "scrapers",
                 "scheduler",
+                "notifications",
                 "llm_analysis_enabled",
                 "llm_provider",
                 "ollama_model",
@@ -580,6 +615,7 @@ class ConfigManager:
             profiles=[self._get_default_profile()],
             scrapers=ScrapersSettings(),
             scheduler=SchedulerSettings(),
+            notifications=NotificationSettings(),
         )
 
     @classmethod
@@ -609,7 +645,14 @@ class ConfigManager:
             except Exception:
                 pass
 
-        return SearchConfig(profiles=[profile], scrapers=scrapers)
+        notifications = NotificationSettings()
+        if "notifications" in data and isinstance(data["notifications"], dict):
+            try:
+                notifications = NotificationSettings(**data["notifications"])
+            except Exception:
+                pass
+
+        return SearchConfig(profiles=[profile], scrapers=scrapers, notifications=notifications)
 
     def load_config(self) -> SearchConfig:
         if self.config_path.exists():
@@ -672,6 +715,10 @@ class ConfigManager:
             current_dict["scrapers"] = updates["scrapers"]
         if "scheduler" in updates:
             current_dict["scheduler"] = updates["scheduler"]
+        if "notifications" in updates and isinstance(updates["notifications"], dict):
+            merged_notif = dict(current_dict.get("notifications") or {})
+            merged_notif.update(updates["notifications"])
+            current_dict["notifications"] = merged_notif
         if "capex" in updates and isinstance(updates["capex"], dict):
             merged = dict(current_dict.get("capex") or {})
             merged.update(updates["capex"])
@@ -800,6 +847,7 @@ class ConfigManager:
                 "profiles",
                 "scrapers",
                 "scheduler",
+                "notifications",
                 "capex",
                 "commute_destinations",
                 "llm_analysis_enabled",

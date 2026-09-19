@@ -1,4 +1,5 @@
 import re
+import time
 from datetime import UTC, datetime
 from typing import Any
 
@@ -6,6 +7,8 @@ import httpx
 from loguru import logger
 
 from src.services.spatial_cache import get_spatial_cache, set_spatial_cache
+
+_mf_cooldown_until: float = 0.0
 
 
 def validate_nip_checksum(nip_str: str) -> bool:
@@ -116,6 +119,11 @@ class DeveloperVerifierService:
         if not validate_nip_checksum(nip):
             return None
 
+        global _mf_cooldown_until
+        if time.time() < _mf_cooldown_until:
+            logger.debug("[DeveloperVerifier] Biała Lista VAT cooldown aktywny (limit 300 zapytań/dobę). Pomijam.")
+            return None
+
         cache_key = f"mf:nip:{nip}"
         cached = await get_spatial_cache(cache_key)
         if cached and isinstance(cached, dict):
@@ -147,6 +155,13 @@ class DeveloperVerifierService:
                     }
                     await set_spatial_cache(cache_key, res, ttl_days=30)
                     return res
+            elif resp.status_code == 429 or (resp.status_code == 400 and "limit" in resp.text.lower()):
+                _mf_cooldown_until = time.time() + 3600
+                logger.warning(
+                    f"[DeveloperVerifier] Osiągnięto limit zapytań (300/dobę) Białej Listy VAT MF ({resp.status_code}). "
+                    "Aktywowano cooldown na 1 godzinę."
+                )
+                return None
         except Exception as e:
             logger.debug(f"[DeveloperVerifier] Biała Lista VAT query note: {e}")
 
