@@ -2147,17 +2147,6 @@
         .config-chips-input {
             flex: 1;
             min-width: 0;
-            background: var(--input);
-            border: 1px solid var(--border);
-            border-radius: var(--r-sm);
-            color: var(--text-primary);
-            padding: 7px 10px;
-            font-size: var(--font-size-sm);
-            line-height: var(--line-height-snug);
-            outline: none;
-        }
-        .config-chips-input:focus {
-            border-color: var(--border-active);
         }
         .config-chips-btns {
             display: flex;
@@ -2183,22 +2172,6 @@
             gap: 8px;
             flex: 1 1 auto;
             min-width: 0;
-        }
-        .commute-dest-fields input,
-        .commute-dest-add-row input {
-            background: var(--input);
-            border: 1px solid var(--border);
-            border-radius: var(--r-sm);
-            color: var(--text-primary);
-            padding: 7px 10px;
-            font-size: var(--font-size-sm);
-            line-height: var(--line-height-snug);
-            outline: none;
-            width: 100%;
-        }
-        .commute-dest-fields input:focus,
-        .commute-dest-add-row input:focus {
-            border-color: var(--border-active);
         }
         .commute-dest-add-row {
             display: flex;
