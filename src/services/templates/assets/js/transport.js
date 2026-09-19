@@ -54,8 +54,8 @@
                     return await ensureOk('/api/overview');
                 },
 
-                async updateCheck() {
-                    return await ensureOk('/api/update');
+                async updateCheck(force = false) {
+                    return await ensureOk(force ? '/api/update?force=true' : '/api/update');
                 },
 
                 async saveConfig(payload) {

@@ -1080,11 +1080,12 @@
             const llm = cfg.llm || {};
 
             const upd = ov.update || {};
-            const updHtml = upd.status === 'available' && upd.latest_version
-                ? `<a href="${escapeHtml(upd.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer">Dostępna ${escapeHtml(upd.latest_version)} → release notes</a>`
+            const updStatusText = upd.status === 'available' && upd.latest_version
+                ? `<a href="${escapeHtml(upd.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">🚀 Dostępna ${escapeHtml(upd.latest_version)} → release notes</a>`
                 : upd.status === 'current'
                     ? `✓ aktualna (${esc(ov.version || '—')})`
                     : 'nie sprawdzono';
+            const updHtml = `<span id="ovUpdateStatus">${updStatusText}</span> <button type="button" class="btn btn-xs btn-outline" id="btnManualCheckUpdate" onclick="manualCheckUpdate(this)" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer" title="Wymuś natychmiastowe sprawdzenie na GitHubie">Sprawdź teraz</button>`;
             const appRows =
                 row('Wersja', esc(ov.version || '—')) +
                 rawRow('Aktualizacje', updHtml) +
@@ -4211,6 +4212,41 @@
                 dot.hidden = true;
             }
         }
+
+        async function manualCheckUpdate(btn) {
+            const statusEl = document.getElementById('ovUpdateStatus');
+            if (btn) {
+                btn.disabled = true;
+                btn.innerText = 'Sprawdzanie…';
+            }
+            try {
+                const st = await Transport.updateCheck(true);
+                const show = !!st && st.status === 'available';
+                const dot = document.getElementById('updateDot');
+                if (dot) dot.hidden = !show;
+                const btnSettings = document.getElementById('btnSettings');
+                if (btnSettings) {
+                    btnSettings.title = show ? `Dostępna nowa wersja ${st.latest_version || ''} — sprawdź Podsumowanie` : 'Ustawienia';
+                }
+                if (statusEl) {
+                    if (show && st.latest_version) {
+                        statusEl.innerHTML = `<a href="${escapeHtml(st.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">🚀 Dostępna ${escapeHtml(st.latest_version)} → release notes</a>`;
+                    } else if (st && st.status === 'current') {
+                        statusEl.innerHTML = `✓ aktualna (${escapeHtml(st.latest_version || 'najnowsza')})`;
+                    } else {
+                        statusEl.innerText = 'Brak danych o wydaniu (GitHub niedostępny)';
+                    }
+                }
+            } catch (err) {
+                if (statusEl) statusEl.innerText = 'Błąd połączenia z GitHub API';
+            } finally {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.innerText = 'Sprawdź teraz';
+                }
+            }
+        }
+        window.manualCheckUpdate = manualCheckUpdate;
 
         window.addEventListener('DOMContentLoaded', async () => {
             bindPipelineScroll();

@@ -304,7 +304,7 @@ async def _seed_overview_listings() -> None:
 def _mock_update_check(monkeypatch: pytest.MonkeyPatch, payload: dict) -> None:
     from src.services import live_dashboard as dash
 
-    async def _fake(self: object) -> dict:
+    async def _fake(self: object, *args: Any, **kwargs: Any) -> dict:
         return dict(payload)
 
     monkeypatch.setattr(dash.LiveDashboardServer, "_check_for_updates", _fake)
@@ -416,7 +416,11 @@ async def test_update_check_detects_newer_release() -> None:
     assert first["url"] == "https://example.com/r/v99.0.0"
     second = await server._check_for_updates()
     assert second == first
-    assert fake.calls == 1  # served from the 12h cache
+    assert fake.calls == 1  # served from the cache
+    third = await server._check_for_updates(force=True)
+    assert third["status"] == first["status"]
+    assert third["latest_version"] == first["latest_version"]
+    assert fake.calls == 2  # bypassed cache on force
 
 
 async def test_update_check_current_when_same_version() -> None:
@@ -448,3 +452,6 @@ async def test_update_endpoint_uses_cached_check(monkeypatch: pytest.MonkeyPatch
         resp = await client.get("/api/update")
         assert resp.status == 200
         assert (await resp.json())["status"] == "current"
+        resp_force = await client.get("/api/update?force=true")
+        assert resp_force.status == 200
+        assert (await resp_force.json())["status"] == "current"
