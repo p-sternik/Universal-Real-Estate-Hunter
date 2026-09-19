@@ -2074,7 +2074,12 @@
             font-weight: var(--font-weight-semibold);
             color: var(--text-secondary);
         }
-        .config-field input, .config-field select, .config-field textarea {
+        .config-field input, .config-field select, .config-field textarea,
+        .config-body input[type="text"],
+        .config-body input[type="number"],
+        .config-body input[type="search"],
+        .config-body select,
+        .config-body textarea {
             background: var(--input);
             border: 1px solid var(--border);
             border-radius: var(--r-sm);
@@ -2085,7 +2090,12 @@
             width: 100%;
             outline: none;
         }
-        .config-field input:focus, .config-field select:focus, .config-field textarea:focus { border-color: var(--border-active); }
+        .config-field input:focus, .config-field select:focus, .config-field textarea:focus,
+        .config-body input[type="text"]:focus,
+        .config-body input[type="number"]:focus,
+        .config-body input[type="search"]:focus,
+        .config-body select:focus,
+        .config-body textarea:focus { border-color: var(--border-active); }
         .config-field textarea { resize: vertical; }
         .config-field select { cursor: pointer; }
 
@@ -2137,6 +2147,17 @@
         .config-chips-input {
             flex: 1;
             min-width: 0;
+            background: var(--input);
+            border: 1px solid var(--border);
+            border-radius: var(--r-sm);
+            color: var(--text-primary);
+            padding: 7px 10px;
+            font-size: var(--font-size-sm);
+            line-height: var(--line-height-snug);
+            outline: none;
+        }
+        .config-chips-input:focus {
+            border-color: var(--border-active);
         }
         .config-chips-btns {
             display: flex;
@@ -2162,6 +2183,22 @@
             gap: 8px;
             flex: 1 1 auto;
             min-width: 0;
+        }
+        .commute-dest-fields input,
+        .commute-dest-add-row input {
+            background: var(--input);
+            border: 1px solid var(--border);
+            border-radius: var(--r-sm);
+            color: var(--text-primary);
+            padding: 7px 10px;
+            font-size: var(--font-size-sm);
+            line-height: var(--line-height-snug);
+            outline: none;
+            width: 100%;
+        }
+        .commute-dest-fields input:focus,
+        .commute-dest-add-row input:focus {
+            border-color: var(--border-active);
         }
         .commute-dest-add-row {
             display: flex;
@@ -2962,9 +2999,15 @@
             /* Touch ergonomics & inputs */
             .config-field input,
             .config-field select,
-            .config-field textarea {
+            .config-field textarea,
+            .config-chips-input,
+            .commute-dest-fields input,
+            .commute-dest-add-row input {
                 min-height: 44px;
                 font-size: 14px;
+            }
+            .commute-dest-fields {
+                grid-template-columns: 1fr;
             }
             .config-row2 {
                 grid-template-columns: 1fr;
