@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.18.0 (2026-09-19)
+
+### Features
+
+- **notifications,scrapers**: Notification management center, config tabs UX, and scraper resilience
+  ([`e4df649`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/e4df6497cff1d976b281f4bcac83d95341f4aaac))
+
+
 ## v1.17.2 (2026-09-19)
 
 ### Bug Fixes
