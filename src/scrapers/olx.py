@@ -395,6 +395,7 @@ class OLXScraper(BaseScraper):
                 physical_fingerprint=physical_fp,
                 created_at=datetime.now(UTC),
                 scraped_at=datetime.now(UTC),
+                skip_detail=url in self.skip_detail_urls,
             )
         except Exception as e:
             logger.error(f"[OLXScraper] Error parsing ad: {e}")
@@ -538,6 +539,8 @@ class OLXScraper(BaseScraper):
                                         item.gallery_images = det_gallery[:15]
                                         if det_gallery and not item.main_image_url:
                                             item.main_image_url = det_gallery[0]
+                        elif abs_url in self.skip_detail_urls:
+                            item.skip_detail = True
 
                         return item
                     except Exception as e:

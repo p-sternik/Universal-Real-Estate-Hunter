@@ -96,13 +96,15 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         explicit_nip=seller_nip,
         is_private_owner=is_priv,
     )
+    vision_coro = audit_vision_data(target)
 
     geo_res: Any
     aq_res: Any
     commute_res: Any
     dev_res: Any
-    geo_res, aq_res, commute_res, dev_res = await asyncio.gather(
-        geo_coro, aq_coro, commute_coro, dev_coro, return_exceptions=True
+    vision_res: Any
+    geo_res, aq_res, commute_res, dev_res, vision_res = await asyncio.gather(
+        geo_coro, aq_coro, commute_coro, dev_coro, vision_coro, return_exceptions=True
     )
 
     geo_audit: dict[str, Any] | None = None
@@ -156,9 +158,6 @@ async def audit_and_apply_spatial_data(target: Any) -> dict[str, Any] | None:
         from src.models.listing import DEVELOPER_FIELDS
 
         apply_if_present(target, dev_res, DEVELOPER_FIELDS)
-
-    # Multimodal Vision AI audit (needs no coordinates — photos only).
-    await audit_vision_data(target)
 
     return geo_audit
 
@@ -428,15 +427,15 @@ class ScraperPipeline:
                     logger.debug(f"[Pipeline] Geoportal/AirQuality audit skipped: {e}")
             else:
                 # Vision and Developer audits need no coordinates: audit photos and
-                # seller/developer even when location is approximate.
+                # seller/developer even when location is approximate (concurrently).
                 try:
-                    await audit_vision_data(listing)
+                    await asyncio.gather(
+                        audit_vision_data(listing),
+                        audit_developer_data(listing),
+                        return_exceptions=True,
+                    )
                 except Exception as e:
-                    logger.debug(f"[Pipeline] Standalone vision audit skipped: {e}")
-                try:
-                    await audit_developer_data(listing)
-                except Exception as e:
-                    logger.debug(f"[Pipeline] Standalone developer audit skipped: {e}")
+                    logger.debug(f"[Pipeline] Standalone vision/developer audit skipped: {e}")
 
         # Check if LLM can be skipped because this listing was already analyzed.
         # Uses stable desc_hash (normalized text) + prompt version instead of raw
@@ -785,7 +784,7 @@ class ScraperPipeline:
                 repo = ListingRepository(session)
                 fresh_urls = set(
                     await repo.get_fresh_urls(
-                        ["Otodom", "NieruchomosciOnline"],
+                        ["Otodom", "OLX", "NieruchomosciOnline", "Morizon"],
                         within_hours=settings.DETAIL_REFRESH_HOURS,
                     )
                 )
@@ -802,7 +801,9 @@ class ScraperPipeline:
                         )
                     )
                 if cfg.scrapers.olx.enabled and (not p_portals or "olx" in p_portals):
-                    scs.append(OLXScraper(max_pages=cfg.scrapers.olx.max_pages, profile=prof))
+                    scs.append(
+                        OLXScraper(max_pages=cfg.scrapers.olx.max_pages, profile=prof, skip_detail_urls=fresh_urls)
+                    )
                 if cfg.scrapers.nieruchomosci_online.enabled and (not p_portals or "nieruchomosci_online" in p_portals):
                     scs.append(
                         NieruchomosciOnlineScraper(
@@ -812,7 +813,11 @@ class ScraperPipeline:
                         )
                     )
                 if cfg.scrapers.morizon.enabled and (not p_portals or "morizon" in p_portals):
-                    scs.append(MorizonScraper(max_pages=cfg.scrapers.morizon.max_pages, profile=prof))
+                    scs.append(
+                        MorizonScraper(
+                            max_pages=cfg.scrapers.morizon.max_pages, profile=prof, skip_detail_urls=fresh_urls
+                        )
+                    )
                 execution_plan.append((prof, scs))
 
         flat_scrapers = []
@@ -874,7 +879,7 @@ class ScraperPipeline:
         logger.info(f"[Pipeline] Scraping stage took {t_scrape:.1f}s total.")
 
         # 2. Concurrently process listings with Semaphore
-        concurrency = getattr(settings, "CONCURRENT_REQUESTS", 3) or 3
+        concurrency = getattr(settings, "CONCURRENT_REQUESTS", 6) or 6
         sem = asyncio.Semaphore(concurrency)
 
         t_process_start = time.perf_counter()

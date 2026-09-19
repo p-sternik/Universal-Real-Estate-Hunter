@@ -78,7 +78,7 @@ class Settings(BaseSettings):
     REQUEST_TIMEOUT_SECONDS: int = 25
     MAX_RETRIES: int = 3
     FETCH_DETAILS: bool = True
-    CONCURRENT_REQUESTS: int = 3
+    CONCURRENT_REQUESTS: int = 6
     DETAIL_REFRESH_HOURS: int = 24
     PROXY_URL: str | None = None
     USER_AGENT: str = (

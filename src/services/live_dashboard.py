@@ -180,7 +180,7 @@ def _parse_version_tag(tag: str | None) -> tuple[int, int, int] | None:
 # Update check: GitHub Releases of this repo (published by semantic-release).
 _UPDATE_CHECK_REPO = "p-sternik/Universal-Real-Estate-Hunter"
 _UPDATE_CHECK_URL = f"https://api.github.com/repos/{_UPDATE_CHECK_REPO}/releases/latest"
-_UPDATE_CHECK_TTL_SECONDS = 12 * 3600
+_UPDATE_CHECK_TTL_SECONDS = 2 * 3600
 _UPDATE_CHECK_TIMEOUT_SECONDS = 5.0
 
 
@@ -335,14 +335,18 @@ class LiveDashboardServer:
                 data[k] = v
         return web.json_response(data)
 
-    async def _check_for_updates(self) -> dict[str, Any]:
-        """Compare the local version against the latest GitHub Release (cached, fail-silent).
+    async def _check_for_updates(self, force: bool = False) -> dict[str, Any]:
+        """Queries GitHub Releases for newer semver tags. Cached for TTL unless forced.
 
         Returns {"status": "current"|"available"|"unknown", "latest_version", "url", "checked_at"}.
         Never raises and never blocks longer than the fetch timeout.
         """
         now_mono = time.monotonic()
-        if self._update_cache is not None and now_mono - self._update_cache_at < _UPDATE_CHECK_TTL_SECONDS:
+        if (
+            not force
+            and self._update_cache is not None
+            and now_mono - self._update_cache_at < _UPDATE_CHECK_TTL_SECONDS
+        ):
             return self._update_cache
         result: dict[str, Any] = {"status": "unknown", "latest_version": None, "url": None, "checked_at": None}
         try:
@@ -369,8 +373,9 @@ class LiveDashboardServer:
         return result
 
     async def handle_get_update(self, request: web.Request) -> web.Response:
-        """Lightweight update status for the topbar dot (uses the cached release check)."""
-        return web.json_response(await self._check_for_updates())
+        """Lightweight update status for the topbar dot (uses cached or forced release check)."""
+        force = request.query.get("force", "").lower() in ("true", "1", "yes")
+        return web.json_response(await self._check_for_updates(force=force))
 
     async def handle_get_overview(self, request: web.Request) -> web.Response:
         """Aggregate system overview for the read-only Podsumowanie settings tab."""

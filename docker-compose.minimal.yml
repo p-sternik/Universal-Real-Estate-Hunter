@@ -1,0 +1,59 @@
+# Minimal setup — the simplest way to try the platform while still using
+# PostgreSQL (the recommended database). Pulls the prebuilt image from GHCR —
+# no source checkout required.
+#
+# Two services: PostgreSQL 16 + the dashboard. Scraping runs in-process via the
+# one-click "scrape" button in the UI, so no separate scraper daemon is needed.
+#
+# For continuous background monitoring, use the full docker-compose.yml instead
+# (adds a dedicated scheduler/scraper daemon).
+#
+# Usage:
+#   docker compose -f docker-compose.minimal.yml up -d
+#   -> Dashboard: http://localhost:8080
+
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: estate_hunter_db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-estate}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-estate_hunter_secret_pass}
+      POSTGRES_DB: ${POSTGRES_DB:-estate_hunter}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-estate} -d $${POSTGRES_DB:-estate_hunter}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  dashboard:
+    image: ghcr.io/p-sternik/universal-real-estate-hunter:${IMAGE_TAG:-latest}
+    container_name: estate_hunter_dashboard
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate_hunter_secret_pass}@db:5432/${POSTGRES_DB:-estate_hunter}
+      - SEARCH_CONFIG_PATH=/app/data/search_config.json
+      - TZ=Europe/Warsaw
+      # Optional: local Ollama for LLM / Vision AI running on the host.
+      # If enabled, also uncomment the `extra_hosts` block below.
+      # - OLLAMA_BASE_URL=http://host.docker.internal:11434
+    # extra_hosts:
+    #   - "host.docker.internal:host-gateway"
+    env_file:
+      - path: .env
+        required: false
+    volumes:
+      - estate_data:/app/data
+
+volumes:
+  postgres_data:
+  estate_data:
