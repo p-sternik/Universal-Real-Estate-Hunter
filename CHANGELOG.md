@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.17.1 (2026-09-19)
+
+### Performance Improvements
+
+- **pipeline,network**: Reuse async http client session and enable gallery cache on skip
+  ([`1f3ca83`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/1f3ca83ce5e4b5b690872fe055b0a0c1c53dce65))
+
+
 ## v1.17.0 (2026-09-19)
 
 ### Bug Fixes
