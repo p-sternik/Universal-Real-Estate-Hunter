@@ -72,6 +72,13 @@ Powered by **OpenRouter**, **OpenAI**, or a local **Ollama** instance. For every
 - Automatic **Night Mode / Quiet Hours** (e.g. reducing checks to every 60 minutes between 22:00 and 07:00).
 - Dynamic interval adjustments from web UI without restarting the container.
 
+### 🔎 8. Extended Intelligence & Valuation
+- **Vision AI Photo Audit:** classifies listing photos — detects renders/exemplary visualizations, verifies the real finish condition, extracts floorplan details, and flags visible defects (optional, independent vision model).
+- **GUNB & Developer Background Check:** cross-checks building permits (GUNB) and company data (KRS/NIP, share capital, registration year) to estimate developer risk.
+- **Commute Matrix:** drive time/distance and pedestrian/transit safety to your custom destinations (workplace, school).
+- **Market Valuation & CAPEX:** estimates fair market value, price deviation, days-on-market, negotiation leverage, and a recommended opening offer, plus total cost of ownership (developer/renovation rate, agency fee, PCC).
+- **Air Quality & Smog:** CAMS Copernicus + GIOŚ station data (AQI, PM2.5, smog days) mapped per location.
+
 ---
 
 ## 🏗️ Architecture
@@ -84,16 +91,28 @@ Universal-Real-Estate-Hunter/
 │   ├── models/                # Pydantic v2 schemas and enums
 │   ├── scrapers/              # Multi-portal scrapers (Otodom, OLX, Nieruchomości-online, Morizon)
 │   ├── filters/               # Qualification engine (Stage 1 + Stage 2 + LLM + fingerprint)
-│   ├── storage/               # Async SQLAlchemy 2.0 models, repository & automatic SQLite migrations
+│   │   ├── stage1_hard_rules.py  # Zero-cost hard reject rules
+│   │   ├── stage2_semantic.py    # Regex semantic NLP (finish, utilities, road access)
+│   │   ├── llm_analyzer.py       # Forensic LLM due-diligence
+│   │   ├── vision_analyzer.py    # Photo audit (renders, finish, floorplans, defects)
+│   │   └── fingerprint.py        # Cross-agency deduplication
+│   ├── storage/               # Async SQLAlchemy 2.0 models, repository & automatic migrations
 │   ├── services/
-│   │   ├── geoportal.py       # GUGiK ULDK & KIEG WMS spatial audit service
-│   │   ├── geocoder.py        # Nominatim caching geocoder
 │   │   ├── pipeline.py        # Orchestrator running scraping, audit, storage, and alerts
 │   │   ├── config_manager.py  # Multi-profile & scheduler JSON configuration manager
 │   │   ├── live_dashboard.py  # aiohttp async web server & REST API
+│   │   ├── geoportal.py       # GUGiK ULDK & KIEG WMS spatial audit service
+│   │   ├── geocoder.py        # Nominatim caching geocoder
+│   │   ├── air_quality.py     # CAMS Copernicus + GIOŚ air quality intelligence
+│   │   ├── market_analyzer.py # Valuation, CAPEX/TCO & negotiation leverage
+│   │   ├── commute.py         # Commute matrix to custom destinations
+│   │   ├── gunb.py            # GUNB building permits background check
+│   │   ├── developer_verifier.py # Developer / KRS background check
 │   │   ├── discord_notifier.py# Rich Discord embed notifier
 │   │   ├── telegram_notifier.py # HTML Telegram bot notifier
 │   │   ├── progress.py        # Live scraping progress tracker
+│   │   ├── scrape_lock.py     # Single-flight scrape lock
+│   │   ├── spatial_cache.py   # Spatial registry cache (GIOŚ/ISOK/SOPO)
 │   │   └── terminal_view.py   # Rich terminal listing table (CLI `view` command)
 │   ├── scheduler/             # Periodic runner with day/night adaptive loop
 │   └── version.py             # Version (managed by semantic-release)
@@ -104,7 +123,7 @@ Universal-Real-Estate-Hunter/
 ├── main.py                    # Unified CLI entrypoint
 ├── pyproject.toml             # Project metadata, ruff, pytest, bandit, semantic-release
 ├── .pre-commit-config.yaml    # Pre-commit hooks (ruff, security, hygiene)
-└── listings.db                # SQLite database (persisted locally or in Docker volume)
+└── data/listings.db           # SQLite database (persisted locally or in Docker volume)
 ```
 
 ---
@@ -117,8 +136,10 @@ git clone https://github.com/p-sternik/Universal-Real-Estate-Hunter.git
 cd Universal-Real-Estate-Hunter
 ```
 
-### 2. Configure environment variables
-Copy the example environment file and add your Discord/Telegram credentials and (optionally) an LLM API key:
+> Only `docker-compose.yml` (and optionally `.env`) is needed — the image is pulled from GHCR, so you can copy just that file instead of cloning the full source.
+
+### 2. Configure environment variables (optional)
+No configuration is required to start. If you want notifications or LLM analysis, copy the example environment file and add your Discord/Telegram credentials and (optionally) an LLM API key:
 ```bash
 cp .env.example .env
 ```
@@ -136,6 +157,34 @@ The system will start three containers out-of-the-box (zero configuration needed
 ### 4. Check logs
 ```bash
 docker compose logs -f scraper
+```
+
+### Docker Compose configuration — required vs optional
+
+`docker compose up -d` works out-of-the-box; every value below has a safe default and is **optional**.
+
+| Setting | Scope | Default | Notes |
+| :--- | :--- | :--- | :--- |
+| `POSTGRES_USER` | `db` | `estate` | Credentials for the bundled PostgreSQL 16 |
+| `POSTGRES_PASSWORD` | `db` | `estate_hunter_secret_pass` | Override in production |
+| `POSTGRES_DB` | `db` | `estate_hunter` | Database name |
+| `IMAGE_TAG` | `dashboard`, `scraper` | `latest` | Pulls `ghcr.io/p-sternik/universal-real-estate-hunter:<tag>`; set to pin a release |
+| `DATABASE_URL` | `dashboard`, `scraper` | `postgresql+asyncpg://…@db:5432/…` | Auto-derived; override only to point at an external database |
+| `OLLAMA_BASE_URL` | `dashboard`, `scraper` | `http://host.docker.internal:11434` | Local Ollama on the host (for LLM/Vision AI) |
+
+**Anything in `.env` is optional** (`env_file` uses `required: false`). Keys you'll typically add there: `DISCORD_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, and one LLM backend (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, …).
+
+**Ports & volumes exposed by default:**
+- Dashboard: `http://localhost:8080`
+- PostgreSQL: `127.0.0.1:5432` (bound to localhost only)
+- Volumes: `postgres_data` (database), `estate_data` (persisted app data incl. `search_config.json`)
+
+**Image-based (no build):** services pull the prebuilt release image from GHCR (`ghcr.io/p-sternik/universal-real-estate-hunter`), so `docker compose up -d` needs no source checkout. Pin a release via `IMAGE_TAG` (default `latest`). To build locally from source instead: `docker build -t ghcr.io/p-sternik/universal-real-estate-hunter:local .`
+
+**Minimal setup:** want the simplest possible start while still using PostgreSQL (the recommended database)? Use [`docker-compose.minimal.yml`](docker-compose.minimal.yml) — PostgreSQL 16 + a single dashboard container (no separate scraper daemon), with one-click in-process scraping:
+
+```bash
+docker compose -f docker-compose.minimal.yml up -d
 ```
 
 ---
@@ -203,7 +252,7 @@ python main.py once --city Kraków --radius 20
 ### 1. Environment Variables (`.env`)
 ```ini
 # Database (SQLite by default, PostgreSQL supported)
-DATABASE_URL=sqlite+aiosqlite:///listings.db
+DATABASE_URL=sqlite+aiosqlite:///data/listings.db
 
 # Notifications
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...

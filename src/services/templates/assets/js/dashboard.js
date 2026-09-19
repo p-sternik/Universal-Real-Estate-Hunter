@@ -3038,8 +3038,18 @@
             document.getElementById('progQualified').innerText = st.items_qualified || 0;
             document.getElementById('progDups').innerText = st.duplicates_found || 0;
             const elapsed = st.elapsed_seconds || 0;
-            document.getElementById('progElapsed').innerText =
-                elapsed >= 60 ? `${Math.floor(elapsed / 60)}m ${elapsed % 60}s` : `${elapsed}s`;
+            let formattedElapsed;
+            if (elapsed >= 3600) {
+                const h = Math.floor(elapsed / 3600);
+                const m = Math.floor((elapsed % 3600) / 60);
+                const s = elapsed % 60;
+                formattedElapsed = `${h}h ${m}m ${s}s`;
+            } else if (elapsed >= 60) {
+                formattedElapsed = `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+            } else {
+                formattedElapsed = `${elapsed}s`;
+            }
+            document.getElementById('progElapsed').innerText = formattedElapsed;
 
             const allLogs = st.logs || [];
             // Update log filter counts

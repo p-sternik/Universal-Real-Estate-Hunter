@@ -71,6 +71,13 @@ Wspierane backendy: **OpenRouter**, **OpenAI** lub lokalny **Ollama**. Dla każd
 - Automatyczny **tryb nocny** (np. co 60 minut między 22:00 a 07:00).
 - Dynamiczna zmiana interwałów z poziomu panelu web bez restartu kontenera.
 
+### 🔎 8. Rozszerzona inteligencja i wycena
+- **Audyt zdjęć Vision AI:** klasyfikacja zdjęć — wykrywanie renderów/zdjęć poglądowych, weryfikacja rzeczywistego stanu wykończenia, ekstrakcja rzutów i oznaczanie widocznych wad (opcjonalny, niezależny model wizyjny).
+- **GUNB i weryfikacja dewelopera:** sprawdzenie pozwoleń budowlanych (GUNB) oraz danych firmy (KRS/NIP, kapitał zakładowy, rok rejestracji) w celu oceny ryzyka dewelopera.
+- **Macierz dojazdów:** czas/dystans jazdy oraz bezpieczeństwo piesze/komunikacyjne do własnych celów (praca, szkoła).
+- **Wycena rynkowa i CAPEX:** szacowanie wartości godziwej, odchylenia ceny, dni na rynku, siły negocjacyjnej i proponowanej oferty otwarcia oraz całkowitego kosztu zakupu (stawka dewelopera/remontu, prowizja, PCC).
+- **Jakość powietrza i smog:** dane CAMS Copernicus + stacje GIOŚ (AQI, PM2.5, dni smogowe) mapowane per lokalizacja.
+
 ---
 
 ## 🏗️ Architektura Projektu
@@ -83,17 +90,29 @@ Universal-Real-Estate-Hunter/
 │   ├── models/                # Schematy Pydantic v2 i enums
 │   ├── scrapers/              # Scrapery portali (Otodom, OLX, Nieruchomości-online, Morizon)
 │   ├── filters/               # Silnik kwalifikacji (Etap I + Etap II + LLM + fingerprint)
-│   ├── storage/               # Modele SQLAlchemy 2.0 async, repozytorium, automatyczne migracje SQLite
+│   │   ├── stage1_hard_rules.py  # Twarde reguły odrzucenia (zero kosztu)
+│   │   ├── stage2_semantic.py    # Semantyczne NLP (stan, media, dojazd)
+│   │   ├── llm_analyzer.py       # Śledcza analiza due diligence LLM
+│   │   ├── vision_analyzer.py    # Audyt zdjęć (rendery, stan, rzuty, wady)
+│   │   └── fingerprint.py        # Deduplikacja między agencjami
+│   ├── storage/               # Modele SQLAlchemy 2.0 async, repozytorium, automatyczne migracje
 │   ├── services/
-│   │   ├── geoportal.py       # Audyt przestrzenny GUGiK ULDK & KIEG WMS
-│   │   ├── geocoder.py        # Geokoder Nominatim z cache
 │   │   ├── pipeline.py        # Orkiestrator cyklu (scraping → audyt → zapis → powiadomienia)
 │   │   ├── config_manager.py  # Konfiguracja profili i harmonogramu (search_config.json)
 │   │   ├── live_dashboard.py  # Asynchroniczny serwer aiohttp i REST API
+│   │   ├── geoportal.py       # Audyt przestrzenny GUGiK ULDK & KIEG WMS
+│   │   ├── geocoder.py        # Geokoder Nominatim z cache
+│   │   ├── air_quality.py     # Jakość powietrza CAMS Copernicus + GIOŚ
+│   │   ├── market_analyzer.py # Wycena, CAPEX/TCO i siła negocjacyjna
+│   │   ├── commute.py         # Macierz dojazdów do własnych celów
+│   │   ├── gunb.py            # Weryfikacja pozwoleń budowlanych GUNB
+│   │   ├── developer_verifier.py # Weryfikacja dewelopera / KRS
 │   │   ├── discord_notifier.py# Powiadomienia Discord Embed
 │   │   ├── telegram_notifier.py # Powiadomienia bota Telegram (HTML)
 │   │   ├── progress.py        # Śledzenie postępu scrapingu na żywo
-│   │   └── report_generator.py# Generator statycznego raportu HTML
+│   │   ├── scrape_lock.py     # Blokada pojedynczego przebiegu scrapingu
+│   │   ├── spatial_cache.py   # Cache rejestrów przestrzennych (GIOŚ/ISOK/SOPO)
+│   │   └── terminal_view.py   # Tabela ofert w terminalu (komenda `view`)
 │   ├── scheduler/             # Cykliczny runner z trybem dzień/noc
 │   └── version.py             # Wersja (zarządzana przez semantic-release)
 ├── tests/                     # Zestaw testów pytest
@@ -102,9 +121,8 @@ Universal-Real-Estate-Hunter/
 ├── search_config.json         # Profile wyszukiwania, limity portali i harmonogram
 ├── main.py                    # Główny punkt wejściowy CLI
 ├── pyproject.toml             # Metadane projektu, ruff, pytest, bandit, semantic-release
-├── requirements.txt           # Zależności pip
 ├── .pre-commit-config.yaml    # Hooki pre-commit (ruff, bezpieczeństwo, higiena plików)
-└── listings.db                # Baza SQLite (lokalnie lub w wolumenie Dockera)
+└── data/listings.db           # Baza SQLite (lokalnie lub w wolumenie Dockera)
 ```
 
 ---
@@ -117,8 +135,10 @@ git clone https://github.com/p-sternik/Universal-Real-Estate-Hunter.git
 cd Universal-Real-Estate-Hunter
 ```
 
-### 2. Skonfiguruj zmienne środowiskowe
-Skopiuj plik przykładowy i uzupełnij dane Discorda/Telegrama oraz (opcjonalnie) klucz LLM:
+> Wystarczy sam `docker-compose.yml` (i opcjonalnie `.env`) — obraz jest pobierany z GHCR, więc możesz skopiować tylko ten plik zamiast klonować całe źródła.
+
+### 2. Skonfiguruj zmienne środowiskowe (opcjonalne)
+Do startu nie jest wymagana żadna konfiguracja. Jeśli chcesz powiadomienia lub analizę LLM, skopiuj plik przykładowy i uzupełnij dane Discorda/Telegrama oraz (opcjonalnie) klucz LLM:
 ```bash
 cp .env.example .env
 ```
@@ -136,6 +156,34 @@ System uruchomi trzy kontenery bez konieczności jakiejkolwiek konfiguracji (zer
 ### 4. Sprawdź logi
 ```bash
 docker compose logs -f scraper
+```
+
+### Konfiguracja Docker Compose — wymagane vs opcjonalne
+
+`docker compose up -d` działa od razu; każda wartość poniżej ma bezpieczny domyślny ustawienie i jest **opcjonalna**.
+
+| Ustawienie | Zakres | Domyślnie | Uwagi |
+| :--- | :--- | :--- | :--- |
+| `POSTGRES_USER` | `db` | `estate` | Dane dostępowe do dołączonego PostgreSQL 16 |
+| `POSTGRES_PASSWORD` | `db` | `estate_hunter_secret_pass` | Nadpisz w środowisku produkcyjnym |
+| `POSTGRES_DB` | `db` | `estate_hunter` | Nazwa bazy danych |
+| `IMAGE_TAG` | `dashboard`, `scraper` | `latest` | Pobiera `ghcr.io/p-sternik/universal-real-estate-hunter:<tag>`; ustaw, by przypiąć konkretną wersję |
+| `DATABASE_URL` | `dashboard`, `scraper` | `postgresql+asyncpg://…@db:5432/…` | Ustalane automatycznie; nadpisz tylko przy zewnętrznej bazie |
+| `OLLAMA_BASE_URL` | `dashboard`, `scraper` | `http://host.docker.internal:11434` | Lokalna Ollama na hoście (LLM / Vision AI) |
+
+**Wszystko w `.env` jest opcjonalne** (`env_file` ma `required: false`). Klucze, które zwykle tam dodasz: `DISCORD_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` oraz jeden backend LLM (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, …).
+
+**Domyślne porty i wolumeny:**
+- Dashboard: `http://localhost:8080`
+- PostgreSQL: `127.0.0.1:5432` (tylko localhost)
+- Wolumeny: `postgres_data` (baza), `estate_data` (trwałe dane aplikacji, w tym `search_config.json`)
+
+**Oparty o obraz (bez budowania):** usługi pobierają gotowy obraz z GHCR (`ghcr.io/p-sternik/universal-real-estate-hunter`), więc `docker compose up -d` nie wymaga pobierania kodu źródłowego. Wersję przypniesz przez `IMAGE_TAG` (domyślnie `latest`). Aby zbudować lokalnie ze źródeł: `docker build -t ghcr.io/p-sternik/universal-real-estate-hunter:local .`
+
+**Minimalny start:** chcesz najprostsze możliwe uruchomienie, ale nadal z PostgreSQL (zalecana baza danych)? Użyj [`docker-compose.minimal.yml`](docker-compose.minimal.yml) — PostgreSQL 16 + pojedynczy kontener dashboardu (bez osobnego demona scrapera) i scrapowaniem w procesie jednym kliknięciem:
+
+```bash
+docker compose -f docker-compose.minimal.yml up -d
 ```
 
 ---
@@ -158,7 +206,7 @@ source venv/bin/activate
 .\venv\Scripts\Activate.ps1
 
 pip install --upgrade pip
-pip install -r requirements.txt
+pip install .
 ```
 
 ### Wariant B: uv (zalecany do developmentu)
@@ -184,7 +232,6 @@ Aplikacja udostępnia ujednolicone CLI w [`main.py`](main.py):
 | `once` | Pojedynczy przebieg scrapingu i kwalifikacji | `python main.py once` lub `python main.py once --profile "Domy Kraków"` |
 | `dashboard` | Uruchomienie Live Dashboard z CRM i mapą Leaflet | `python main.py dashboard --port 8080` (alias: `server`) |
 | `geoportal` | Audyt zapisanych ofert w Geoportalu GUGiK | `python main.py geoportal --limit 50` (`--all` — z niezakwalifikowanymi) |
-| `report` | Generowanie statycznego raportu HTML | `python main.py report` (otwiera w przeglądarce) |
 | `view` | Podgląd zakwalifikowanych ofert w terminalu | `python main.py view --status QUALIFIED --limit 15` |
 | `reindex` | Ponowna ocena wszystkich ofert w bazie najnowszymi filtrami | `python main.py reindex` |
 | `geocode` | Uzupełnienie brakujących współrzędnych GPS przez Nominatim | `python main.py geocode` |
@@ -204,7 +251,7 @@ python main.py once --city Kraków --radius 20
 ### 1. Zmienne środowiskowe (`.env`)
 ```ini
 # Baza danych (domyślnie SQLite, wspierany PostgreSQL)
-DATABASE_URL=sqlite+aiosqlite:///listings.db
+DATABASE_URL=sqlite+aiosqlite:///data/listings.db
 
 # Powiadomienia
 DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...

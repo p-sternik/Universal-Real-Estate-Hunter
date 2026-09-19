@@ -140,6 +140,10 @@ def restore_cached_details(listing: "ListingSchema", existing_model: Any) -> Non
         listing.has_fiber = bool(existing_model.has_fiber)
     if not listing.has_visualisations:
         listing.has_visualisations = bool(existing_model.has_visualisations)
+    if not listing.main_image_url and getattr(existing_model, "main_image_url", None):
+        listing.main_image_url = existing_model.main_image_url
+    if not listing.gallery_images and getattr(existing_model, "gallery_images", None):
+        listing.gallery_images = list(existing_model.gallery_images)
     if not listing.year_built:
         listing.year_built = existing_model.year_built
     if not listing.coordinates and existing_model.latitude and existing_model.longitude:

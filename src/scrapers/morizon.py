@@ -451,6 +451,8 @@ class MorizonScraper(BaseScraper):
                                         item.main_image_url = item.gallery_images[0]
                         except Exception as err:
                             logger.debug(f"[{self.name}] Detail enrichment failed for {item.url}: {err}")
+                elif item.url in self.skip_detail_urls:
+                    item.skip_detail = True
                 return item
 
             results = await asyncio.gather(*[process_card(card) for card in valid_cards])
