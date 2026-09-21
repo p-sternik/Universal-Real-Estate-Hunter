@@ -180,7 +180,7 @@ function renderLandAuditHtml(item) {
         legalRows += `<tr class="row-ok"><th>Potencjał solarny (PVGIS)</th><td class="value"><span class="num">${solarTxt}</span> (baza satelitarna SARAH-3)</td></tr>`;
     }
     if (item.geology_formation || item.geology_risk_note) {
-        const isGeoWarn = Boolean(item.geology_risk_note && item.geology_risk_note.includes('⚠️'));
+        const isGeoWarn = Boolean(item.geology_risk_note);
         legalRows += `<tr class="${isGeoWarn ? 'row-warn' : 'row-ok'}"><th>Warunki geologiczno-gruntowe</th><td class="value"><strong>${escapeHtml(item.geology_formation || 'Grunty mineralne')}</strong>${item.geology_risk_note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${escapeHtml(item.geology_risk_note)}</div>` : ''}</td></tr>`;
     }
 
@@ -549,7 +549,7 @@ function renderLandAuditHtml(item) {
         const discrepancyRow = item.vision_discrepancy_note ? `
             <tr class="row-warn">
                 <th>Rozbieżność z opisem</th>
-                <td class="value"><span style="color: var(--yellow, #f59e0b); font-weight: 600;">⚠️ ${escapeHtml(item.vision_discrepancy_note)}</span></td>
+                <td class="value"><span style="color: var(--yellow, #f59e0b); font-weight: 600;">${escapeHtml(item.vision_discrepancy_note)}</span></td>
             </tr>
         ` : '';
         visionHtml = `
@@ -857,7 +857,7 @@ async function openAiModal(listingId, forceRefresh = false) {
         for (const [role, list] of Object.entries(sq)) {
             if (Array.isArray(list) && list.length > 0) {
                 const title = roleLabels[role] || role;
-                sqHtml += `<li style="list-style:none;margin-top:8px;margin-bottom:4px;"><strong style="font-size:var(--font-size-xs);color:var(--blue-text);text-transform:uppercase;letter-spacing:0.5px;">📌 ${escapeHtml(title)}:</strong></li>`;
+                sqHtml += `<li style="list-style:none;margin-top:8px;margin-bottom:4px;"><strong style="font-size:var(--font-size-xs);color:var(--blue-text);text-transform:uppercase;letter-spacing:0.5px;">${escapeHtml(title)}:</strong></li>`;
                 sqHtml += list.map(q => `<li>${escapeHtml(q)}</li>`).join('');
             }
         }
@@ -912,7 +912,7 @@ async function openAiModal(listingId, forceRefresh = false) {
         relistBanner = `
             <div class="relist-banner" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
                 <div>
-                    <span style="font-weight: 700; color: #ef4444;">🔁 WYKRYTO POZORNY RE-LISTING (${item.relist_count}x)</span>
+                    <span style="font-weight: 700; color: #ef4444;">WYKRYTO POZORNY RE-LISTING (${item.relist_count}x)</span>
                     <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
                         Pierwotna cena: <strong>${initP || '—'}</strong> ${dropTotal ? ' | ' + dropTotal : ''} | Łączny czas na rynku: <strong>${daysOnMkt}</strong>
                     </div>

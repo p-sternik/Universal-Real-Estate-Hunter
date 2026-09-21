@@ -917,7 +917,7 @@
             refreshProfileSelect();
             loadProfileIntoForm(newId);
             renderProfileTabs();
-            showToast(`Zduplikowano profil "${curP.name}" ➔ "${cloned.name}". Zmień miasto lub parametry i kliknij Zapisz.`);
+            showToast(`Zduplikowano profil "${curP.name}" → "${cloned.name}". Zmień miasto lub parametry i kliknij Zapisz.`);
 
             const cityInput = document.getElementById('cfgCity');
             if (cityInput) {
@@ -1293,7 +1293,7 @@
                         <input type="number" class="config-chips-input" value="${d.longitude}" placeholder="Długość geogr. (lon)" step="0.000001"
                                oninput="commuteDestinations[${idx}].longitude = parseFloat(this.value)">
                     </div>
-                    <button type="button" class="btn btn-sm btn-ghost" onclick="removeCommuteDestination(${idx})" title="Usuń cel dojazdu">✕</button>
+                    <button type="button" class="btn btn-sm btn-ghost" onclick="removeCommuteDestination(${idx})" title="Usuń cel dojazdu">${svgIcon('x')}</button>
                 </div>
             `).join('');
         }
@@ -1385,7 +1385,7 @@
             const updStatusText = upd.status === 'available' && upd.latest_version
                 ? `<a href="${escapeHtml(upd.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">Dostępna ${escapeHtml(upd.latest_version)} → release notes</a>`
                 : upd.status === 'current'
-                    ? `✓ aktualna (${esc(ov.version || '—')})`
+                    ? `Aktualna (${esc(ov.version || '—')})`
                     : 'nie sprawdzono';
             const updHtml = `<span id="ovUpdateStatus">${updStatusText}</span> <button type="button" class="btn btn-xs btn-outline" id="btnManualCheckUpdate" onclick="manualCheckUpdate(this)" style="margin-left:8px;padding:2px 8px;font-size:11px;cursor:pointer" title="Wymuś natychmiastowe sprawdzenie na GitHubie">Sprawdź teraz</button>`;
             const appRows =
@@ -1425,7 +1425,7 @@
             const portalNames = { otodom: 'Otodom', olx: 'OLX', nieruchomosci_online: 'Nier-online', morizon: 'Morizon' };
             const portalsText = Object.keys(portalNames).map(k => {
                 const s = scrapers[k] || {};
-                return `${portalNames[k]} ${s.enabled === false ? '✗' : '✓'}`;
+                return `${portalNames[k]} ${s.enabled === false ? 'wył.' : 'wł.'}`;
             }).join(' · ');
             const cfgRows =
                 row('Profile', `${fmtInt(cfg.profiles_total)} (wł.: ${profNames})`) +
@@ -2306,7 +2306,7 @@
                 : (cat === 'mieszkanie' ? `${item.area_home.toFixed(0)} m² • ${item.rooms ? item.rooms + ' pok. • ' : ''}` : `${item.area_home.toFixed(0)} m² • Działka: ${plotText} • `);
 
             const visionPopupBadge = item.vision_discrepancy_note
-                ? `<div class="popup-precision" style="color:var(--yellow,#f59e0b);font-weight:600;margin-top:2px;">⚠️ Rozbieżność foto z opisem</div>`
+                ? `<div class="popup-precision" style="color:var(--yellow,#f59e0b);font-weight:600;margin-top:2px;">Rozbieżność foto z opisem</div>`
                 : (item.vision_is_render === true ? `<div class="popup-precision" style="color:var(--accent,#3b82f6);margin-top:2px;">Wizualizacje 3D (Vision AI)</div>` : '');
 
             const popupHtml = `
@@ -2319,9 +2319,9 @@
                         <div class="popup-precision" style="color: ${precisionColor};">${precisionText}</div>
                         ${visionPopupBadge}
                         <div class="popup-actions">
-                            <button class="btn btn-sm ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="updateStatus(${item.id}, 'FAVORITE')">★</button>
+                            <button class="btn btn-sm ${item.user_status === 'FAVORITE' ? 'active-fav' : ''}" onclick="updateStatus(${item.id}, 'FAVORITE')" title="Ulubione">${svgIcon('star', 13)}</button>
                             <button class="btn btn-sm ${item.user_status === 'TO_VISIT' ? 'active-visit' : ''}" onclick="updateStatus(${item.id}, 'TO_VISIT')">Do wizyty</button>
-                            <button class="btn btn-sm" onclick="updateStatus(${item.id}, 'REJECTED')">×</button>
+                            <button class="btn btn-sm" onclick="updateStatus(${item.id}, 'REJECTED')" title="Odrzuć">${svgIcon('x', 13)}</button>
                             ${item.geoportal_url ? `<a href="${escapeHtml(item.geoportal_url)}" target="_blank" class="btn btn-sm" title="Geoportal">Geoportal</a>` : ''}
                         </div>
                     </div>
@@ -2865,7 +2865,7 @@
             let deltaBadge = '';
             let deltaPill = '';
             if (item.relist_count && item.relist_count > 0) {
-                deltaBadge = `<span class="card-badge badge-relist" title="Wykryto powrót oferty na rynek (${item.relist_count}x re-listing)">🔁 Re-list (${item.relist_count}x)</span>`;
+                deltaBadge = `<span class="card-badge badge-relist" title="Wykryto powrót oferty na rynek (${item.relist_count}x re-listing)">Re-list (${item.relist_count}x)</span>`;
                 deltaPill = `<span class="meta-tag tag-profile" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">Re-list ${item.relist_count}x</span>`;
             } else if (item.listing_status === 'DELISTED') {
                 deltaBadge = `<span class="card-badge badge-delisted">Wycofana</span>`;
@@ -2933,7 +2933,7 @@
                 const countBadge = item.filter_reasons.length > 1 ? ` (+${item.filter_reasons.length - 1})` : '';
                 rejectionHtml = `
                     <details class="rejection-box">
-                        <summary><span class="rejection-label" title="${firstReason}">⚠️ ${firstReason}${countBadge}</span></summary>
+                        <summary><span class="rejection-label" title="${firstReason}">${firstReason}${countBadge}</span></summary>
                         <ul>${item.filter_reasons.map(r => `<li>${escapeHtml(r)}</li>`).join('')}</ul>
                     </details>
                 `;
@@ -2945,7 +2945,7 @@
             const heatText = item.heating && item.heating !== 'nieznane' ? escapeHtml(item.heating) : '';
             const roadText = item.access_road_type && item.access_road_type !== 'nieznana' ? escapeHtml(item.access_road_type) : '';
             const visTag = (item.has_visualisations || item.vision_is_render === true) ? `<span class="meta-tag tag-vis" title="Zdjęcia to wizualizacje 3D / rendery">Wizualizacje 3D</span>` : '';
-            const visionDiscrepancyTag = item.vision_discrepancy_note ? `<span class="meta-tag tag-aqi tag-aqi-danger" title="${escapeHtml(item.vision_discrepancy_note)}">⚠️ Rozbieżność foto</span>` : '';
+            const visionDiscrepancyTag = item.vision_discrepancy_note ? `<span class="meta-tag tag-aqi tag-aqi-danger" title="${escapeHtml(item.vision_discrepancy_note)}">Rozbieżność foto</span>` : '';
             const mpzpZoneText = item.mpzp_zone ? escapeHtml(item.mpzp_zone.length > 25 ? item.mpzp_zone.slice(0, 25) + '…' : item.mpzp_zone) : '';
             const floodWarn = item.flood_risk_zone === 'ZAGROZENIE_POWODZIOWE';
 
@@ -3054,11 +3054,11 @@
                     ? ` — po korekcie o stan wykończenia: ${dev > 0 ? '+' : ''}${dev}% (surowe: ${devRaw > 0 ? '+' : ''}${devRaw}%)`
                     : '';
                 if (dev <= -4.0) {
-                    devBadge = `<span class="market-delta dev-low" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena poniżej mediany">${dev > 0 ? '+' : ''}${dev}% vs rynek</span>`;
+                    devBadge = `<span class="market-delta dev-low" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena poniżej mediany">${dev}% poniżej mediany</span>`;
                 } else if (dev >= 8.0) {
-                    devBadge = `<span class="market-delta dev-high" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena powyżej mediany">+${dev}% vs rynek</span>`;
+                    devBadge = `<span class="market-delta dev-high" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena powyżej mediany">+${dev}% powyżej mediany</span>`;
                 } else {
-                    devBadge = `<span class="market-delta dev-fair" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena w normie">${dev > 0 ? '+' : ''}${dev}% vs rynek</span>`;
+                    devBadge = `<span class="market-delta dev-fair" title="Mediana rynku: ${medFmt} zł/m²${corrNote} — wycena w normie">${dev > 0 ? '+' : ''}${dev}% w normie</span>`;
                 }
             }
 
@@ -3068,7 +3068,7 @@
 
             // Days on market badge (e.g. "14 dni") — always visible on the card
             const daysBadge = (item.days_on_market !== null && item.days_on_market !== undefined)
-                ? `<span class="market-delta dev-fair" title="Liczba dni od pierwszego wykrycia oferty">⏱ ${item.days_on_market} dni</span>`
+                ? `<span class="market-delta dev-fair" title="Liczba dni od pierwszego wykrycia oferty">${item.days_on_market} dni</span>`
                 : '';
 
             // Price per ar (for plots and houses with land) next to price per m²
@@ -3140,7 +3140,7 @@
                             ${deltaBadge}
                         </div>
                         <button type="button" class="card-fav-btn ${item.user_status === 'FAVORITE' ? 'active' : ''}" onclick="event.stopPropagation(); toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">
-                            ${item.user_status === 'FAVORITE' ? '★' : '☆'}
+                            ${svgIcon('star', 15)}
                         </button>
                     </div>
                 </div>
@@ -4028,9 +4028,9 @@
             if (orNotice) {
                 if (or.configured) {
                     const cred = (or.limit_remaining !== null && or.limit_remaining !== undefined) ? ` · Limit: $${Number(or.limit_remaining).toFixed(2)}` : '';
-                    orNotice.innerHTML = `<span style="color:var(--green,#10b981);">✓ Klucz OPENROUTER_API_KEY jest aktywny (<code>${escapeHtml(or.key_masked)}</code>)${cred}</span>`;
+                    orNotice.innerHTML = `<span style="color:var(--green,#10b981);">Klucz OPENROUTER_API_KEY jest aktywny (<code>${escapeHtml(or.key_masked)}</code>)${cred}</span>`;
                 } else {
-                    orNotice.innerHTML = '<span style="color:var(--text-muted);">ℹ️ Brak klucza OPENROUTER_API_KEY w pliku .env (opcjonalny do chmurowych modeli)</span>';
+                    orNotice.innerHTML = '<span style="color:var(--text-muted);">Brak klucza OPENROUTER_API_KEY w pliku .env (opcjonalny do chmurowych modeli)</span>';
                 }
             }
 
@@ -4038,14 +4038,14 @@
             if (data.has_working_provider && data.active_provider) {
                 bannerHtml = `
                     <div class="llm-active-banner status-ok">
-                        <span>🟢 <strong>Aktywny dostawca:</strong> ${escapeHtml(data.active_provider.label || data.active_provider.name)}</span>
+                        <span><span class="llm-dot ok" style="vertical-align:middle;margin-right:4px;"></span><strong>Aktywny dostawca:</strong> ${escapeHtml(data.active_provider.label || data.active_provider.name)}</span>
                         <span style="font-size:11px;opacity:0.9;">Gotowy do analiz</span>
                     </div>
                 `;
             } else {
                 bannerHtml = `
                     <div class="llm-active-banner status-err">
-                        <span>🔴 <strong>Brak gotowego dostawcy AI:</strong> Skonfigurowany dostawca nie odpowiada</span>
+                        <span><span class="llm-dot err" style="vertical-align:middle;margin-right:4px;"></span><strong>Brak gotowego dostawcy AI:</strong> Skonfigurowany dostawca nie odpowiada</span>
                         <span style="font-size:11px;opacity:0.9;">Sprawdź klucz API lub uruchom silnik lokalny</span>
                     </div>
                 `;
@@ -4116,9 +4116,9 @@
             if (tps) {
                 const estSec = Math.round(300 / tps);
                 if (tps >= 15) {
-                    tpsBadge = `<span class="meta-tag tag-exact" style="margin-left:auto;" title="Akceleracja GPU (~${estSec}s na analizę oferty)">⚡ ${tps} tok/s (GPU)</span>`;
+                    tpsBadge = `<span class="meta-tag tag-exact" style="margin-left:auto;" title="Akceleracja GPU (~${estSec}s na analizę oferty)">${tps} tok/s (GPU)</span>`;
                 } else {
-                    tpsBadge = `<span class="meta-tag tag-vis" style="margin-left:auto;" title="Praca na CPU (~${estSec}s na analizę oferty) — rozważ mniejszy model 3B">⚠️ ${tps} tok/s (CPU)</span>`;
+                    tpsBadge = `<span class="meta-tag tag-vis" style="margin-left:auto;" title="Praca na CPU (~${estSec}s na analizę oferty) — rozważ mniejszy model 3B">${tps} tok/s (CPU)</span>`;
                 }
             }
 
@@ -4394,7 +4394,7 @@
                 const areaFmt = item.area_home > 0 ? `${item.area_home.toFixed(1)} m²` : (item.area_plot ? `${Math.round(item.area_plot)} m²` : '—');
                 const plotFmt = item.area_plot ? `${Math.round(item.area_plot)} m²` : '—';
                 const finishFmt = item.finish_condition && item.finish_condition !== 'nieokreślony' ? escapeHtml(item.finish_condition) : '—';
-                const scoreFmt = item.match_score !== null && item.match_score !== undefined ? `${Math.round(item.match_score)}` : '—';
+                const scoreFmt = item.qualification_score !== null && item.qualification_score !== undefined ? `${Math.round(item.qualification_score)}` : '—';
                 const dateFmt = item.created_at ? item.created_at.slice(0, 10) : '—';
                 const portalHref = item.url || '#';
 
@@ -4434,7 +4434,7 @@
                         <td class="num">${dateFmt}</td>
                         <td class="table-actions-cell">
                             <button type="button" class="btn btn-xs" onclick="openAiModal(${item.id})" title="Otwórz audyt Due Diligence"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Raport</button>
-                            <button type="button" class="btn btn-xs ${item.user_status === 'FAVORITE' ? 'btn-primary' : ''}" onclick="toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">★</button>
+                            <button type="button" class="btn btn-xs ${item.user_status === 'FAVORITE' ? 'btn-primary' : ''}" onclick="toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">${svgIcon('star', 13)}</button>
                         </td>
                     </tr>
                 `;
@@ -4496,7 +4496,7 @@
                 csvEscape(i.location || i.city),
                 i.latitude || '',
                 i.longitude || '',
-                i.match_score !== null && i.match_score !== undefined ? Math.round(i.match_score) : '',
+                i.qualification_score !== null && i.qualification_score !== undefined ? Math.round(i.qualification_score) : '',
                 csvEscape(i.qualification_status),
                 csvEscape((i.filter_reasons || []).join('; ')),
                 i.air_aqi !== null && i.air_aqi !== undefined ? i.air_aqi : '',
@@ -4543,7 +4543,7 @@
             subtitle.textContent = `Zestawienie parametrów dla ${targetItems.length} wybranych nieruchomości`;
 
             const minPrice = Math.min(...targetItems.map(i => i.price || Infinity));
-            const maxScore = Math.max(...targetItems.map(i => i.match_score || 0));
+            const maxScore = Math.max(...targetItems.map(i => i.qualification_score || 0));
 
             const params = [
                 { label: 'Cena ofertowa', render: i => `<strong class="num ${i.price === minPrice ? 'compare-highlight-best' : ''}">${i.price ? formatPrice(i.price) : '—'}</strong>` },
@@ -4554,9 +4554,9 @@
                 { label: 'Stan wykończenia', render: i => escapeHtml(i.finish_condition || '—') },
                 { label: 'Rok budowy / Pokoje', render: i => `${i.year_built || '—'} · ${i.rooms ? i.rooms + ' pok.' : '—'}` },
                 { label: 'Ogrzewanie & Ścieki', render: i => `${escapeHtml(i.heating || '—')} / ${escapeHtml(i.sewerage || '—')}` },
-                { label: 'Internet / Światłowód', render: i => i.has_fiber ? '✓ Światłowód' : (escapeHtml(i.broadband_status || '—')) },
+                { label: 'Internet / Światłowód', render: i => i.has_fiber ? 'Światłowód' : (escapeHtml(i.broadband_status || '—')) },
                 { label: 'Jakość powietrza (AQI)', render: i => i.air_aqi !== null && i.air_aqi !== undefined ? `AQI ${i.air_aqi} (${escapeHtml(i.air_aqi_label || '')})` : '—' },
-                { label: 'Kwalifikacja & Score', render: i => `<span class="num ${i.match_score === maxScore ? 'compare-highlight-best' : ''}">Score: ${i.match_score !== null && i.match_score !== undefined ? Math.round(i.match_score) : '—'}</span>` },
+                { label: 'Kwalifikacja & Score', render: i => `<span class="num ${i.qualification_score === maxScore ? 'compare-highlight-best' : ''}">Score: ${i.qualification_score !== null && i.qualification_score !== undefined ? Math.round(i.qualification_score) : '—'}</span>` },
                 { label: 'Kluczowe zalety', render: i => (i.pros || []).length > 0 ? `<ul>${i.pros.slice(0, 3).map(p => `<li>${escapeHtml(p)}</li>`).join('')}</ul>` : '—' },
                 { label: 'Uwagi / Ryzyka', render: i => (i.cons || []).length > 0 ? `<ul style="color:var(--red-text);">${i.cons.slice(0, 3).map(c => `<li>${escapeHtml(typeof c === 'string' ? c : JSON.stringify(c))}</li>`).join('')}</ul>` : '—' },
                 {
@@ -4564,7 +4564,7 @@
                     render: i => `
                         <div style="display:flex;gap:6px;flex-direction:column;margin-top:6px;">
                             <button type="button" class="btn btn-sm btn-primary" onclick="closeCompareModal(); openAiModal(${i.id});"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Otwórz audyt</button>
-                            <a href="${escapeHtml(i.url || '#')}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline">Otwórz ogłoszenie ↗</a>
+                            <a href="${escapeHtml(i.url || '#')}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline">Otwórz ogłoszenie →</a>
                         </div>
                     `
                 }
@@ -4655,7 +4655,7 @@
                     if (show && st.latest_version) {
                         statusEl.innerHTML = `<a href="${escapeHtml(st.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">Dostępna ${escapeHtml(st.latest_version)} → release notes</a>`;
                     } else if (st && st.status === 'current') {
-                        statusEl.innerHTML = `✓ aktualna (${escapeHtml(st.latest_version || 'najnowsza')})`;
+                        statusEl.innerHTML = `Aktualna (${escapeHtml(st.latest_version || 'najnowsza')})`;
                     } else {
                         statusEl.innerText = 'Brak danych o wydaniu (GitHub niedostępny)';
                     }
