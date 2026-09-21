@@ -140,6 +140,13 @@
             --font-sans: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             --font-mono: 'IBM Plex Mono', ui-monospace, 'SF Mono', 'Cascadia Mono', 'Segoe UI Mono', Consolas, monospace;
 
+            /* Semantic aliases — referenced by inline markup in config/notification
+               cards; kept here so they resolve to real tokens (no transparent/borderless
+               boxes) and stay re-themable with the rest of the system. */
+            --bg-secondary: var(--surface-2);
+            --border-color: var(--border);
+            --text-main: var(--text-primary);
+
             /* Sub-pixel inner light edge (no outer glow, ever) */
             --edge: inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
         }
@@ -2447,6 +2454,40 @@
             white-space: nowrap;
         }
 
+        /* Danger zone — reset separated from the primary save actions */
+        .config-actions-danger {
+            border-right: 1px solid var(--border);
+            padding-right: 14px;
+            margin-right: 6px;
+        }
+        .btn-reset-db {
+            background: transparent;
+            border-color: var(--red-border);
+            color: var(--red-text);
+            box-shadow: none;
+        }
+        .btn-reset-db:hover {
+            background: var(--red-bg);
+            border-color: var(--red-text);
+            color: #fca5a5;
+        }
+
+        /* Notification config cards (Powiadomienia tab) — tokenized containers */
+        .notif-sub-card {
+            margin-bottom: 14px;
+            padding: 14px;
+            background: var(--surface-2);
+            border: 1px solid var(--border);
+            border-radius: var(--r-lg);
+            transition: opacity 0.2s ease;
+        }
+        .notif-sub-card.is-master {
+            padding: 12px 14px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
         /* ==========================================================================
            9. DUE DILIGENCE DRAWER (slide-over, right side)
            ========================================================================== */
@@ -3837,9 +3878,9 @@
             display: inline-block;
             flex-shrink: 0;
         }
-        .llm-dot.ok { background: #10b981; box-shadow: 0 0 6px rgba(16, 185, 129, 0.6); }
-        .llm-dot.warn { background: #f59e0b; box-shadow: 0 0 6px rgba(245, 158, 11, 0.6); }
-        .llm-dot.err { background: #ef4444; box-shadow: 0 0 6px rgba(239, 68, 68, 0.6); }
+        .llm-dot.ok { background: #10b981; }
+        .llm-dot.warn { background: #f59e0b; }
+        .llm-dot.err { background: #ef4444; }
         .llm-dot.neutral { background: #6b7280; }
         .llm-provider-name {
             font-weight: 600;
@@ -4205,7 +4246,7 @@
         article.card.is-selected {
             outline: 2px solid var(--blue);
             outline-offset: -1px;
-            box-shadow: 0 0 16px rgba(59, 130, 246, 0.25);
+            border-color: var(--border-active);
         }
 
         .bulk-action-bar {

@@ -1101,7 +1101,7 @@
                     <div class="config-field" style="margin-top:14px;">
                         <label for="cfgLlmProvider">Aktywny dostawca AI (LLM):</label>
                         <select id="cfgLlmProvider" onchange="onLlmProviderChange(this.value)">
-                            <option value="auto">Automatyczny (OpenRouter ➔ OpenAI ➔ Silnik lokalny)</option>
+                            <option value="auto">Automatyczny (OpenRouter → OpenAI → Silnik lokalny)</option>
                             <option value="local">Lokalny silnik AI (Ollama / LM Studio / vLLM / Docker)</option>
                             <option value="openrouter">OpenRouter (chmura)</option>
                             <option value="openai">OpenAI (chmura)</option>
@@ -1291,7 +1291,7 @@
                     </div>
 
                     <!-- Master switch -->
-                    <div style="margin-bottom:14px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;display:flex;align-items:center;justify-content:space-between;">
+                    <div class="notif-sub-card is-master">
                         <div>
                             <strong style="font-size:13px;display:block;">Wszystkie powiadomienia</strong>
                             <span style="font-size:12px;color:var(--text-muted);">Główny przełącznik wysyłania alertów i raportów</span>
@@ -1302,7 +1302,7 @@
                     </div>
 
                     <!-- Telegram Card -->
-                    <div class="notification-card notif-sub-card" id="cardTelegram" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                    <div class="notification-card notif-sub-card" id="cardTelegram">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                             <div style="display:flex;align-items:center;gap:8px;">
                                 <strong style="font-size:13px;">Telegram Bot</strong>
@@ -1332,7 +1332,7 @@
                     </div>
 
                     <!-- Discord Card -->
-                    <div class="notification-card notif-sub-card" id="cardDiscord" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                    <div class="notification-card notif-sub-card" id="cardDiscord">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                             <div style="display:flex;align-items:center;gap:8px;">
                                 <strong style="font-size:13px;">Discord Webhook</strong>
@@ -1356,7 +1356,7 @@
                     </div>
 
                     <!-- Typy i zdarzenia powiadomień -->
-                    <div class="notif-sub-card" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                    <div class="notif-sub-card">
                         <strong style="font-size:13px;display:block;margin-bottom:10px;">Typy powiadomień i zdarzenia rynkowe</strong>
                         <div style="display:flex;flex-direction:column;gap:10px;">
                             <label class="check-item">
@@ -1392,7 +1392,7 @@
                     </div>
 
                     <!-- Godziny ciszy -->
-                    <div class="notif-sub-card" style="padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
+                    <div class="notif-sub-card">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                             <div>
                                 <strong style="font-size:13px;display:block;">Godziny ciszy (Quiet Hours)</strong>
@@ -1418,7 +1418,7 @@
 
             <div class="config-actions">
                 <div class="config-actions-danger">
-                    <button type="button" class="btn btn-danger btn-reset-db" onclick="resetDatabaseData()">
+                    <button type="button" class="btn btn-reset-db" onclick="resetDatabaseData()">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M3 6h18"></path>
                             <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
