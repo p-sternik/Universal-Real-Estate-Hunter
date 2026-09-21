@@ -14,6 +14,18 @@ function copyParcelCadastre(listingId) {
     }).catch(() => {});
 }
 
+// Severity dot with a non-color label (tooltip + screen reader), so the
+// danger/warning/success/info level is not conveyed by hue alone.
+function auditDot(severity) {
+    const sev = severity === 'danger' ? 'danger'
+        : (severity === 'warning' ? 'warning'
+            : (severity === 'success' ? 'success' : 'info'));
+    const label = sev === 'danger' ? 'Ryzyko'
+        : (sev === 'warning' ? 'Ostrzeżenie'
+            : (sev === 'success' ? 'OK' : 'Informacja'));
+    return `<span class="audit-dot d-${sev}" title="Poziom: ${label}" aria-label="Poziom: ${label}"></span>`;
+}
+
 // ========================
 // Due Diligence drawer content (land audit)
 // ========================
@@ -292,7 +304,7 @@ function renderLandAuditHtml(item) {
     if (commute) {
         const commuteFindings = (commute.findings || []).map(f => `
             <div class="audit-finding-item">
-                <span class="audit-dot d-${f.severity === 'danger' ? 'danger' : (f.severity === 'warning' ? 'warning' : (f.severity === 'success' ? 'success' : 'info'))}"></span>
+                ${auditDot(f.severity)}
                 <div class="audit-finding-body">
                     <div class="audit-finding-title">${f.badge ? `<span class="audit-finding-badge">${escapeHtml(f.badge)}</span>` : ''}${escapeHtml(f.title)}</div>
                     <div class="audit-finding-desc">${escapeHtml(f.desc)}</div>
@@ -380,7 +392,7 @@ function renderLandAuditHtml(item) {
     if (risk) {
         const riskFindings = (risk.findings || []).map(f => `
             <div class="audit-finding-item">
-                <span class="audit-dot d-${f.severity === 'danger' ? 'danger' : (f.severity === 'warning' ? 'warning' : (f.severity === 'success' ? 'success' : 'info'))}"></span>
+                ${auditDot(f.severity)}
                 <div class="audit-finding-body">
                     <div class="audit-finding-title">${f.badge ? `<span class="audit-finding-badge">${escapeHtml(f.badge)}</span>` : ''}${escapeHtml(f.title)}</div>
                     <div class="audit-finding-desc">${escapeHtml(f.desc)}</div>
@@ -414,7 +426,7 @@ function renderLandAuditHtml(item) {
     if (gesut) {
         const gesutFindings = (gesut.findings || []).map(f => `
             <div class="audit-finding-item">
-                <span class="audit-dot d-${f.severity === 'danger' ? 'danger' : (f.severity === 'warning' ? 'warning' : (f.severity === 'success' ? 'success' : 'info'))}"></span>
+                ${auditDot(f.severity)}
                 <div class="audit-finding-body">
                     <div class="audit-finding-title">${f.badge ? `<span class="audit-finding-badge">${escapeHtml(f.badge)}</span>` : ''}${escapeHtml(f.title)}</div>
                     <div class="audit-finding-desc">${escapeHtml(f.desc)}</div>
@@ -531,7 +543,7 @@ function renderLandAuditHtml(item) {
         const defects = (item.vision_defects || []).map(d => `<tr><th>Wada</th><td class="value">${escapeHtml(formatVisionDefect(d))}</td></tr>`).join('');
         const summaryHtml = item.vision_summary ? `
             <div class="audit-summary-note" style="margin: 8px 0 12px 0; padding: 10px 14px; background: rgba(59, 130, 246, 0.08); border-left: 3px solid var(--accent, #3b82f6); border-radius: 4px; font-size: 13px; line-height: 1.5; color: var(--text, #e2e8f0);">
-                <span style="font-size: 14px; margin-right: 4px;">💬</span> <em>${escapeHtml(item.vision_summary)}</em>
+                <em>${escapeHtml(item.vision_summary)}</em>
             </div>
         ` : '';
         const discrepancyRow = item.vision_discrepancy_note ? `
@@ -667,6 +679,7 @@ let currentAiItem = null;
 async function openAiModal(listingId, forceRefresh = false) {
     const item = allListings.find(i => i.id === listingId);
     if (!item) return;
+    if (typeof storeModalFocus === 'function') storeModalFocus('aiModal');
     currentAiItem = item;
 
     if (item.user_status === 'NEW') {
@@ -712,7 +725,9 @@ async function openAiModal(listingId, forceRefresh = false) {
     // Update AI audit button state
     const btnAiAudit = document.getElementById('btnGenerateAiAudit');
     if (btnAiAudit) {
-        btnAiAudit.innerText = item.ai_summary ? '🔄 Odśwież raport AI' : '🤖 Generuj raport AI';
+        btnAiAudit.innerHTML = item.ai_summary
+            ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path><path d="M3 21v-5h5"></path></svg> Odśwież raport AI'
+            : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Generuj raport AI';
         btnAiAudit.disabled = false;
     }
 
@@ -725,7 +740,7 @@ async function openAiModal(listingId, forceRefresh = false) {
             <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-md);border:1px dashed var(--border);">
                 <span style="color:var(--text-muted);font-size:var(--font-size-xs);">Oferta nie posiada jeszcze wygenerowanego raportu AI.</span>
                 <button class="btn btn-sm btn-ai-audit" style="align-self:flex-start;" onclick="triggerAiAuditForCurrentItem()">
-                    🤖 Generuj raport AI teraz
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Generuj raport AI teraz
                 </button>
             </div>
         `;
@@ -785,10 +800,11 @@ async function openAiModal(listingId, forceRefresh = false) {
         if (risks.length > 0) {
             riskSection.style.display = 'flex';
             const riskCards = risks.map(r => {
-                const sev = (r.severity || 'SREDNIE').toUpperCase();
+                const sevRaw = (r.severity || 'SREDNIE').toUpperCase();
+                const sev = sevRaw === 'SREDNIE' ? 'ŚREDNIE' : sevRaw;
                 let badgeCls = 'audit-verdict-warning';
-                if (sev.includes('KRYT') || sev.includes('WYSOK')) badgeCls = 'audit-verdict-danger';
-                else if (sev.includes('NISK')) badgeCls = 'audit-verdict-success';
+                if (sevRaw.includes('KRYT') || sevRaw.includes('WYSOK')) badgeCls = 'audit-verdict-danger';
+                else if (sevRaw.includes('NISK')) badgeCls = 'audit-verdict-success';
 
                 return `
                     <div style="background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);padding:8px 10px;display:flex;flex-direction:column;gap:4px;">
@@ -988,6 +1004,7 @@ async function openAiModal(listingId, forceRefresh = false) {
 function closeAiModal(e) {
     if (e && e.target && e.target.id !== 'aiModal') return;
     document.getElementById('aiModal').classList.remove('open');
+    if (typeof restoreModalFocus === 'function') restoreModalFocus('aiModal');
     const closedId = currentAiItem ? currentAiItem.id : null;
     currentAiItem = null;
     if (closedId) {
@@ -1156,6 +1173,11 @@ function copyAiDocuments() {
     navigator.clipboard.writeText(text).then(() => showToast('Checklista dokumentów skopiowana do schowka.'));
 }
 
+function drawerToggleStatus(targetStatus) {
+    if (!currentAiItem) return;
+    if (typeof toggleStatus === 'function') toggleStatus(currentAiItem.id, targetStatus);
+}
+
 function copyAiSms() {
     if (!currentAiItem) return;
     const item = currentAiItem;
@@ -1212,7 +1234,7 @@ async function triggerAiAuditForCurrentItem() {
                 <div style="display:flex;flex-direction:column;gap:8px;padding:10px 12px;background:var(--surface-2);border-radius:var(--r-md);border:1px dashed var(--border);">
                     <span style="color:var(--red-text);font-size:var(--font-size-xs);">Nie udało się wygenerować raportu: ${escapeHtml(err.message)}</span>
                     <button class="btn btn-sm btn-ai-audit" style="align-self:flex-start;" onclick="triggerAiAuditForCurrentItem()">
-                        🔄 Ponów próbę
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path><path d="M3 21v-5h5"></path></svg> Ponów próbę
                     </button>
                 </div>
             `;
@@ -1220,7 +1242,9 @@ async function triggerAiAuditForCurrentItem() {
     } finally {
         if (btn) {
             btn.disabled = false;
-            btn.innerHTML = item.ai_summary ? '🔄 Odśwież raport AI' : '🤖 Generuj raport AI';
+            btn.innerHTML = item.ai_summary
+                ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M21 3v5h-5"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path><path d="M3 21v-5h5"></path></svg> Odśwież raport AI'
+                : '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Generuj raport AI';
         }
     }
 }

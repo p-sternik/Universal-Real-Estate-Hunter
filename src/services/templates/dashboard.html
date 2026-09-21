@@ -98,17 +98,23 @@
 
         <!-- ===== COMMAND BAR: Row 2 (Pipeline + Search + Views + Filters) ===== -->
         <section class="command-bar">
-            <div class="pipeline">
+            <div class="pipeline" role="tablist" aria-label="Lejek ofert">
                 <button class="pipe-item active" data-filter="ALL" onclick="setFilter('ALL', this)">Wszystkie <b id="stTotal">0</b></button>
                 <button class="pipe-item" data-filter="NEW" onclick="setFilter('NEW', this)" title="Oferty z ostatniego przebiegu">Nowe <b id="stNew">0</b></button>
                 <button class="pipe-item" data-filter="QUALIFIED" onclick="setFilter('QUALIFIED', this)">Kwalifikacja <b id="stQualified">0</b></button>
+                <button class="pipe-item" data-filter="NEEDS_REVIEW" onclick="setFilter('NEEDS_REVIEW', this)">Do weryfikacji <b id="cntRev">0</b></button>
+                <button class="pipe-item pipe-more-trigger" id="pipeMoreBtn" onclick="togglePipeMore(event)" aria-haspopup="menu" aria-expanded="false" title="Więcej segmentów lejka">
+                    Więcej
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                </button>
+            </div>
+
+            <div class="pipe-more-body" id="pipeMoreBody" hidden role="menu">
                 <button class="pipe-item" data-filter="QUALIFIED_WHITELIST" onclick="setFilter('QUALIFIED_WHITELIST', this)">Whitelist <b id="stWhitelist">0</b></button>
-                <button class="pipe-item" data-filter="REJECTED" onclick="setFilter('REJECTED', this)">Odrzucone <b id="cntRej">0</b></button>
-                <span class="pipe-divider"></span>
                 <button class="pipe-item" data-filter="CRM_FAVORITE" onclick="setFilter('CRM_FAVORITE', this)">Ulubione <b id="stFavorite">0</b></button>
                 <button class="pipe-item" data-filter="CRM_TO_VISIT" onclick="setFilter('CRM_TO_VISIT', this)">Do wizyty <b id="stToVisit">0</b></button>
-                <button class="pipe-item" data-filter="NEEDS_REVIEW" onclick="setFilter('NEEDS_REVIEW', this)">Do weryfikacji <b id="cntRev">0</b></button>
                 <button class="pipe-item" data-filter="NEEDS_REVIEW_BORDERLINE" onclick="setFilter('NEEDS_REVIEW_BORDERLINE', this)" title="Oferty graniczne: wartości blisko progów filtrów lub stan do remontu">Graniczne <b id="cntBorder">0</b></button>
+                <button class="pipe-item" data-filter="REJECTED" onclick="setFilter('REJECTED', this)">Odrzucone <b id="cntRej">0</b></button>
             </div>
 
             <div class="faceted-search">
@@ -137,26 +143,31 @@
                     <span>Filtry</span>
                     <span class="filters-count num" id="activeFilterCount"></span>
                 </button>
-                <div class="sort-wrap">
-                    <select id="sortSelect" onchange="applyFilters()" aria-label="Sortowanie">
-                        <option value="score_desc">Score</option>
-                        <option value="price_asc">Cena (od najniższej)</option>
-                        <option value="price_desc">Cena (od najwyższej)</option>
-                        <option value="area_desc">Metraż (od największego)</option>
-                        <option value="price_m2_asc">Cena / m² (najniższa)</option>
-                        <option value="created_desc">Data (najnowsze)</option>
-                        <option value="deal_desc">Okazje (% vs mediana)</option>
-                        <option value="drop_desc">Obniżki cen</option>
-                    </select>
-                </div>
-                <button class="btn btn-sm export-csv-btn" onclick="exportCurrentListingsToCsv()" title="Eksportuj aktualne wyniki do pliku CSV">
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-                        <polyline points="7 10 12 15 17 10"></polyline>
-                        <line x1="12" y1="15" x2="12" y2="3"></line>
-                    </svg>
-                    <span>CSV</span>
-                </button>
+                <details class="tools-more">
+                    <summary class="btn btn-sm tools-more-btn" aria-label="Narzędzia sortowania i eksportu" title="Sortowanie i eksport">⋯</summary>
+                    <div class="tools-more-body">
+                        <div class="sort-wrap">
+                            <select id="sortSelect" onchange="applyFilters()" aria-label="Sortowanie">
+                                <option value="score_desc">Score</option>
+                                <option value="price_asc">Cena (od najniższej)</option>
+                                <option value="price_desc">Cena (od najwyższej)</option>
+                                <option value="area_desc">Metraż (od największego)</option>
+                                <option value="price_m2_asc">Cena / m² (najniższa)</option>
+                                <option value="created_desc">Data (najnowsze)</option>
+                                <option value="deal_desc">Okazje (% vs mediana)</option>
+                                <option value="drop_desc">Obniżki cen</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-sm export-csv-btn" onclick="exportCurrentListingsToCsv()" title="Eksportuj aktualne wyniki do pliku CSV">
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                                <polyline points="7 10 12 15 17 10"></polyline>
+                                <line x1="12" y1="15" x2="12" y2="3"></line>
+                            </svg>
+                            <span>CSV</span>
+                        </button>
+                    </div>
+                </details>
                 <div class="segmented-switcher" role="group" aria-label="Widok">
                     <button class="view-btn" id="btnViewGrid" onclick="switchViewMode('grid')" title="Siatka kafelków">
                         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -210,9 +221,11 @@
                 </div>
             </div>
             <div class="filters-grid">
-                <div class="field-group">
+                <!-- Single source of truth dla perspektywy i profilu: topbar.
+                     Pola zachowane w DOM (hidden) wyłącznie do synchronizacji JS. -->
+                <div class="field-group" hidden>
                     <label for="filterPerspective">Perspektywa bazy</label>
-                    <select id="filterPerspective" onchange="setViewMode(this.value)">
+                    <select id="filterPerspective" onchange="setViewMode(this.value)" tabindex="-1">
                         <option value="ALL">Cała baza</option>
                         <option value="NEW_CYCLE">Ostatni przebieg</option>
                         <option value="UPDATED_CYCLE">Korekty cen</option>
@@ -229,9 +242,9 @@
                         <option value="dzialka">Działki</option>
                     </select>
                 </div>
-                <div class="field-group">
+                <div class="field-group" hidden>
                     <label for="filterProfile">Profil</label>
-                    <select id="filterProfile" onchange="applyFilters()">
+                    <select id="filterProfile" onchange="applyFilters()" tabindex="-1">
                         <option value="ALL">Wszystkie profile</option>
                     </select>
                 </div>
@@ -281,9 +294,9 @@
                 </div>
                 <div class="field-group">
                     <label for="filterVis">Zdjęcia</label>
-                    <select id="filterVis" onchange="applyFilters()">
+                    <select id="filterVis" onchange="applyFilters()" aria-label="Zdjęcia oferty">
                         <option value="ALL">Wszystkie</option>
-                        <option value="NO_VIS">Tylko realne zdjęcia</option>
+                        <option value="NO_VIS">Ze zdjęciami (bez wizualizacji)</option>
                         <option value="ONLY_VIS">Tylko wizualizacje</option>
                     </select>
                 </div>
@@ -405,15 +418,32 @@
                     <div class="map-aqi-row"><span class="aqi-swatch aqi-bad"></span> &gt; 25 µg/m³ (Smog)</div>
                     <div class="map-aqi-row"><span class="aqi-swatch aqi-unknown"></span> Brak danych</div>
                 </div>
+                <div class="map-status-legend" id="mapStatusLegend">
+                    <button type="button" class="map-legend-toggle" id="mapStatusLegendToggle" onclick="toggleStatusLegend()" aria-expanded="false" aria-controls="mapStatusLegendBody" title="Pokaż lub ukryj legendę statusów ofert">
+                        <span class="map-aqi-title">Status ofert</span>
+                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
+                    </button>
+                    <div class="map-legend-body" id="mapStatusLegendBody" style="display:none;">
+                        <div class="map-aqi-row"><span class="pin-swatch pin-gold"></span> Ulubione</div>
+                        <div class="map-aqi-row"><span class="pin-swatch pin-purple"></span> Do wizyty</div>
+                        <div class="map-aqi-row"><span class="pin-swatch pin-green"></span> Sprawdzone / Whitelist</div>
+                        <div class="map-aqi-row"><span class="pin-swatch pin-gray"></span> Odrzucone</div>
+                        <div class="map-aqi-row"><span class="pin-swatch pin-orange"></span> Do weryfikacji</div>
+                        <div class="map-aqi-row"><span class="pin-swatch pin-blue"></span> Oferta</div>
+                    </div>
+                </div>
             </div>
             <div class="listings-column">
                 <div class="results-count">
                     <span class="results-summary">Wyniki: <b id="cntFiltered">0</b> / <b id="cntTotalAll">0</b> <span class="results-sep">·</span> <span class="results-avg">Śr. <b id="stAvgPrice">—</b></span></span>
                 </div>
                 <div class="listings-container" id="listingsContainer">
-                    <div style="text-align: center; padding: 40px; color: var(--text-muted);">
-                        Ładowanie ofert z bazy danych…
-                    </div>
+                    <div class="skeleton-card"><div class="sk-media"></div><div class="sk-body"><div class="sk-line h-xl w-40"></div><div class="sk-line w-85"></div><div class="sk-line w-60"></div></div></div>
+                    <div class="skeleton-card"><div class="sk-media"></div><div class="sk-body"><div class="sk-line h-xl w-40"></div><div class="sk-line w-85"></div><div class="sk-line w-60"></div></div></div>
+                    <div class="skeleton-card"><div class="sk-media"></div><div class="sk-body"><div class="sk-line h-xl w-40"></div><div class="sk-line w-85"></div><div class="sk-line w-60"></div></div></div>
+                    <div class="skeleton-card"><div class="sk-media"></div><div class="sk-body"><div class="sk-line h-xl w-40"></div><div class="sk-line w-85"></div><div class="sk-line w-60"></div></div></div>
+                    <div class="skeleton-card"><div class="sk-media"></div><div class="sk-body"><div class="sk-line h-xl w-40"></div><div class="sk-line w-85"></div><div class="sk-line w-60"></div></div></div>
+                    <div class="skeleton-card"><div class="sk-media"></div><div class="sk-body"><div class="sk-line h-xl w-40"></div><div class="sk-line w-85"></div><div class="sk-line w-60"></div></div></div>
                 </div>
                 <div class="listings-table-container" id="listingsTableContainer" style="display:none;">
                     <table class="listings-table" id="listingsTable">
@@ -452,19 +482,19 @@
                 <span>Porównaj</span>
             </button>
             <button type="button" class="btn btn-sm" onclick="bulkSetStatus('FAVORITE')" title="Dodaj wybrane do ulubionych">
-                ★ Ulubione
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg> Ulubione
             </button>
             <button type="button" class="btn btn-sm" onclick="bulkSetStatus('TO_VISIT')" title="Dodaj wybrane do listy wizyt">
-                🚗 Do wizyty
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M19 17h2c.6 0 1-.4 1-1v-3c0-.9-.7-1.7-1.5-1.9C18.7 10.6 16 10 16 10s-1.3-1.4-2.2-2.3c-.5-.4-1.1-.7-1.8-.7H5c-.6 0-1.1.4-1.4.9l-1.4 2.9A3.7 3.7 0 0 0 2 12v4c0 .6.4 1 1 1h2"></path><circle cx="7" cy="17" r="2"></circle><path d="M9 17h6"></path><circle cx="17" cy="17" r="2"></circle></svg> Do wizyty
             </button>
             <button type="button" class="btn btn-sm" onclick="bulkSetStatus('CHECKED')" title="Oznacz wybrane jako sprawdzone">
-                ✓ Sprawdzone
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"></path></svg> Sprawdzone
             </button>
             <button type="button" class="btn btn-sm" onclick="bulkSetStatus('REJECTED')" title="Odrzuć wybrane oferty">
-                ✕ Odrzuć
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg> Odrzuć
             </button>
             <button type="button" class="btn btn-sm" onclick="exportSelectedListingsToCsv()" title="Eksportuj tylko zaznaczone do CSV">
-                📥 CSV
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> CSV
             </button>
             <button type="button" class="btn btn-sm btn-ghost" onclick="clearSelectedListings()" title="Odznacz wszystkie">
                 Odznacz
@@ -473,7 +503,7 @@
     </div>
 
     <!-- ===== SIDE-BY-SIDE COMPARISON MODAL ===== -->
-    <div id="compareModal" class="modal-backdrop compare-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeCompareModal()">
+    <div id="compareModal" class="modal-backdrop compare-modal-backdrop" style="display:none;" onclick="if(event.target===this)closeCompareModal()" role="dialog" aria-modal="true" aria-label="Porównanie ofert nieruchomości">
         <div class="modal-dialog compare-dialog">
             <div class="modal-header compare-header">
                 <div>
@@ -481,7 +511,7 @@
                     <div class="modal-subtitle" id="compareSubtitle">Zestawienie parametrów technicznych, prawnych i finansowych</div>
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
-                    <button type="button" class="btn btn-sm btn-outline" onclick="exportCompareToCsv()" title="Eksportuj porównanie do CSV">📥 Pobierz CSV</button>
+                    <button type="button" class="btn btn-sm btn-outline" onclick="exportCompareToCsv()" title="Eksportuj porównanie do CSV"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg> Pobierz CSV</button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="closeCompareModal()" aria-label="Zamknij porównanie">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 6 6 18"></path>
@@ -515,8 +545,27 @@
         </svg>
     </button>
 
+    <!-- ===== CONFIRM / PROMPT MODAL (replaces native alert/confirm/prompt) ===== -->
+    <div id="confirmModal" class="confirm-modal-backdrop" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="confirmModalTitle">
+        <div class="confirm-dialog">
+            <div class="confirm-header">
+                <h2 class="confirm-title" id="confirmModalTitle">Potwierdź</h2>
+            </div>
+            <div class="confirm-body">
+                <p class="confirm-message" id="confirmModalMessage"></p>
+                <div class="confirm-input-wrap" id="confirmModalInputWrap" style="display:none;">
+                    <input type="text" id="confirmModalInput" class="confirm-input" autocomplete="off" spellcheck="false" aria-label="Wartość potwierdzenia">
+                </div>
+            </div>
+            <div class="confirm-actions">
+                <button type="button" class="btn btn-sm" id="confirmModalCancel">Anuluj</button>
+                <button type="button" class="btn btn-sm btn-primary" id="confirmModalOk">Potwierdź</button>
+            </div>
+        </div>
+    </div>
+
     <!-- ===== IMAGE LIGHTBOX ===== -->
-    <div id="imgModal" onclick="closeImgModal()">
+    <div id="imgModal" onclick="closeImgModal()" role="dialog" aria-modal="true" aria-label="Podgląd zdjęcia oferty">
         <span id="imgModalClose" onclick="closeImgModal()">&times;</span>
         <button id="imgModalPrev" class="img-modal-btn prev" onclick="event.stopPropagation(); navModalGallery(-1)" title="Poprzednie zdjęcie">&#10094;</button>
         <div class="img-modal-content" onclick="event.stopPropagation()">
@@ -527,7 +576,7 @@
     </div>
 
     <!-- ===== CONFIG MODAL ===== -->
-    <div id="configModal" onclick="closeConfigModal(event)">
+    <div id="configModal" onclick="closeConfigModal(event)" role="dialog" aria-modal="true" aria-label="Konfiguracja wyszukiwania i scraperów">
         <div class="config-card" onclick="event.stopPropagation()">
             <div class="config-header">
                 <div>
@@ -909,7 +958,7 @@
                         <input type="text" id="cfgNewDestAddress" class="config-chips-input" placeholder="Adres (np. ul. Ciepłownicza 12, Rzeszów)" style="flex:2 1 260px;">
                         <button type="button" class="btn btn-sm" id="btnGeocodeDest" onclick="geocodeNewDestination()">Szukaj adresu</button>
                     </div>
-                    <div style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+                    <div style="font-size:12px;color:var(--text-muted);margin-top:6px;">
                         Po wyszukaniu adresu współrzędne uzupełnią się automatycznie (możesz je też wpisać ręcznie).
                         Zmiany zapisują się razem z pozostałymi ustawieniami.
                     </div>
@@ -982,7 +1031,7 @@
                             <input type="checkbox" id="cfgSchedulerEnabled" checked style="width:auto;" onchange="toggleSchedulerInputs(this.checked)">
                             <span><strong>Włącz harmonogram (daemon)</strong></span>
                         </label>
-                        <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
                             Po wyłączeniu <code>python main.py run</code> nie uruchamia cykli (ręczna synchronizacja nadal działa).
                         </div>
                     </div>
@@ -1008,7 +1057,7 @@
                             <input type="checkbox" id="cfgNightMode" checked style="width:auto;" onchange="toggleNightModeInputs(this.checked)">
                             <span><strong>Włącz tryb nocny / godziny ciszy</strong></span>
                         </label>
-                        <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
                             Zmniejsza częstotliwość scrapowania w nocy, gdy nie pojawiają się nowe ogłoszenia.
                         </div>
                     </div>
@@ -1048,7 +1097,7 @@
                             <input type="checkbox" id="cfgLlmAnalysis" style="width:auto;">
                             <span><strong>Włącz analizę AI (LLM) ogłoszeń</strong></span>
                         </label>
-                        <div style="font-size:11px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-left:22px;margin-top:2px;">
                             Generuje syntezę, pytania do agenta i dane kontaktowe dla każdego ogłoszenia.<br>
                             Wspiera dostawców w łańcuchu: <code>OpenRouter</code> &rarr; <code>OpenAI</code> &rarr; <code>Ollama (lokalny)</code>.
                         </div>
@@ -1062,7 +1111,7 @@
                             <option value="openrouter">OpenRouter (chmura)</option>
                             <option value="openai">OpenAI (chmura)</option>
                         </select>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;" id="llmProviderDesc">
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;" id="llmProviderDesc">
                             Tryb automatyczny najpierw sprawdza chmurę (OpenRouter/OpenAI), a w razie braku — lokalny silnik.
                         </div>
                     </div>
@@ -1071,7 +1120,7 @@
                     <div class="config-field" style="margin-top:14px;">
                         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
                             <label style="margin-bottom:0;">Lokalny silnik AI na Twoim komputerze:</label>
-                            <span id="localPresetBadge" style="font-size:11px;color:var(--text-muted);">Preset: Ollama</span>
+                            <span id="localPresetBadge" style="font-size:12px;color:var(--text-muted);">Preset: Ollama</span>
                         </div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
                             <button type="button" class="btn btn-sm" id="btnPresetOllama" onclick="setLocalEnginePreset('ollama')">Ollama (:11434)</button>
@@ -1091,7 +1140,7 @@
                                 <input type="number" id="cfgLocalTimeout" placeholder="180" step="10" min="10" style="width:100%;">
                             </div>
                         </div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;margin-bottom:10px;">
                             W Dockerze użyj <code>http://host.docker.internal:...</code>. Większe modele mogą potrzebować dłuższego timeoutu.
                         </div>
 
@@ -1109,7 +1158,7 @@
                         <div class="config-input-chips-group">
                             <input type="text" id="cfgLocalModel" placeholder="qwen2.5:7b" class="config-chips-input" oninput="onLocalModelInputCustom(this.value)">
                         </div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
                             Wybierz z listy zainstalowanych modeli lub wpisz własną nazwę modelu.
                         </div>
 
@@ -1149,7 +1198,7 @@
                             <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('meta-llama/llama-3.3-70b-instruct:free')">llama-3.3-70b:free</button>
                             <button type="button" class="btn btn-sm" onclick="setOpenRouterModelChip('deepseek/deepseek-chat')">deepseek-chat</button>
                         </div>
-                        <div id="openrouterKeyNotice" style="font-size:11px;color:var(--text-muted);margin-top:4px;">
+                        <div id="openrouterKeyNotice" style="font-size:12px;color:var(--text-muted);margin-top:4px;">
                             Wpisz model z OpenRouter. Dostępne gdy w pliku .env skonfigurowano klucze OPENROUTER_API_KEY lub OPENAI_API_KEY.
                         </div>
                     </div>
@@ -1157,7 +1206,7 @@
                     <!-- Vision AI (audyt zdjęć: rendery, stan wykończenia, rzuty, wady) -->
                     <div class="config-field" style="margin-top:14px;">
                         <label style="margin-bottom:6px;">Vision AI — model do audytu zdjęć ofert (niezależny od modelu tekstowego):</label>
-                        <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-bottom:6px;">
                             Modele tekstowe (qwen2.5, bielik…) nie analizują zdjęć — lista zawiera wyłącznie modele multimodalne.
                         </div>
                         <div style="display:flex;gap:8px;align-items:center;margin-bottom:6px;">
@@ -1201,7 +1250,7 @@
                                 </div>
                             </div>
                         </div>
-                        <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">
                             Puste Base URL = auto (silnik lokalny gdy aktywny dostawca lokalny, OpenRouter lub OpenAI). API chmurowe wymaga klucza w .env (VISION_API_KEY, OPENROUTER_API_KEY lub OPENAI_API_KEY); Ollama nie wymaga klucza.<br>
                             Zdjęcia ofertowe są automatycznie skalowane do optymalnej rozdzielczości przed wysłaniem do modelu wizyjnego.<br>
                             Kliknij „Sprawdź połączenie” poniżej — wykryte lokalnie modele wizyjne pojawią się na liście powyżej.
@@ -1250,7 +1299,7 @@
                     <div style="margin-bottom:14px;padding:12px 14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;display:flex;align-items:center;justify-content:space-between;">
                         <div>
                             <strong style="font-size:13px;display:block;">Wszystkie powiadomienia</strong>
-                            <span style="font-size:11px;color:var(--text-muted);">Główny przełącznik wysyłania alertów i raportów</span>
+                            <span style="font-size:12px;color:var(--text-muted);">Główny przełącznik wysyłania alertów i raportów</span>
                         </div>
                         <label class="check-item" style="margin:0;font-weight:600;">
                             <input type="checkbox" id="cfgNotifyMasterEnabled" checked onchange="toggleMasterNotificationInputs(this.checked)"> Aktywne
@@ -1261,7 +1310,6 @@
                     <div class="notification-card notif-sub-card" id="cardTelegram" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                             <div style="display:flex;align-items:center;gap:8px;">
-                                <span style="font-size:16px;">✈️</span>
                                 <strong style="font-size:13px;">Telegram Bot</strong>
                             </div>
                             <label class="check-item" style="margin:0;">
@@ -1283,7 +1331,7 @@
                                 <button type="button" class="btn btn-sm" id="btnTestTelegram" onclick="triggerTestNotification('telegram')">
                                     <span>Wyślij test Telegram</span>
                                 </button>
-                                <span id="telegramTestStatus" style="font-size:11px;color:var(--text-muted);"></span>
+                                <span id="telegramTestStatus" style="font-size:12px;color:var(--text-muted);"></span>
                             </div>
                         </div>
                     </div>
@@ -1292,7 +1340,6 @@
                     <div class="notification-card notif-sub-card" id="cardDiscord" style="margin-bottom:14px;padding:14px;background:var(--bg-secondary);border:1px solid var(--border-color);border-radius:8px;transition:opacity 0.2s ease;">
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                             <div style="display:flex;align-items:center;gap:8px;">
-                                <span style="font-size:16px;">💬</span>
                                 <strong style="font-size:13px;">Discord Webhook</strong>
                             </div>
                             <label class="check-item" style="margin:0;">
@@ -1308,7 +1355,7 @@
                                 <button type="button" class="btn btn-sm" id="btnTestDiscord" onclick="triggerTestNotification('discord')">
                                     <span>Wyślij test Discord</span>
                                 </button>
-                                <span id="discordTestStatus" style="font-size:11px;color:var(--text-muted);"></span>
+                                <span id="discordTestStatus" style="font-size:12px;color:var(--text-muted);"></span>
                             </div>
                         </div>
                     </div>
@@ -1319,15 +1366,15 @@
                         <div style="display:flex;flex-direction:column;gap:10px;">
                             <label class="check-item">
                                 <input type="checkbox" id="cfgNotifyNewQualified" checked>
-                                <span>⭐ <strong>Nowa zakwalifikowana oferta</strong> (spełniająca reguły i filtry profilu)</span>
+                                <span><strong>Nowa zakwalifikowana oferta</strong> (spełniająca reguły i filtry profilu)</span>
                             </label>
                             <label class="check-item">
                                 <input type="checkbox" id="cfgNotifyPriceDrop" checked>
-                                <span>📉 <strong>Obniżka ceny</strong> w obserwowanej ofercie</span>
+                                <span><strong>Obniżka ceny</strong> w obserwowanej ofercie</span>
                             </label>
                             <label class="check-item">
                                 <input type="checkbox" id="cfgNotifyCycleSummary" checked onchange="toggleCycleSummaryInputs(this.checked)">
-                                <span>🏁 <strong>Podsumowanie każdego cyklu scrapingu</strong> (czas wykonania, przeszukane oferty, nowe okazje)</span>
+                                <span><strong>Podsumowanie każdego cyklu scrapingu</strong> (czas wykonania, przeszukane oferty, nowe okazje)</span>
                             </label>
                             <div id="cycleSummaryOnlyChangesRow" style="margin-left:24px;transition:opacity 0.2s ease;">
                                 <label class="check-item">
@@ -1337,7 +1384,7 @@
                             </div>
                             <label class="check-item">
                                 <input type="checkbox" id="cfgNotifyErrors" checked>
-                                <span>🚨 <strong>Alerty o błędach systemu</strong> (blokady IP/403, błędy bazy danych, awarie API)</span>
+                                <span><strong>Alerty o błędach systemu</strong> (blokady IP/403, błędy bazy danych, awarie API)</span>
                             </label>
                         </div>
 
@@ -1354,7 +1401,7 @@
                         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
                             <div>
                                 <strong style="font-size:13px;display:block;">Godziny ciszy (Quiet Hours)</strong>
-                                <span style="font-size:11px;color:var(--text-muted);">Wstrzymuje wysyłanie alertów w wybranym przedziale czasowym</span>
+                                <span style="font-size:12px;color:var(--text-muted);">Wstrzymuje wysyłanie alertów w wybranym przedziale czasowym</span>
                             </div>
                             <label class="check-item" style="margin:0;">
                                 <input type="checkbox" id="cfgNotifyQuietEnabled" onchange="toggleQuietHoursInputs(this.checked)"> Włączone
@@ -1413,7 +1460,7 @@
     </div>
 
     <!-- ===== DUE DILIGENCE DRAWER ===== -->
-    <div id="aiModal" class="drawer-overlay" onclick="closeAiModal(event)">
+    <div id="aiModal" class="drawer-overlay" onclick="closeAiModal(event)" role="dialog" aria-modal="true" aria-label="Raport audytu nieruchomości">
         <aside class="drawer" onclick="event.stopPropagation()">
             <div class="drawer-header">
                 <div class="drawer-title">
@@ -1422,10 +1469,10 @@
                 </div>
                 <div style="display: flex; gap: 8px; align-items: center;">
                     <button type="button" id="btnPrintAiAudit" class="btn btn-sm btn-outline" onclick="window.print()" title="Drukuj lub zapisz raport audytu jako PDF">
-                        🖨️ PDF / Drukuj
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"></path><rect x="6" y="14" width="12" height="8" rx="1"></rect></svg> PDF / Drukuj
                     </button>
                     <button type="button" id="btnGenerateAiAudit" class="btn btn-sm btn-ai-audit" onclick="triggerAiAuditForCurrentItem()" title="Wygeneruj lub odśwież analizę AI dla tej oferty">
-                        🤖 Generuj raport AI
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Generuj raport AI
                     </button>
                     <button type="button" class="btn btn-ghost btn-sm" onclick="closeAiModal(null)" aria-label="Zamknij raport">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1448,32 +1495,39 @@
                         Rekomendacja
                     </h3>
                     <div id="aiVerdictBadge" class="verdict-badge"></div>
-                    <div id="aiVerdictContent" class="drawer-text"></div>
+                    <div id="aiVerdictContent" class="drawer-text"><p class="drawer-empty">Brak werdyktu — wygeneruj raport AI.</p></div>
                 </section>
 
-                <!-- Synteza -->
-                <section class="drawer-section">
+                <!-- Zidentyfikowane ryzyka i plan działań -->
+                <section class="drawer-section" id="aiStructuredRisksSection" style="display:none;">
                     <h3 class="drawer-section-title">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M4 6h16"></path>
-                            <path d="M4 12h10"></path>
-                            <path d="M4 18h6"></path>
+                            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
+                            <line x1="12" y1="9" x2="12" y2="13"></line>
+                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
                         </svg>
-                        Synteza oferty i wnioski
+                        Zidentyfikowane ryzyka i plan działań
                     </h3>
-                    <div id="aiSummaryContent" class="drawer-text"></div>
+                    <div id="aiStructuredRisksContent"><p class="drawer-empty">Brak ryzyk — wygeneruj raport AI.</p></div>
                 </section>
 
-                <!-- Audyt przestrzenny, CAPEX, GESUT -->
-                <section class="drawer-section" id="aiSpatialSection" style="display:none;">
+                <!-- Wycena rynkowa i argumentacja negocjacyjna -->
+                <section class="drawer-section" id="aiNegotiationSection">
                     <h3 class="drawer-section-title">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path>
-                            <circle cx="7.5" cy="7.5" r=".5"></circle>
+                            <path d="M12 2v20"></path>
+                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
                         </svg>
-                        Audyt przestrzenny, finansowy i prawny
+                        Wycena rynkowa i argumentacja negocjacyjna
+                        <button class="copy-inline-btn" id="btnCopyNegArgs" onclick="copyNegotiationArguments()" title="Kopiuj argumenty do negocjacji">
+                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                                <rect x="9" y="9" width="13" height="13" rx="2"></rect>
+                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
+                            </svg>
+                            Kopiuj
+                        </button>
                     </h3>
-                    <div id="aiSpatialContent"></div>
+                    <div id="aiNegotiationContent"><p class="drawer-empty">Brak wyceny — wygeneruj raport AI.</p></div>
                 </section>
 
                 <!-- Kontakt -->
@@ -1489,22 +1543,39 @@
                             <div class="contact-name" id="aiContactPerson"></div>
                             <a class="contact-phone" id="aiContactPhone" href=""></a>
                         </div>
-                        <button class="audit-copy-btn" onclick="copyAiSms()" title="Kopiuj gotową wiadomość SMS">Kopiuj SMS</button>
+                        <button class="copy-inline-btn" onclick="copyAiSms()" title="Kopiuj gotową wiadomość SMS">Kopiuj SMS</button>
                     </div>
                 </section>
 
-                <!-- Zidentyfikowane ryzyka i plan działań -->
-                <section class="drawer-section" id="aiStructuredRisksSection" style="display:none;">
+                <!-- Synteza -->
+                <section class="drawer-section">
                     <h3 class="drawer-section-title">
                         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"></path>
-                            <line x1="12" y1="9" x2="12" y2="13"></line>
-                            <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                            <path d="M4 6h16"></path>
+                            <path d="M4 12h10"></path>
+                            <path d="M4 18h6"></path>
                         </svg>
-                        Zidentyfikowane ryzyka i plan działań
+                        Synteza oferty i wnioski
                     </h3>
-                    <div id="aiStructuredRisksContent"></div>
+                    <div id="aiSummaryContent" class="drawer-text"><p class="drawer-empty">Brak syntezy — wygeneruj raport AI.</p></div>
                 </section>
+
+                <!-- Szczegóły audytu (drugorzędne sekcje) -->
+                <details class="drawer-more">
+                    <summary>Szczegóły audytu</summary>
+                <!-- Audyt przestrzenny, CAPEX, GESUT -->
+                <section class="drawer-section" id="aiSpatialSection" style="display:none;">
+                    <h3 class="drawer-section-title">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M12.586 2.586A2 2 0 0 0 11.172 2H4a2 2 0 0 0-2 2v7.172a2 2 0 0 0 .586 1.414l8.704 8.704a2.426 2.426 0 0 0 3.42 0l6.58-6.58a2.426 2.426 0 0 0 0-3.42z"></path>
+                            <circle cx="7.5" cy="7.5" r=".5"></circle>
+                        </svg>
+                        Audyt przestrzenny, finansowy i prawny
+                    </h3>
+                    <div id="aiSpatialContent"><p class="drawer-empty">Brak audytu — wygeneruj raport AI.</p></div>
+                </section>
+
+                <!-- (Kontakt przeniesiony wyżej, obok wyceny) -->
 
                 <!-- Checklista dokumentów przed zakupem -->
                 <section class="drawer-section" id="aiDocumentsSection" style="display:none;">
@@ -1548,24 +1619,7 @@
                     <ul id="aiQuestionsList" class="questions-list"></ul>
                 </section>
 
-                <!-- Wycena rynkowa i argumentacja negocjacyjna -->
-                <section class="drawer-section" id="aiNegotiationSection">
-                    <h3 class="drawer-section-title">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M12 2v20"></path>
-                            <path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"></path>
-                        </svg>
-                        Wycena rynkowa i argumentacja negocjacyjna
-                        <button class="copy-inline-btn" id="btnCopyNegArgs" onclick="copyNegotiationArguments()" title="Kopiuj argumenty do negocjacji">
-                            <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                                <rect x="9" y="9" width="13" height="13" rx="2"></rect>
-                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path>
-                            </svg>
-                            Kopiuj
-                        </button>
-                    </h3>
-                    <div id="aiNegotiationContent"></div>
-                </section>
+                <!-- (Wycena przeniesiona wyżej, obok ryzyk) -->
 
                 <!-- Jakość powietrza i profil smogowy (CAMS + GIOŚ) -->
                 <section class="drawer-section" id="aiAirQualitySection" style="display:none;">
@@ -1593,13 +1647,19 @@
                     <div id="aiPriceDropBadge"></div>
                     <div id="aiPriceTimeline" class="price-timeline" style="margin-top:4px;"></div>
                 </section>
+                </details>
 
+            </div>
+            <div class="drawer-footer">
+                <button type="button" class="btn btn-sm" onclick="drawerToggleStatus('TO_VISIT')" title="Dodaj tę ofertę do listy wizyt">Do wizyty</button>
+                <button type="button" class="btn btn-sm" onclick="drawerToggleStatus('FAVORITE')" title="Dodaj tę ofertę do ulubionych">Ulubione</button>
+                <button type="button" class="btn btn-sm btn-primary" onclick="copyAiSms()" title="Kopiuj gotową wiadomość SMS">Kopiuj SMS</button>
             </div>
         </aside>
     </div>
 
     <!-- Notification Toast -->
-    <div id="toast">Powiadomienie</div>
+    <div id="toast" role="status" aria-live="polite">Powiadomienie</div>
 
     <!-- Leaflet Map JS (Self-hosted) -->
     <script src="/assets/vendor/leaflet/leaflet.js" defer></script>

@@ -24,6 +24,71 @@
             setTimeout(() => { t.style.display = 'none'; }, 3200);
         }
 
+        // Reusable confirmation / prompt modal — replaces native alert/confirm/prompt.
+        // Resolves: confirm mode -> true/false, prompt mode -> trimmed string/null.
+        function showConfirmDialog(opts) {
+            return new Promise((resolve) => {
+                const modal = document.getElementById('confirmModal');
+                const titleEl = document.getElementById('confirmModalTitle');
+                const msgEl = document.getElementById('confirmModalMessage');
+                const inputWrap = document.getElementById('confirmModalInputWrap');
+                const inputEl = document.getElementById('confirmModalInput');
+                const okBtn = document.getElementById('confirmModalOk');
+                const cancelBtn = document.getElementById('confirmModalCancel');
+                if (!modal || !titleEl || !msgEl || !inputWrap || !inputEl || !okBtn || !cancelBtn) {
+                    resolve(null);
+                    return;
+                }
+
+                titleEl.textContent = opts.title || 'Potwierdź';
+                msgEl.textContent = opts.message || '';
+                okBtn.textContent = opts.confirmLabel || 'Potwierdź';
+                okBtn.className = opts.danger ? 'btn btn-sm btn-danger' : 'btn btn-sm btn-primary';
+
+                const hasInput = Boolean(opts.input);
+                inputWrap.style.display = hasInput ? 'flex' : 'none';
+                if (hasInput) {
+                    inputEl.value = '';
+                    inputEl.placeholder = opts.inputPlaceholder || '';
+                    setTimeout(() => inputEl.focus(), 60);
+                }
+
+                const onDocKey = (e) => { if (e.key === 'Escape') finish(hasInput ? null : false); };
+                const finish = (value) => {
+                    modal.style.display = 'none';
+                    document.removeEventListener('keydown', onDocKey);
+                    modal.onclick = null;
+                    okBtn.onclick = null;
+                    cancelBtn.onclick = null;
+                    inputEl.onkeydown = null;
+                    restoreModalFocus('confirmModal');
+                    resolve(value);
+                };
+                const okValue = () => (hasInput ? inputEl.value.trim() : true);
+
+                okBtn.onclick = () => finish(okValue());
+                cancelBtn.onclick = () => finish(hasInput ? null : false);
+                inputEl.onkeydown = (e) => { if (e.key === 'Enter') finish(okValue()); };
+                document.addEventListener('keydown', onDocKey);
+                modal.onclick = (e) => { if (e.target === modal) finish(hasInput ? null : false); };
+                storeModalFocus('confirmModal');
+                modal.style.display = 'flex';
+            });
+        }
+
+        // Focus return for modals — restores the trigger element on close so
+        // keyboard users don't lose their place. Safe no-op if element is gone.
+        const modalFocusReturn = {};
+        function storeModalFocus(id) {
+            try { modalFocusReturn[id] = document.activeElement; }
+            catch (e) { modalFocusReturn[id] = null; }
+        }
+        function restoreModalFocus(id) {
+            const el = modalFocusReturn[id];
+            delete modalFocusReturn[id];
+            if (el && el.focus) { try { el.focus({ preventScroll: true }); } catch (e) {} }
+        }
+
         // ========================
         // Map (Leaflet + OpenStreetMap dark tiles)
         // ========================
@@ -899,11 +964,17 @@
 
         async function deleteCurrentProfile() {
             if (allProfiles.length <= 1) {
-                alert("Nie można usunąć jedynego profilu wyszukiwania.");
+                showToast("Nie można usunąć jedynego profilu wyszukiwania.");
                 return;
             }
             const profName = document.getElementById('cfgProfileName').value || currentProfileId;
-            if (!confirm(`Czy na pewno chcesz usunąć profil "${profName}" oraz WSZYSTKIE powiązane z nim oferty z bazy danych?\n\nTej operacji nie można cofnąć.`)) {
+            const confirmed = await showConfirmDialog({
+                title: 'Usuń profil',
+                message: `Czy na pewno chcesz usunąć profil "${profName}" oraz WSZYSTKIE powiązane z nim oferty z bazy danych?\nTej operacji nie można cofnąć.`,
+                confirmLabel: 'Usuń profil',
+                danger: true
+            });
+            if (!confirmed) {
                 return;
             }
 
@@ -992,6 +1063,7 @@
 
         function openConfigModal() {
             if (!activeConfig) return;
+            storeModalFocus('configModal');
             switchConfigTab('overview');
 
             const sc = scrapersConfig || {};
@@ -1182,6 +1254,7 @@
             if (!e || e.target.id === 'configModal' || e === null) {
                 document.getElementById('configModal').classList.remove('open');
                 document.body.classList.remove('config-open');
+                restoreModalFocus('configModal');
             }
         }
 
@@ -1310,7 +1383,7 @@
 
             const upd = ov.update || {};
             const updStatusText = upd.status === 'available' && upd.latest_version
-                ? `<a href="${escapeHtml(upd.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">🚀 Dostępna ${escapeHtml(upd.latest_version)} → release notes</a>`
+                ? `<a href="${escapeHtml(upd.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">Dostępna ${escapeHtml(upd.latest_version)} → release notes</a>`
                 : upd.status === 'current'
                     ? `✓ aktualna (${esc(ov.version || '—')})`
                     : 'nie sprawdzono';
@@ -1569,10 +1642,14 @@
         async function resetDatabaseData() {
             const scope = currentProfileId || null;
             const scopeLabel = scope ? `profilu "${scope}"` : 'CAŁEJ bazy danych';
-            const typed = prompt(
-                `UWAGA: Usuniesz WSZYSTKIE oferty z ${scopeLabel}\n(wraz z historią cen, notatkami i statusami CRM).\n\nAby potwierdzić, wpisz: RESET`,
-                ''
-            );
+            const typed = await showConfirmDialog({
+                title: 'Reset bazy danych',
+                message: `UWAGA: Usuniesz WSZYSTKIE oferty z ${scopeLabel}\n(wraz z historią cen, notatkami i statusami CRM).\n\nAby potwierdzić, wpisz: RESET`,
+                input: true,
+                inputPlaceholder: 'RESET',
+                confirmLabel: 'Usuń dane',
+                danger: true
+            });
             if (typed !== 'RESET') {
                 showToast('Anulowano — nie wpisano RESET.');
                 return;
@@ -1608,20 +1685,20 @@
                 const chanRes = (res.results && res.results[channel]) || {};
                 if (chanRes.ok) {
                     if (statusEl) {
-                        statusEl.textContent = '✅ ' + (chanRes.message || 'Wysłano pomyślnie!');
+                        statusEl.textContent = chanRes.message || 'Wysłano pomyślnie';
                         statusEl.style.color = 'var(--success-color, #2ecc71)';
                     }
-                    showToast(`Wiadomość testowa ${channel === 'telegram' ? 'Telegram' : 'Discord'} wysłana pomyślnie!`);
+                    showToast(`Wiadomość testowa ${channel === 'telegram' ? 'Telegram' : 'Discord'} wysłana pomyślnie`);
                 } else {
                     if (statusEl) {
-                        statusEl.textContent = '❌ ' + (chanRes.message || 'Błąd wysyłania');
+                        statusEl.textContent = chanRes.message || 'Błąd wysyłania';
                         statusEl.style.color = 'var(--danger-color, #e74c3c)';
                     }
                     showToast(`Błąd testu ${channel === 'telegram' ? 'Telegram' : 'Discord'}: ${chanRes.message || 'Błąd połączenia'}`);
                 }
             } catch (err) {
                 if (statusEl) {
-                    statusEl.textContent = '❌ ' + (err.message || 'Błąd');
+                    statusEl.textContent = err.message || 'Błąd';
                     statusEl.style.color = 'var(--danger-color, #e74c3c)';
                 }
                 showToast(`Błąd testu: ${err.message || err}`);
@@ -1682,13 +1759,13 @@
                     const container = document.getElementById('listingsContainer');
                     if (container) {
                         container.innerHTML = `
-                            <div style="text-align: center; padding: 48px 24px; color: var(--text-muted);">
-                                <div style="font-size: 28px; margin-bottom: 12px;">⚠️</div>
-                                <div style="font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">Nie udało się załadować ofert z bazy danych</div>
-                                <div style="font-size: 13px; max-width: 420px; margin: 0 auto 16px;">Wystąpił problem podczas pobierania danych z serwera. Sprawdź logi kontenera lub spróbuj ponownie.</div>
-                                <button class="btn btn-secondary" onclick="fetchListings()" style="display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
-                                    Odśwież dane
-                                </button>
+                            <div class="empty-state empty-state--error">
+                                <div class="empty-state-icon" aria-hidden="true">
+                                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+                                </div>
+                                <div class="empty-state-title">Nie udało się załadować ofert</div>
+                                <div class="empty-state-desc">Wystąpił problem podczas pobierania danych z serwera. Sprawdź logi kontenera lub spróbuj ponownie.</div>
+                                <button type="button" class="btn" onclick="fetchListings()">Odśwież dane</button>
                             </div>
                         `;
                     }
@@ -2171,22 +2248,30 @@
         // ========================
         function addMapMarker(item, deferAdd) {
             let pinClass = "pin-blue";
+            let pinLabel = "Oferta";
             const cat = item.category || 'dom';
 
             if (item.user_status === 'FAVORITE') {
                 pinClass = "pin-gold";
+                pinLabel = "Ulubione";
             } else if (item.user_status === 'TO_VISIT') {
                 pinClass = "pin-purple";
+                pinLabel = "Do wizyty";
             } else if (item.user_status === 'CHECKED') {
                 pinClass = "pin-green";
+                pinLabel = "Sprawdzone";
             } else if (item.user_status === 'REJECTED' || (item.qualification_status && item.qualification_status.startsWith('REJECTED'))) {
                 pinClass = "pin-gray";
+                pinLabel = "Odrzucone";
             } else if (item.qualification_status === 'QUALIFIED_WHITELIST') {
                 pinClass = "pin-green";
+                pinLabel = "Whitelist";
             } else if (item.qualification_status === 'NEEDS_REVIEW') {
                 pinClass = "pin-orange";
+                pinLabel = "Do weryfikacji";
             } else if (item.qualification_status === 'NEEDS_REVIEW_BORDERLINE') {
                 pinClass = "pin-orange";
+                pinLabel = "Do weryfikacji";
             }
 
             if (!item.is_exact_coords) {
@@ -2200,7 +2285,7 @@
             const jitterLon = item.longitude + (offsetMultiplier * 0.0002);
 
             const shortPrice = formatShortPrice(item.price);
-            const iconHtml = `<div class="custom-pin price-pin ${pinClass}" id="pin-${item.id}"><span class="pin-dot"></span><span class="pin-price">${shortPrice}</span></div>`;
+            const iconHtml = `<div class="custom-pin price-pin ${pinClass}" id="pin-${item.id}" title="${pinLabel} — ${escapeHtml(item.title || '')}"><span class="pin-dot"></span><span class="pin-price">${shortPrice}</span></div>`;
             const icon = L.divIcon({
                 html: iconHtml,
                 className: 'custom-div-icon',
@@ -2303,6 +2388,52 @@
                 }
             }
         }
+
+        function toggleStatusLegend() {
+            const body = document.getElementById('mapStatusLegendBody');
+            const toggle = document.getElementById('mapStatusLegendToggle');
+            if (!body) return;
+            const isOpen = body.style.display !== 'none';
+            body.style.display = isOpen ? 'none' : 'block';
+            if (toggle) toggle.setAttribute('aria-expanded', String(!isOpen));
+        }
+
+        function togglePipeMore(e) {
+            if (e) e.stopPropagation();
+            const body = document.getElementById('pipeMoreBody');
+            const btn = document.getElementById('pipeMoreBtn');
+            if (!body) return;
+            const willOpen = body.hidden;
+            body.hidden = !willOpen;
+            if (btn) btn.setAttribute('aria-expanded', String(willOpen));
+            if (willOpen && btn) {
+                const bar = btn.closest('.command-bar');
+                if (bar) {
+                    const btnRect = btn.getBoundingClientRect();
+                    const barRect = bar.getBoundingClientRect();
+                    const left = Math.max(4, Math.min(btnRect.left - barRect.left, barRect.width - 214));
+                    body.style.left = left + 'px';
+                }
+            }
+        }
+        document.addEventListener('click', (e) => {
+            const body = document.getElementById('pipeMoreBody');
+            const btn = document.getElementById('pipeMoreBtn');
+            if (body && !body.hidden && btn && !btn.contains(e.target) && !body.contains(e.target)) {
+                body.hidden = true;
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                const body = document.getElementById('pipeMoreBody');
+                const btn = document.getElementById('pipeMoreBtn');
+                if (body && !body.hidden) {
+                    body.hidden = true;
+                    btn.setAttribute('aria-expanded', 'false');
+                }
+            }
+        });
 
         function toggleAqiMapLayer() {
             if (!map) return;
@@ -2556,7 +2687,15 @@
             }
 
             if (currentGridItems.length === 0) {
-                container.innerHTML = '<div style="text-align: center; padding: 60px 20px; color: var(--text-muted); font-size: var(--font-size-base);">Brak ofert spełniających aktywne kryteria wyszukiwania.</div>';
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon" aria-hidden="true">
+                            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.35-4.35"></path><path d="M8 11h6"></path></svg>
+                        </div>
+                        <div class="empty-state-title">Brak ofert spełniających aktywne kryteria</div>
+                        <div class="empty-state-desc">Zmień filtry, perspektywę lub wyszukiwanie, aby zobaczyć więcej ofert z bazy danych.</div>
+                        <div class="empty-state-actions"><button type="button" class="btn btn-sm" onclick="resetLiveFilters()">Wyczyść filtry</button></div>
+                    </div>`;
                 return;
             }
 
@@ -2790,11 +2929,11 @@
 
             let aiBadge = '';
             if (item.worth_interest === true) {
-                aiBadge = `<span class="meta-tag tag-exact" title="AI Rekomendacja: Pozytywna (Kwalifikuje się) — ${escapeHtml(item.ai_verdict || '')}">🤖 AI: Warto</span>`;
+                aiBadge = `<span class="meta-tag tag-exact" title="AI Rekomendacja: Pozytywna (Kwalifikuje się) — ${escapeHtml(item.ai_verdict || '')}">AI: Warto</span>`;
             } else if (item.worth_interest === false) {
-                aiBadge = `<span class="meta-tag tag-aqi tag-aqi-danger" title="AI Rekomendacja: Negatywna (Do odrzucenia) — ${escapeHtml(item.ai_verdict || '')}">🤖 AI: Odrzuć</span>`;
+                aiBadge = `<span class="meta-tag tag-aqi tag-aqi-danger" title="AI Rekomendacja: Negatywna (Do odrzucenia) — ${escapeHtml(item.ai_verdict || '')}">AI: Odrzuć</span>`;
             } else if (item.ai_summary) {
-                aiBadge = `<span class="meta-tag tag-profile" title="Wygenerowano raport AI">🤖 AI Raport</span>`;
+                aiBadge = `<span class="meta-tag tag-profile" title="Wygenerowano raport AI">AI Raport</span>`;
             }
 
             let rejectionHtml = "";
@@ -4250,7 +4389,7 @@
             const tbody = document.getElementById('listingsTableBody');
             if (!tbody) return;
             if (!items || items.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="11" style="text-align:center;padding:40px;color:var(--text-muted);">Brak ofert spełniających aktywne kryteria wyszukiwania.</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="11"><div class="empty-state empty-state--table"><div class="empty-state-title">Brak ofert spełniających aktywne kryteria</div><div class="empty-state-desc">Zmień filtry lub perspektywę, aby zobaczyć oferty.</div><div class="empty-state-actions"><button type="button" class="btn btn-sm" onclick="resetLiveFilters()">Wyczyść filtry</button></div></div></td></tr>';
                 return;
             }
 
@@ -4303,7 +4442,7 @@
                         <td><span class="workflow-badge ${badgeClass}" style="font-size:10px;">${badgeLabel}</span> <span class="num">${scoreFmt}</span></td>
                         <td class="num">${dateFmt}</td>
                         <td class="table-actions-cell">
-                            <button type="button" class="btn btn-xs" onclick="openAiModal(${item.id})" title="Otwórz audyt Due Diligence">🤖 Raport</button>
+                            <button type="button" class="btn btn-xs" onclick="openAiModal(${item.id})" title="Otwórz audyt Due Diligence"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Raport</button>
                             <button type="button" class="btn btn-xs ${item.user_status === 'FAVORITE' ? 'btn-primary' : ''}" onclick="toggleStatus(${item.id}, 'FAVORITE')" title="Ulubione">★</button>
                         </td>
                     </tr>
@@ -4335,7 +4474,7 @@
 
         function exportListingsToCsv(items, filename = 'oferty_nieruchomosci.csv') {
             if (!items || items.length === 0) {
-                alert('Brak ofert do eksportu.');
+                showToast('Brak ofert do eksportu.');
                 return;
             }
             const headers = [
@@ -4398,11 +4537,11 @@
         function openCompareModal() {
             const items = allListings.filter(i => selectedListingIds.has(i.id));
             if (items.length < 2) {
-                alert('Wybierz co najmniej 2 oferty (zaznaczając pola wyboru na kartach lub w tabeli), aby dokonać porównania.');
+                showToast('Wybierz co najmniej 2 oferty, aby dokonać porównania.');
                 return;
             }
             if (items.length > 5) {
-                alert('Zalecane porównanie to 2–4 oferty. Ograniczono widok do pierwszych 4 wybranych.');
+                showToast('Zalecane porównanie to 2–4 oferty. Ograniczono widok do pierwszych 4 wybranych.');
             }
             const targetItems = items.slice(0, 4);
             const modal = document.getElementById('compareModal');
@@ -4433,7 +4572,7 @@
                     label: 'Szczegóły & Raport',
                     render: i => `
                         <div style="display:flex;gap:6px;flex-direction:column;margin-top:6px;">
-                            <button type="button" class="btn btn-sm btn-primary" onclick="closeCompareModal(); openAiModal(${i.id});">🤖 Otwórz audyt</button>
+                            <button type="button" class="btn btn-sm btn-primary" onclick="closeCompareModal(); openAiModal(${i.id});"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Otwórz audyt</button>
                             <a href="${escapeHtml(i.url || '#')}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline">Otwórz ogłoszenie ↗</a>
                         </div>
                     `
@@ -4466,12 +4605,14 @@
 
             html += '</tbody></table>';
             wrapper.innerHTML = html;
+            storeModalFocus('compareModal');
             modal.style.display = 'flex';
         }
 
         function closeCompareModal() {
             const modal = document.getElementById('compareModal');
             if (modal) modal.style.display = 'none';
+            restoreModalFocus('compareModal');
         }
 
         function removeFromCompare(id) {
@@ -4521,7 +4662,7 @@
                 }
                 if (statusEl) {
                     if (show && st.latest_version) {
-                        statusEl.innerHTML = `<a href="${escapeHtml(st.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">🚀 Dostępna ${escapeHtml(st.latest_version)} → release notes</a>`;
+                        statusEl.innerHTML = `<a href="${escapeHtml(st.url || 'https://github.com/p-sternik/Universal-Real-Estate-Hunter/releases')}" target="_blank" rel="noopener noreferrer" style="color:var(--color-primary-light,#60a5fa);font-weight:600">Dostępna ${escapeHtml(st.latest_version)} → release notes</a>`;
                     } else if (st && st.status === 'current') {
                         statusEl.innerHTML = `✓ aktualna (${escapeHtml(st.latest_version || 'najnowsza')})`;
                     } else {
