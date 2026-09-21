@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.19.0 (2026-09-21)
+
+### Features
+
+- **valuation**: Transaction-adjusted medians, hygiene, age/CAPEX FMV, AI pricing
+  ([`cb54974`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/cb54974b36e26464ade0c324bc95a066ddf9f2b8))
+
+
 ## v1.18.2 (2026-09-21)
 
 ### Bug Fixes
