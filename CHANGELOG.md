@@ -6,6 +6,22 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.18.1 (2026-09-21)
+
+### Bug Fixes
+
+- **dashboard**: Always-visible map legend, hide Leaflet attribution, mobile drawer close
+  ([`9a54915`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/9a5491511a0cb0431371bca216953a3ea3b98370))
+
+- **dashboard**: Declutter command bar, fix map legend anchoring and drawer priority
+  ([`7a432a3`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/7a432a3a6f54ea50820601cec7b0699a4eb18b0a))
+
+### Chores
+
+- **dashboard**: Add self-hosted IBM Plex fonts
+  ([`f4b0d29`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/f4b0d2927945451140813c6a0a758bed5216de37))
+
+
 ## v1.18.0 (2026-09-19)
 
 ### Features
