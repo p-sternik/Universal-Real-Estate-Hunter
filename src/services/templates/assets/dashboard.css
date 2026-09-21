@@ -3703,6 +3703,8 @@
             .drawer { width: 100%; max-width: 100vw; }
             .drawer-body { padding: 12px 14px 24px; overflow-x: hidden; }
             .drawer-header { padding: 12px 14px; }
+            .drawer-header .drawer-title { min-width: 0; }
+            .drawer-header .btn-label { display: none; } /* icon-only actions so the close (X) button stays on-screen */
             .drawer-header .btn-ghost {
                 min-width: 36px;
                 min-height: 36px;
@@ -4427,8 +4429,8 @@
            ========================================================================== */
         .map-aqi-legend {
             position: absolute;
-            bottom: 14px;
-            left: 14px;
+            bottom: 4px;
+            right: 4px;
             z-index: 999;
             background: rgba(15, 23, 42, 0.88);
             backdrop-filter: blur(8px);
@@ -4441,6 +4443,8 @@
             pointer-events: auto;
             box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
         }
+        /* Hide the Leaflet attribution line (kept in map footer is unnecessary chrome) */
+        .leaflet-control-attribution { display: none; }
         .map-aqi-title {
             font-size: var(--font-size-3xs);
             font-weight: var(--font-weight-bold);
@@ -4470,11 +4474,11 @@
         .aqi-swatch.aqi-unknown { background: #64748b; }
 
         /* Status legend — pin colors mapped to labels (non-color meaning).
-           Positioned top-right to avoid the bottom-left AQI legend. */
+           Always visible, bottom-left corner of the map. */
         .map-status-legend {
             position: absolute;
-            top: 14px;
-            right: 14px;
+            left: 4px;
+            bottom: 4px;
             z-index: 999;
             background: rgba(15, 23, 42, 0.88);
             backdrop-filter: blur(8px);
@@ -4494,23 +4498,6 @@
             display: inline-block;
             flex-shrink: 0;
         }
-        .map-legend-toggle {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 8px;
-            width: 100%;
-            background: none;
-            border: none;
-            padding: 0;
-            cursor: pointer;
-            color: var(--text-primary);
-            text-align: left;
-        }
-        .map-legend-toggle .map-aqi-title { margin-bottom: 0; }
-        .map-legend-toggle svg { flex: none; color: var(--text-muted); transition: transform 0.15s ease; }
-        .map-legend-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
-        .map-legend-body { margin-top: 6px; }
 
         /* ==========================================================================
            SCROLLBARS REFINEMENT

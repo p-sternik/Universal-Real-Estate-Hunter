@@ -419,18 +419,13 @@
                     <div class="map-aqi-row"><span class="aqi-swatch aqi-unknown"></span> Brak danych</div>
                 </div>
                 <div class="map-status-legend" id="mapStatusLegend">
-                    <button type="button" class="map-legend-toggle" id="mapStatusLegendToggle" onclick="toggleStatusLegend()" aria-expanded="false" aria-controls="mapStatusLegendBody" title="Pokaż lub ukryj legendę statusów ofert">
-                        <span class="map-aqi-title">Status ofert</span>
-                        <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"></path></svg>
-                    </button>
-                    <div class="map-legend-body" id="mapStatusLegendBody" style="display:none;">
-                        <div class="map-aqi-row"><span class="pin-swatch pin-gold"></span> Ulubione</div>
-                        <div class="map-aqi-row"><span class="pin-swatch pin-purple"></span> Do wizyty</div>
-                        <div class="map-aqi-row"><span class="pin-swatch pin-green"></span> Sprawdzone / Whitelist</div>
-                        <div class="map-aqi-row"><span class="pin-swatch pin-gray"></span> Odrzucone</div>
-                        <div class="map-aqi-row"><span class="pin-swatch pin-orange"></span> Do weryfikacji</div>
-                        <div class="map-aqi-row"><span class="pin-swatch pin-blue"></span> Oferta</div>
-                    </div>
+                    <div class="map-aqi-title">Status ofert</div>
+                    <div class="map-aqi-row"><span class="pin-swatch pin-gold"></span> Ulubione</div>
+                    <div class="map-aqi-row"><span class="pin-swatch pin-purple"></span> Do wizyty</div>
+                    <div class="map-aqi-row"><span class="pin-swatch pin-green"></span> Sprawdzone / Whitelist</div>
+                    <div class="map-aqi-row"><span class="pin-swatch pin-gray"></span> Odrzucone</div>
+                    <div class="map-aqi-row"><span class="pin-swatch pin-orange"></span> Do weryfikacji</div>
+                    <div class="map-aqi-row"><span class="pin-swatch pin-blue"></span> Oferta</div>
                 </div>
             </div>
             <div class="listings-column">
@@ -1467,14 +1462,14 @@
                     <h2>Raport audytu nieruchomości</h2>
                     <span class="drawer-sub" id="aiModalTitle"></span>
                 </div>
-                <div style="display: flex; gap: 8px; align-items: center;">
+                <div style="display: flex; gap: 8px; align-items: center; flex-shrink: 0;">
                     <button type="button" id="btnPrintAiAudit" class="btn btn-sm btn-outline" onclick="window.print()" title="Drukuj lub zapisz raport audytu jako PDF">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"></path><rect x="6" y="14" width="12" height="8" rx="1"></rect></svg> PDF / Drukuj
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"></path><path d="M6 9V3a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v6"></path><rect x="6" y="14" width="12" height="8" rx="1"></rect></svg><span class="btn-label">PDF / Drukuj</span>
                     </button>
                     <button type="button" id="btnGenerateAiAudit" class="btn btn-sm btn-ai-audit" onclick="triggerAiAuditForCurrentItem()" title="Wygeneruj lub odśwież analizę AI dla tej oferty">
-                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg> Generuj raport AI
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"></path><path d="M20 3v4"></path><path d="M22 5h-4"></path></svg><span class="btn-label">Generuj raport AI</span>
                     </button>
-                    <button type="button" class="btn btn-ghost btn-sm" onclick="closeAiModal(null)" aria-label="Zamknij raport">
+                    <button type="button" class="btn btn-ghost btn-sm" onclick="closeAiModal(null)" aria-label="Zamknij raport" title="Zamknij raport">
                         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
                             <path d="M18 6 6 18"></path>
                             <path d="m6 6 12 12"></path>

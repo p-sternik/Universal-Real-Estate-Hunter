@@ -2389,15 +2389,6 @@
             }
         }
 
-        function toggleStatusLegend() {
-            const body = document.getElementById('mapStatusLegendBody');
-            const toggle = document.getElementById('mapStatusLegendToggle');
-            if (!body) return;
-            const isOpen = body.style.display !== 'none';
-            body.style.display = isOpen ? 'none' : 'block';
-            if (toggle) toggle.setAttribute('aria-expanded', String(!isOpen));
-        }
-
         function togglePipeMore(e) {
             if (e) e.stopPropagation();
             const body = document.getElementById('pipeMoreBody');
