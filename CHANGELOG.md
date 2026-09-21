@@ -6,6 +6,14 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.18.2 (2026-09-21)
+
+### Bug Fixes
+
+- **dashboard**: Remove emoji/glow slop, fix undefined tokens and stale score
+  ([`072a90d`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/072a90d1da53474b85f27a5cd38429d79f28aca8))
+
+
 ## v1.18.1 (2026-09-21)
 
 ### Bug Fixes
