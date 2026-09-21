@@ -381,6 +381,10 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("valuation_negotiation_leverage", "VARCHAR(20)", "VARCHAR(20)"),
     ("valuation_fair_market_value", "FLOAT", "DOUBLE PRECISION"),
     ("valuation_opening_offer", "FLOAT", "DOUBLE PRECISION"),
+    ("ai_suggested_price_per_m2", "FLOAT", "DOUBLE PRECISION"),
+    ("ai_opening_offer", "FLOAT", "DOUBLE PRECISION"),
+    ("ai_negotiation_ceiling", "FLOAT", "DOUBLE PRECISION"),
+    ("ai_price_rationale", "TEXT", "TEXT"),
     # Extended Intelligence: GUNB
     ("gunb_permits", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
     ("gunb_risk_flags", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),

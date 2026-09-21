@@ -1173,6 +1173,9 @@
             if (document.getElementById('cfgCapexPccExempt')) {
                 document.getElementById('cfgCapexPccExempt').checked = !!capex.pcc_exempt_first_home;
             }
+            if (document.getElementById('cfgCapexDiscount')) {
+                document.getElementById('cfgCapexDiscount').value = String(capex.transaction_discount ?? 0.92);
+            }
 
             commuteDestinations = Array.isArray(activeConfig.commute_destinations)
                 ? activeConfig.commute_destinations.map(d => ({
@@ -1554,7 +1557,8 @@
                 developer_rate: parseFloat(document.getElementById('cfgCapexDeveloper')?.value) || 1800,
                 renovation_rate: parseFloat(document.getElementById('cfgCapexRenovation')?.value) || 2200,
                 agency_fee_pct: parseFloat(document.getElementById('cfgCapexAgency')?.value ?? '2') || 0,
-                pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked
+                pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked,
+                transaction_discount: parseFloat(document.getElementById('cfgCapexDiscount')?.value ?? '0.92') || 1
             };
 
             const commuteDestinationsPayload = commuteDestinations

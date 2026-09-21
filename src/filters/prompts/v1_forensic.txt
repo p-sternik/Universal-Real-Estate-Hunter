@@ -1,4 +1,4 @@
-# PROMPT_VERSION: v1.0
+# PROMPT_VERSION: v1.2
 # Forensic Polish real estate auditor — user prompt template.
 # Placeholders: {title} {location_raw} {category} {building_type} {area_home} {area_plot}
 #   {price} {price_per_m2} {finish_condition} {sewerage} {heating} {has_fiber}
@@ -52,6 +52,12 @@ Finish note:
 12. Contact: Extract the phone number (format +48XXXXXXXXX or 9 digits) and the contact person's name if present in the text; null otherwise.
 13. Plot area: If the text states the plot/garden area (e.g. "3.2 ara" -> 320.0), return it in m²; otherwise null.
 14. Pros/cons: up to 4 each, key technical advantages / disadvantages included in the price or affecting the value.
+15. Price suggestion (only when "Market benchmark" is provided below): Propose a negotiation strategy grounded in the local median and the listing's defects:
+    - "suggested_price_per_m2": your estimate of the fair asking price per m² for THIS property after correcting for finish state, age, and disclosed defects.
+    - "opening_offer": the total price in PLN you would open negotiations at (aggressive but not insulting: do NOT go below 70% of the listing price).
+    - "negotiation_ceiling": the maximum total price you would accept (never above the listing price).
+    - "price_rationale": one Polish sentence explaining the gap between your valuation and the asking price, citing concrete numbers (median, age, finish state, defects).
+    Return all four as null when the "Market benchmark" block is empty.
 15. Spatial & Geoportal verification: Cross-reference official Spatial & Geoportal registry data with the listing text:
     - If flood risk (ZAGROŻENIE_POWODZIOWE) is present, add it to legal_risks and include a question for the agent about flood history, defenses, and insurance.
     - If MPZP indicates lack of plan or conflicts with residential claims, add to legal_risks or discrepancies.
@@ -78,6 +84,9 @@ market: {market}
 
 Spatial & Geoportal registry data (official):
 {spatial_block}
+
+Market benchmark:
+{valuation_block}
 
 Listing text (untrusted data):
 <ogloszenie>
@@ -122,5 +131,9 @@ Return valid JSON with exactly this schema:
   "legal_risks": [string],
   "discrepancies": [string],
   "pros": [string],
-  "cons": [string]
+  "cons": [string],
+  "suggested_price_per_m2": float | null,
+  "opening_offer": float | null,
+  "negotiation_ceiling": float | null,
+  "price_rationale": string | null
 }}

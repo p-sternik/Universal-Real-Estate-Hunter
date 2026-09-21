@@ -240,6 +240,7 @@ async def test_repository_get_market_medians():
     session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
     async with session_factory() as session:
         # Add 3 listings in Rzeszów Słocina (dom) and 1 in Rzeszów Zalesie (dom)
+        recent = datetime.now(UTC) - timedelta(days=1)
         l1 = ListingModel(
             portal="Otodom",
             portal_id="1",
@@ -251,6 +252,8 @@ async def test_repository_get_market_medians():
             city="Rzeszów",
             district="Słocina",
             category="dom",
+            listing_status="ACTIVE",
+            last_scraped_at=recent,
         )
         l2 = ListingModel(
             portal="Otodom",
@@ -263,6 +266,8 @@ async def test_repository_get_market_medians():
             city="Rzeszów",
             district="Słocina",
             category="dom",
+            listing_status="ACTIVE",
+            last_scraped_at=recent,
         )
         l3 = ListingModel(
             portal="Otodom",
@@ -275,6 +280,8 @@ async def test_repository_get_market_medians():
             city="Rzeszów",
             district="Słocina",
             category="dom",
+            listing_status="ACTIVE",
+            last_scraped_at=recent,
         )
         l4 = ListingModel(
             portal="Otodom",
@@ -287,6 +294,8 @@ async def test_repository_get_market_medians():
             city="Rzeszów",
             district="Zalesie",
             category="dom",
+            listing_status="ACTIVE",
+            last_scraped_at=recent,
         )
         session.add_all([l1, l2, l3, l4])
         await session.commit()
@@ -296,8 +305,9 @@ async def test_repository_get_market_medians():
 
         # Słocina median of [7000, 8000, 9000] should be 8000
         assert medians["rzeszów:słocina:dom"] == 8000.0
-        # Zalesie median of [6000] should be 6000
-        assert medians["rzeszów:zalesie:dom"] == 6000.0
+        # Zalesie has only 1 listing (< MEDIANS_MIN_SAMPLE=3) -> bucket dropped,
+        # resolve_local_median falls back to the city median.
+        assert "rzeszów:zalesie:dom" not in medians
         # City-wide median of [6000, 7000, 8000, 9000] should be 7500.0
         assert medians["rzeszów::dom"] == 7500.0
 
@@ -750,9 +760,11 @@ def test_property_valuation_engine_evaluate():
     )
 
     assert isinstance(intel, PropertyValuationIntelligence)
-    assert intel.local_median_m2 == 7500.0
-    assert intel.negotiation.market_median_m2 == 7500.0
-    assert intel.negotiation.price_deviation_pct == 6.7
+    # Median is transaction-discounted: 7500 * 0.92 = 6900
+    assert intel.local_median_m2 == 6900.0
+    assert intel.negotiation.market_median_m2 == 6900.0
+    # (8000 - 6900) / 6900 = +15.9%
+    assert intel.negotiation.price_deviation_pct == 15.9
     assert "tco_audit" in intel.land_and_utilities
     assert "commute_audit" in intel.land_and_utilities
     assert "risk_shield" in intel.land_and_utilities
@@ -767,8 +779,8 @@ def test_property_valuation_engine_evaluate():
 
     # Dashboard dict format
     d = intel.to_dashboard_dict()
-    assert d["market_median_m2"] == 7500.0
-    assert d["price_deviation_pct"] == 6.7
+    assert d["market_median_m2"] == 6900.0
+    assert d["price_deviation_pct"] == 15.9
     assert d["fair_market_value"] is not None
     assert d["suggested_opening_offer"] is not None
     assert "land_audit" in d
@@ -777,5 +789,130 @@ def test_property_valuation_engine_evaluate():
 
 def test_property_valuation_engine_custom_medians():
     engine = PropertyValuationEngine(market_medians={"krakow::mieszkanie": 15000.0})
-    assert engine.resolve_median("Krakow", None, "mieszkanie") == 15000.0
+    # 15000 * 0.92 = 13800
+    assert engine.resolve_median("Krakow", None, "mieszkanie") == 13800.0
     assert engine.resolve_median("Warszawa", None, "mieszkanie") is None
+
+
+def test_year_built_depreciation_reduces_fmv():
+    current_year = datetime.now(UTC).year
+    base = {
+        "price": 1_000_000,
+        "price_per_m2": 10_000,
+        "area_home": 100.0,
+        "finish_condition": "pod_klucz",
+    }
+    new_house = analyze_negotiation({**base, "year_built": current_year}, market_median_m2=8000.0)
+    old_house = analyze_negotiation({**base, "year_built": current_year - 40}, market_median_m2=8000.0)
+
+    # 40-year-old house: age-25 = 15 -> 15 * 0.5% = 7.5% depreciation
+    assert old_house.fair_market_value is not None and new_house.fair_market_value is not None
+    assert old_house.fair_market_value < new_house.fair_market_value
+    # base 800k * 1.05 (pod klucz) = 840k; * 0.925 = 777k
+    assert old_house.fair_market_value == 777_000.0
+
+
+def test_capex_based_fmv_for_unfinished():
+    listing = {
+        "price": 1_000_000,
+        "price_per_m2": 10_000,
+        "area_home": 100.0,
+        "finish_condition": "do_wykonczenia",
+    }
+    advice = analyze_negotiation(listing, market_median_m2=8000.0)
+    # FMV = median * area - finishing cost = 800k - (100 * 1800) = 620k
+    assert advice.fair_market_value == 620_000.0
+
+
+def test_ai_opening_offer_blends_into_suggestion():
+    listing = {
+        "price": 1_000_000,
+        "price_per_m2": 10_000,
+        "area_home": 100.0,
+        "finish_condition": "pod_klucz",
+        "ai_opening_offer": 850_000,
+    }
+    advice = analyze_negotiation(listing, market_median_m2=8000.0)
+    # deterministic anchor = min(840k*0.94=790k, 1M*0.95=950k) = 790k
+    # AI 850k clamped to [700k, 950k]; blend = (790k + 850k) / 2 = 820k
+    assert advice.suggested_opening_offer == 820_000.0
+
+
+def test_ai_opening_offer_clamped_to_floor():
+    listing = {
+        "price": 1_000_000,
+        "price_per_m2": 10_000,
+        "area_home": 100.0,
+        "finish_condition": "pod_klucz",
+        "ai_opening_offer": 500_000,  # absurd lowball -> clamped to 70% floor
+    }
+    advice = analyze_negotiation(listing, market_median_m2=8000.0)
+    # AI clamped to 700k; blend = (790k + 700k) / 2 = 745k
+    assert advice.suggested_opening_offer == 745_000.0
+
+
+@pytest.mark.asyncio
+async def test_get_market_medians_exclude_self():
+    from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+
+    from src.storage.models import Base, ListingModel
+    from src.storage.repository import ListingRepository, clear_medians_cache
+
+    clear_medians_cache()
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(bind=engine, class_=AsyncSession, expire_on_commit=False)
+    recent = datetime.now(UTC) - timedelta(days=1)
+    async with session_factory() as session:
+        prices = [7000.0, 8000.0, 9000.0, 10000.0]
+        listings = []
+        for i, p in enumerate(prices):
+            listings.append(
+                ListingModel(
+                    portal="Otodom",
+                    portal_id=str(i),
+                    url=f"https://example.com/{i}",
+                    title=f"Dom {i}",
+                    price=p * 100,
+                    price_per_m2=p,
+                    area_home=100.0,
+                    city="Rzeszów",
+                    district="Słocina",
+                    category="dom",
+                    listing_status="ACTIVE",
+                    last_scraped_at=recent,
+                )
+            )
+        listings.append(
+            ListingModel(
+                portal="Otodom",
+                portal_id="z",
+                url="https://example.com/z",
+                title="Dom Zalesie",
+                price=600_000,
+                price_per_m2=6000.0,
+                area_home=100.0,
+                city="Rzeszów",
+                district="Zalesie",
+                category="dom",
+                listing_status="ACTIVE",
+                last_scraped_at=recent,
+            )
+        )
+        session.add_all(listings)
+        await session.commit()
+
+        repo = ListingRepository(session)
+        medians = await repo.get_market_medians()
+        # Słocina median of [7000, 8000, 9000, 10000] = 8500
+        assert medians["rzeszów:słocina:dom"] == 8500.0
+
+        # Exclude one listing -> Słocina [8000, 9000, 10000] median 9000
+        excl = await repo.get_market_medians(exclude_url="https://example.com/0")
+        assert excl["rzeszów:słocina:dom"] == 9000.0
+        assert excl["rzeszów::dom"] == 8500.0
+
+    await engine.dispose()
+    clear_medians_cache()

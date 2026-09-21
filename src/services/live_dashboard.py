@@ -157,7 +157,7 @@ _IMG_CACHE_TTL_SECONDS = 30 * 86400
 _IMG_CACHE_SWEEP_PROBABILITY = 0.05
 
 
-VALUATION_CACHE_CODE_VERSION = 1
+VALUATION_CACHE_CODE_VERSION = 2
 
 
 def _parse_version_tag(tag: str | None) -> tuple[int, int, int] | None:
@@ -1142,7 +1142,7 @@ class LiveDashboardServer:
         try:
             cap = config_manager.get_config().capex
             capex_fp = hashlib.md5(
-                f"{cap.developer_rate}|{cap.renovation_rate}|{cap.agency_fee_pct}|{cap.pcc_exempt_first_home}".encode(),
+                f"{cap.developer_rate}|{cap.renovation_rate}|{cap.agency_fee_pct}|{cap.pcc_exempt_first_home}|{cap.transaction_discount}".encode(),
                 usedforsecurity=False,
             ).hexdigest()
         except Exception:
@@ -1170,6 +1170,10 @@ class LiveDashboardServer:
                 str(drop_amount),
                 str(drop_pct),
                 str(ph_count),
+                str(getattr(item, "year_built", None)),
+                str(getattr(item, "ai_opening_offer", None)),
+                str(getattr(item, "ai_negotiation_ceiling", None)),
+                str(getattr(item, "ai_suggested_price_per_m2", None)),
             ]
         )
         return hashlib.md5(raw.encode("utf-8"), usedforsecurity=False).hexdigest()

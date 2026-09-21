@@ -933,10 +933,22 @@
                             </label>
                         </div>
                     </div>
+                    <div class="config-row2">
+                        <div class="config-field">
+                            <label for="cfgCapexDiscount">Korekta mediana ofertowa → transakcyjna (%):</label>
+                            <select id="cfgCapexDiscount">
+                                <option value="1">100% (bez korekty)</option>
+                                <option value="0.95">95% (rynek płynny)</option>
+                                <option value="0.92" selected>92% (standard)</option>
+                                <option value="0.88">88% (rynek wolny)</option>
+                            </select>
+                        </div>
+                    </div>
                     <div class="hint-box" style="margin-top:12px;">
                         Stawki służą do szacowania nakładów na wykończenie / remont w TCO.
                         Prowizja nie dotyczy ofert bezpośrednio od właściciela. Zwolnienie z PCC
-                        zeruje podatek 2% także na rynku wtórnym (pierwsze lokum).
+                        zeruje podatek 2% także na rynku wtórnym (pierwsze lokum). Korekta mediany
+                        zamienia medianę cen ofertowych (zawyzżonych) na szacunek cen transakcyjnych.
                     </div>
                 </div>
 

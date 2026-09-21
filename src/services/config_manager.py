@@ -246,6 +246,10 @@ class CapexSettings(BaseModel):
     renovation_rate: float = 2200.0
     agency_fee_pct: float = 2.0
     pcc_exempt_first_home: bool = False
+    # Asking price -> transaction price conversion. The median is computed from
+    # listing (asking) prices which run ~8% above actual transaction prices.
+    # 1.0 = no conversion (use raw asking-price median).
+    transaction_discount: float = 0.92
 
 
 class NotificationSettings(BaseModel):

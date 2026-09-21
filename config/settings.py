@@ -91,8 +91,12 @@ class Settings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     OPENROUTER_MODEL: str = "nex-agi/nex-n2.5-mini:free"
     LLM_MAX_CALLS_PER_MINUTE: int = 15
-    LLM_PROMPT_VERSION: str = "v1.1"
+    LLM_PROMPT_VERSION: str = "v1.2"
     MEDIANS_CACHE_TTL_MINUTES: int = 30
+    # Median hygiene: a bucket is only trusted with at least this many active
+    # listings; stale listings (older than MEDIANS_MAX_AGE_DAYS) are ignored.
+    MEDIANS_MIN_SAMPLE: int = 3
+    MEDIANS_MAX_AGE_DAYS: int = 90
     GEOCODE_BATCH_SIZE: int = 8
     OPENAI_API_KEY: str | None = None
     OPENAI_MODEL: str = "gpt-4o-mini"

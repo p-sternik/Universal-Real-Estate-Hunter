@@ -122,15 +122,9 @@ def analyze_negotiation(
     if market_median_m2 and area_home > 0:
         # Base benchmark value
         base_fmv = market_median_m2 * area_home
-        # Adjustments based on verified technical attributes
+        # Technical adjustments (everything EXCEPT finish condition and age,
+        # which are handled separately below for a transparent CAPEX breakdown)
         adjustment_factor = 1.0
-
-        if any(f in finish_cond for f in ("deweloperski", "do_wykonczenia")):
-            adjustment_factor -= 0.05
-        elif any(f in finish_cond for f in ("remont", "surowy")):
-            adjustment_factor -= 0.15
-        elif "pod_klucz" in finish_cond or "zamieszkania" in finish_cond:
-            adjustment_factor += 0.05
 
         if any(r in road_type for r in ("nieutwardzona", "polna", "gruntowa")):
             adjustment_factor -= 0.03
@@ -165,7 +159,27 @@ def analyze_negotiation(
         if b_status in ("BRAK", "BRAK_ZASIĘGU"):
             adjustment_factor -= 0.02
 
-        fair_market_value = round(base_fmv * adjustment_factor / 1000.0) * 1000.0
+        technical_fmv = base_fmv * adjustment_factor
+
+        # Finish condition: turnkey premium vs real CAPEX burden for unfinished states.
+        # Unfinished homes are comparable to the market median only AFTER adding the
+        # finishing budget, so we subtract that budget directly instead of a flat %.
+        capex_cfg = _resolve_capex_settings()
+        if "pod_klucz" in finish_cond or "zamieszkania" in finish_cond:
+            technical_fmv *= 1.05
+        elif any(f in finish_cond for f in ("deweloperski", "do_wykonczenia")):
+            technical_fmv -= area_home * float(capex_cfg["developer_rate"])
+        elif any(f in finish_cond for f in ("remont", "surowy")):
+            technical_fmv -= area_home * float(capex_cfg["renovation_rate"])
+
+        # Age depreciation: 0.5%/year above 25 years, capped at -15%.
+        year_built = _prop(listing, "year_built", None)
+        if year_built:
+            age = max(0, datetime.now(UTC).year - int(year_built))
+            if age > 25:
+                technical_fmv *= 1.0 - min(0.15, (age - 25) * 0.005)
+
+        fair_market_value = round(technical_fmv / 1000.0) * 1000.0
 
     # 4. Suggested Opening Offer
     if fair_market_value and fair_market_value > 0 and price > 0:
@@ -174,6 +188,18 @@ def analyze_negotiation(
         suggested_opening = min(opening_candidate, round((price * 0.95) / 1000.0) * 1000.0)
         # Avoid absurd lowball below 70% of listing price
         suggested_opening = max(suggested_opening, round((price * 0.70) / 1000.0) * 1000.0)
+        # AI-suggested opening offer (when available) refines the deterministic anchor,
+        # but is hard-clamped to the same guardrails to prevent hallucinations.
+        ai_offer = _prop(listing, "ai_opening_offer", None)
+        if ai_offer:
+            try:
+                ai_val = float(ai_offer)
+                if ai_val > 0:
+                    ai_val = min(ai_val, round((price * 0.95) / 1000.0) * 1000.0)
+                    ai_val = max(ai_val, round((price * 0.70) / 1000.0) * 1000.0)
+                    suggested_opening = round((suggested_opening + ai_val) / 2 / 1000.0) * 1000.0
+            except (TypeError, ValueError):
+                pass
     elif price > 0:
         # Fallback based on days on market and price drops
         discount_rate = 0.05
@@ -293,6 +319,10 @@ def analyze_negotiation(
         )
     elif any(f in finish_cond for f in ("remont", "surowy")):
         arguments.append("Stan surowy lub do remontu wymaga znacznego budżetu i rezerw na prace budowlane.")
+
+    ai_rationale = str(_prop(listing, "ai_price_rationale", "") or "").strip()
+    if ai_rationale:
+        arguments.append(f"[AI] Strategia cenowa: {ai_rationale}")
 
     if any(r in road_type for r in ("nieutwardzona", "polna", "gruntowa")):
         arguments.append("Dojazd drogą nieutwardzoną generuje konieczność własnych nakładów na nawierzchnię.")
@@ -457,6 +487,7 @@ def _resolve_capex_settings() -> dict[str, Any]:
         "renovation_rate": 2200.0,
         "agency_fee_pct": 2.0,
         "pcc_exempt_first_home": False,
+        "transaction_discount": 0.92,
     }
     try:
         from src.services.config_manager import config_manager
@@ -467,9 +498,18 @@ def _resolve_capex_settings() -> dict[str, Any]:
             "renovation_rate": float(cap.renovation_rate),
             "agency_fee_pct": float(cap.agency_fee_pct),
             "pcc_exempt_first_home": bool(cap.pcc_exempt_first_home),
+            "transaction_discount": float(cap.transaction_discount),
         }
     except Exception:
         return defaults
+
+
+def _transaction_discount() -> float:
+    """Asking->transaction conversion factor applied to every resolved median."""
+    try:
+        return float(_resolve_capex_settings().get("transaction_discount", 1.0))
+    except Exception:
+        return 1.0
 
 
 def calculate_tco_audit(
@@ -1572,7 +1612,10 @@ class PropertyValuationEngine:
         override_medians: dict[str, float] | None = None,
     ) -> float | None:
         medians = override_medians if override_medians is not None else self.market_medians
-        return resolve_local_median(medians, city, district, category)
+        raw = resolve_local_median(medians, city, district, category)
+        if raw is None:
+            return None
+        return round(raw * _transaction_discount(), 1)
 
     def evaluate(
         self,
@@ -1589,7 +1632,7 @@ class PropertyValuationEngine:
         district = _prop(listing, "district", None)
         category = _prop(listing, "category", "dom")
 
-        local_median = resolve_local_median(medians, city, district, category)
+        local_median = self.resolve_median(city, district, category, override_medians=medians)
 
         neg_advice = analyze_negotiation(
             listing=listing,
