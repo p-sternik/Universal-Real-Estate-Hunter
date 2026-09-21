@@ -20,7 +20,7 @@ from src.filters.vision_analyzer import (
 from src.models.listing import ListingSchema
 
 LLM_MAX_RETRIES = 3
-PROMPT_VERSION = "v1.1"
+PROMPT_VERSION = "v1.2"
 _PROMPT_TEMPLATE_PATH = Path(__file__).resolve().parent / "prompts" / "v1_forensic.txt"
 _PROMPT_TEMPLATE_CACHE: str | None = None
 
@@ -1056,7 +1056,7 @@ class LLMAnalyzer:
                 logger.warning(f"[LLMAnalyzer] Ollama ({url}) error: {err_msg}")
         return None
 
-    def build_prompt(self, listing: ListingSchema) -> tuple[str, str]:
+    def build_prompt(self, listing: ListingSchema, market_median_m2: float | None = None) -> tuple[str, str]:
         """Build versioned prompt from template file. Returns (prompt, prompt_version)."""
         try:
             prompt_version = str(getattr(settings, "LLM_PROMPT_VERSION", PROMPT_VERSION) or PROMPT_VERSION)
@@ -1142,6 +1142,13 @@ class LLMAnalyzer:
             spatial_lines.append(f"Jakość powietrza i smog (CAMS + GIOŚ): {'; '.join(aq_parts)}")
 
         spatial_block = "\n".join(spatial_lines)
+        if market_median_m2:
+            valuation_block = (
+                f"Local median (transaction-adjusted): {market_median_m2:,.0f} zł/m² "
+                f"(listing: {listing.price_per_m2:,.0f} zł/m²)"
+            )
+        else:
+            valuation_block = "(brak danych rynkowych — nie sugeruj cen)"
         template = load_prompt_template()
         if template:
             try:
@@ -1161,6 +1168,7 @@ class LLMAnalyzer:
                     year_built=listing.year_built,
                     market=getattr(listing.market, "value", listing.market),
                     spatial_block=spatial_block,
+                    valuation_block=valuation_block,
                     desc_slice=desc_slice,
                 )
                 return prompt, prompt_version
@@ -1176,13 +1184,15 @@ class LLMAnalyzer:
         )
         return prompt, prompt_version
 
-    async def analyze_description(self, listing: ListingSchema) -> dict[str, Any] | None:
+    async def analyze_description(
+        self, listing: ListingSchema, market_median_m2: float | None = None
+    ) -> dict[str, Any] | None:
         if not self.enabled:
             return None
 
         await _throttle_llm_calls()
 
-        prompt, prompt_version = self.build_prompt(listing)
+        prompt, prompt_version = self.build_prompt(listing, market_median_m2=market_median_m2)
 
         # Prompt built via build_prompt() from versioned template (see src/filters/prompts/).
         # Execute providers based on preference (with cooldown for recently rate-limited ones).

@@ -146,6 +146,14 @@ def restore_cached_details(listing: "ListingSchema", existing_model: Any) -> Non
         listing.gallery_images = list(existing_model.gallery_images)
     if not listing.year_built:
         listing.year_built = existing_model.year_built
+    if not listing.ai_opening_offer:
+        listing.ai_opening_offer = getattr(existing_model, "ai_opening_offer", None)
+    if not listing.ai_suggested_price_per_m2:
+        listing.ai_suggested_price_per_m2 = getattr(existing_model, "ai_suggested_price_per_m2", None)
+    if not listing.ai_negotiation_ceiling:
+        listing.ai_negotiation_ceiling = getattr(existing_model, "ai_negotiation_ceiling", None)
+    if not listing.ai_price_rationale:
+        listing.ai_price_rationale = getattr(existing_model, "ai_price_rationale", None)
     if not listing.coordinates and existing_model.latitude and existing_model.longitude:
         listing.coordinates = (existing_model.latitude, existing_model.longitude)
     if listing.building_type == BuildingType.INNY and (
@@ -368,6 +376,11 @@ class ListingSchema(BaseModel):
     stakeholder_questions: dict[str, list[str]] = Field(default_factory=dict)
     documents_to_obtain: list[str] = Field(default_factory=list)
     structured_risks: list[dict[str, str]] = Field(default_factory=list)
+    # AI price suggestion (opening offer / ceiling / per-m² / rationale)
+    ai_suggested_price_per_m2: float | None = None
+    ai_opening_offer: float | None = None
+    ai_negotiation_ceiling: float | None = None
+    ai_price_rationale: str | None = None
     # Air quality & smog intelligence (CAMS + GIOŚ)
     air_aqi: int | None = None
     air_aqi_label: str | None = None

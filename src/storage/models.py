@@ -207,6 +207,11 @@ class ListingModel(Base):
     _structured_risks: Mapped[str] = mapped_column("structured_risks", Text, default="[]")
     contact_phone: Mapped[str | None] = mapped_column(String(50), nullable=True)
     contact_person: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    # AI price suggestion (from LLM enrichment; used to refine the opening offer)
+    ai_suggested_price_per_m2: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_opening_offer: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_negotiation_ceiling: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ai_price_rationale: Mapped[str | None] = mapped_column(Text, nullable=True)
     # LLM cache: stable hash of normalized description + raw JSON + prompt/model version
     desc_hash: Mapped[str | None] = mapped_column(String(64), nullable=True, index=True)
     _llm_json: Mapped[str | None] = mapped_column("llm_json", Text, nullable=True)

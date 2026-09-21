@@ -118,6 +118,15 @@ def _populate_listing_model(
 
     if listing.year_built or is_new:
         model.year_built = listing.year_built
+
+    if listing.ai_opening_offer is not None or is_new:
+        model.ai_opening_offer = listing.ai_opening_offer
+    if listing.ai_suggested_price_per_m2 is not None or is_new:
+        model.ai_suggested_price_per_m2 = listing.ai_suggested_price_per_m2
+    if listing.ai_negotiation_ceiling is not None or is_new:
+        model.ai_negotiation_ceiling = listing.ai_negotiation_ceiling
+    if listing.ai_price_rationale or is_new:
+        model.ai_price_rationale = listing.ai_price_rationale
     if listing.main_image_url or is_new:
         model.main_image_url = listing.main_image_url
     if listing.gallery_images or is_new:
@@ -437,26 +446,36 @@ class ListingRepository:
         logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
         return len(listing_ids)
 
-    async def get_market_medians(self, force_refresh: bool = False) -> dict[str, float]:
+    async def get_market_medians(self, force_refresh: bool = False, exclude_url: str | None = None) -> dict[str, float]:
         """
         Computes median price per m2 aggregated by:
         - city:district:category -> float
         - city::category -> float
         Returns a dictionary mapping composite keys to median price/m2.
         Results are cached in-process for MEDIANS_CACHE_TTL_MINUTES.
+
+        Hygiene: only ACTIVE listings scraped within MEDIANS_MAX_AGE_DAYS count,
+        and a bucket is emitted only when it holds at least MEDIANS_MIN_SAMPLE
+        values (small buckets fall back to the city-wide median instead of
+        producing an unstable number). Pass ``exclude_url`` to recompute a fresh
+        (uncached) median with that listing excluded (self-reference removal).
         """
         global _MEDIANS_CACHE, _MEDIANS_CACHE_TS
         try:
             from config import settings as _settings
 
             ttl_min = int(getattr(_settings, "MEDIANS_CACHE_TTL_MINUTES", 30) or 30)
+            min_sample = int(getattr(_settings, "MEDIANS_MIN_SAMPLE", 3) or 3)
+            max_age_days = int(getattr(_settings, "MEDIANS_MAX_AGE_DAYS", 90) or 90)
         except Exception:
-            ttl_min = 30
+            ttl_min, min_sample, max_age_days = 30, 3, 90
         import time as _time
 
         now = _time.monotonic()
-        if not force_refresh and _MEDIANS_CACHE and (now - _MEDIANS_CACHE_TS) < ttl_min * 60:
+        if not force_refresh and exclude_url is None and _MEDIANS_CACHE and (now - _MEDIANS_CACHE_TS) < ttl_min * 60:
             return dict(_MEDIANS_CACHE)
+
+        cutoff = datetime.now(UTC) - timedelta(days=max_age_days)
         stmt = select(
             ListingModel.city,
             ListingModel.district,
@@ -465,7 +484,12 @@ class ListingRepository:
         ).where(
             ListingModel.price_per_m2 > 0,
             ListingModel.city.isnot(None),
+            ListingModel.listing_status == "ACTIVE",
+            ListingModel.last_scraped_at.isnot(None),
+            ListingModel.last_scraped_at >= cutoff,
         )
+        if exclude_url:
+            stmt = stmt.where(ListingModel.url != exclude_url)
         res = await self.session.execute(stmt)
         rows = res.all()
 
@@ -486,12 +510,13 @@ class ListingRepository:
 
         medians: dict[str, float] = {}
         for k, vals in district_buckets.items():
-            if vals:
+            if len(vals) >= min_sample:
                 medians[k] = round(float(statistics.median(vals)), 1)
         for k, vals in city_buckets.items():
-            if vals:
+            if len(vals) >= min_sample:
                 medians[k] = round(float(statistics.median(vals)), 1)
 
-        _MEDIANS_CACHE = dict(medians)
-        _MEDIANS_CACHE_TS = now
+        if exclude_url is None:
+            _MEDIANS_CACHE = dict(medians)
+            _MEDIANS_CACHE_TS = now
         return medians

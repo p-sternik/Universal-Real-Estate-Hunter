@@ -260,7 +260,11 @@ async def test_medians_cache_hit_avoids_db():
     async def fake_execute(stmt):
         class FakeResult:
             def all(self):
-                return [("Rzeszów", "Słocina", "dom", 8000.0)]
+                return [
+                    ("Rzeszów", "Słocina", "dom", 7000.0),
+                    ("Rzeszów", "Słocina", "dom", 8000.0),
+                    ("Rzeszów", "Słocina", "dom", 9000.0),
+                ]
 
         return FakeResult()
 

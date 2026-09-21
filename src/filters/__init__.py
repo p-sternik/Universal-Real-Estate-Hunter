@@ -36,6 +36,16 @@ from .vision_analyzer import (
 )
 
 
+def _safe_float(value: Any) -> float | None:
+    try:
+        if value is None:
+            return None
+        f = float(value)
+        return f if f > 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
 class QualificationEngine:
     """
     Two-stage filtration and qualification engine:
@@ -457,6 +467,7 @@ class QualificationEngine:
         profile: Any | None = None,
         skip_llm: bool = False,
         geo_audit: dict[str, Any] | None = None,
+        market_median_m2: float | None = None,
     ) -> FilterResult:
         """
         Runs the multi-stage qualification pipeline on a single listing.
@@ -570,7 +581,7 @@ class QualificationEngine:
             )
             t_llm_start = time.perf_counter()
             self.llm_calls += 1
-            llm_insights = await self.llm.analyze_description(listing)
+            llm_insights = await self.llm.analyze_description(listing, market_median_m2=market_median_m2)
             if llm_insights:
                 self.llm_successes += 1
             else:
@@ -708,6 +719,14 @@ class QualificationEngine:
 
                 contact_phone = llm_insights.get("contact_phone") or None
                 contact_person = llm_insights.get("contact_person") or None
+
+                # AI price suggestion (opening offer / ceiling / per-m² / rationale)
+                listing.ai_suggested_price_per_m2 = _safe_float(llm_insights.get("suggested_price_per_m2"))
+                listing.ai_opening_offer = _safe_float(llm_insights.get("opening_offer"))
+                listing.ai_negotiation_ceiling = _safe_float(llm_insights.get("negotiation_ceiling"))
+                ai_rationale = llm_insights.get("price_rationale")
+                if ai_rationale:
+                    listing.ai_price_rationale = str(ai_rationale).strip()
 
         # Fallback: regex extraction for Polish phone numbers if LLM didn't find one
         if not contact_phone and listing.raw_description:

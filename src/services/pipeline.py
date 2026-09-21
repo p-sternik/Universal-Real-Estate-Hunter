@@ -526,8 +526,20 @@ class ScraperPipeline:
         result["llm_skipped"] = skip_llm
 
         # 2. Run two-stage qualification engine (LLM now receives spatial context in listing!)
+        local_median = None
+        if market_medians:
+            local_median = valuation_engine.resolve_median(
+                listing.city,
+                listing.district,
+                getattr(listing.category, "value", listing.category),
+                override_medians=market_medians,
+            )
         filter_result = await self.engine.evaluate_listing(
-            listing, profile=profile, skip_llm=skip_llm, geo_audit=geo_audit
+            listing,
+            profile=profile,
+            skip_llm=skip_llm,
+            geo_audit=geo_audit,
+            market_median_m2=local_median,
         )
         # The engine may fail to get an answer from the provider — propagate that
         # so cycle summaries stay honest.
