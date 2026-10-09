@@ -609,3 +609,13 @@ def test_listing_model_vision_summary_and_discrepancy_fields() -> None:
         listing.vision_discrepancy_note
         == "W opisie deklarowano stan deweloperski, a zdjęcia pokazują pełne wykończenie."
     )
+
+
+def test_listing_model_discrepancies_round_trip() -> None:
+    from src.storage.models import ListingModel
+
+    listing = ListingModel()
+    listing.discrepancies = ["Portal podaje inny stan niż opis."]
+
+    assert listing.discrepancies == ["Portal podaje inny stan niż opis."]
+    assert listing._discrepancies == '["Portal podaje inny stan niż opis."]'

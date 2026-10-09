@@ -282,17 +282,18 @@ def test_stage2_finish_vocabulary_expansion():
         assert finish == FinishCondition.DO_WYKONCZENIA, f"Expected DO_WYKONCZENIA for: {desc}"
 
 
-def test_stage2_finish_conflict_structured_wins():
+def test_stage2_finish_conflict_description_wins():
     s2 = Stage2SemanticFilter()
 
-    # Portal says DO_WYKONCZENIA, description says 'pod klucz' -> conflict flagged, structured wins
+    # Portal tags are unverified; physical evidence in the description wins.
     listing = create_sample_listing(
         finish_condition=FinishCondition.DO_WYKONCZENIA,
         raw_description="Dom wykończony pod klucz, gotowy do zamieszkania.",
     )
     _, _, _, cons, _, _, _, finish, *_ = s2.analyze(listing)
-    assert finish == FinishCondition.DO_WYKONCZENIA
-    assert any("Rozbieżność stanu wykończenia" in c for c in cons)
+    assert finish == FinishCondition.DO_ZAMIESZKANIA
+    assert any("Skorygowano stan wykończenia" in c for c in cons)
+    assert listing.discrepancies
 
     # Portal deceptively says DO_ZAMIESZKANIA, description mentions remont -> description facts override
     listing2 = create_sample_listing(
@@ -310,6 +311,28 @@ def test_stage2_finish_conflict_structured_wins():
     )
     _, _, _, _, _, _, _, finish3, *_ = s2.analyze(listing3)
     assert finish3 == FinishCondition.DO_WYKONCZENIA
+
+
+def test_stage2_ignores_historical_and_other_unit_finish_claims():
+    s2 = Stage2SemanticFilter()
+
+    descriptions = [
+        "Dom kupiony w stanie deweloperskim i wykończony pod klucz.",
+        "Dostępne są również inne segmenty do wykończenia.",
+    ]
+    for description in descriptions:
+        listing = create_sample_listing(raw_description=description)
+        result = s2.analyze(listing)
+        assert result[7] == FinishCondition.NIEOKRESLONY
+
+
+def test_stage2_keeps_turnkey_when_only_ancillary_work_remains():
+    s2 = Stage2SemanticFilter()
+    listing = create_sample_listing(raw_description="Dom wykończony pod klucz. Do wykończenia pozostał taras i ogród.")
+
+    result = s2.analyze(listing)
+
+    assert result[7] == FinishCondition.DO_ZAMIESZKANIA
 
 
 def test_stage2_visualisations_detection():

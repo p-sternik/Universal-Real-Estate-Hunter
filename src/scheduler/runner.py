@@ -99,14 +99,30 @@ class SchedulerRunner:
             return 20
 
     async def _job_wrapper(self):
+        heartbeat_task: asyncio.Task[None] | None = None
         try:
             interval = self.get_effective_interval()
             prof_str = f" dla profilu '{self.target_profile}'" if self.target_profile else ""
             logger.info(f"[Scheduler] Uruchamianie cyklu scrapowania (aktywny interwał: {interval}m){prof_str}...")
             write_heartbeat(status="scraping", interval_minutes=interval)
+            heartbeat_task = asyncio.create_task(self._refresh_scraping_heartbeat())
             await self.pipeline.run_cycle(target_profile=self.target_profile)
         except Exception as e:
             logger.error("[Scheduler] Nieoczekiwany błąd podczas cyklu: {}", e, exc_info=True)
+        finally:
+            if heartbeat_task is not None:
+                heartbeat_task.cancel()
+                try:
+                    await heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
+    async def _refresh_scraping_heartbeat(self) -> None:
+        """Keep the daemon heartbeat fresh while a potentially long cycle runs."""
+        refresh_seconds = min(max(self.idle_poll_seconds, 1.0), 30.0)
+        while True:
+            await asyncio.sleep(refresh_seconds)
+            write_heartbeat(status="scraping", interval_minutes=self.get_effective_interval())
 
     def stop(self):
         logger.info("[Scheduler] Otrzymano sygnał zatrzymania.")

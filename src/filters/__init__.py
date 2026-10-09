@@ -122,6 +122,7 @@ class QualificationEngine:
             stage2_reasons=stage2_reasons,
             pros=pros,
             cons=cons,
+            discrepancies=list(listing.discrepancies),
             is_corner=is_corner,
             has_parking_or_garage=has_parking_or_garage,
             matched_whitelist_area=matched_whitelist_area,
@@ -546,6 +547,7 @@ class QualificationEngine:
                 stage2_reasons=stage2_reasons,
                 pros=pros,
                 cons=cons,
+                discrepancies=list(listing.discrepancies),
                 is_corner=is_corner,
                 has_parking_or_garage=has_parking,
                 matched_whitelist_area=matched_wl,
@@ -683,6 +685,9 @@ class QualificationEngine:
                 for lr in llm_insights.get("legal_risks", []):
                     cons.append(f"⚖️ [Ryzyko prawne] {lr}")
                 for d in llm_insights.get("discrepancies", []):
+                    discrepancy = str(d).strip()
+                    if discrepancy and discrepancy not in listing.discrepancies:
+                        listing.discrepancies.append(discrepancy)
                     cons.append(f"🔍 [LLM] Rozbieżność portal vs opis: {d}")
                 for p in llm_insights.get("pros", []):
                     if p not in pros:

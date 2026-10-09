@@ -1008,7 +1008,7 @@ class ScraperPipeline:
         logger.info(f"[Pipeline] Scraping stage took {t_scrape:.1f}s total.")
 
         # 2. Concurrently process listings with Semaphore
-        concurrency = getattr(settings, "CONCURRENT_REQUESTS", 6) or 6
+        concurrency = max(1, int(getattr(settings, "CONCURRENT_REQUESTS", 6) or 6))
         sem = asyncio.Semaphore(concurrency)
 
         t_process_start = time.perf_counter()
@@ -1065,10 +1065,16 @@ class ScraperPipeline:
                             global_tracker.set_processing_fraction(_step_idx, _total_steps, processed, total_listings)
                         return item, res
 
-                results = await asyncio.gather(*[safe_process(item) for item in listings])
+                results = []
+                for start in range(0, len(listings), concurrency):
+                    if global_tracker.is_cancelled():
+                        break
+                    batch = listings[start : start + concurrency]
+                    batch_results = await asyncio.gather(*(safe_process(item) for item in batch))
+                    results.extend(batch_results)
 
-                # Single-commit batch persist: 1 commit per batch instead of per listing.
-                # (Per-item sessions above are effectively read-only + geocoder cache.)
+                # Bound task creation while retaining a single commit per profile batch.
+                # Per-item sessions above are effectively read-only + geocoder cache.
                 await self._persist_batch(list(results), prof, cycle_medians, client=http_client)
 
                 for _item, res in results:

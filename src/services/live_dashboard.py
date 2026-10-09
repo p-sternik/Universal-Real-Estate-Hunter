@@ -1402,6 +1402,7 @@ class LiveDashboardServer:
             "filter_reasons": item.filter_reasons,
             "pros": item.pros[:3],
             "cons": item.cons[:2],
+            "discrepancies": item.discrepancies,
             "created_at": item.created_at.isoformat() if item.created_at else None,
             "updated_at": item.updated_at.isoformat() if item.updated_at else None,
             "last_scraped_at": item.last_scraped_at.isoformat() if item.last_scraped_at else None,

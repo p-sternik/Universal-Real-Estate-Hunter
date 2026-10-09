@@ -159,6 +159,7 @@ def _populate_listing_model(
     model.filter_reasons = filter_result.stage1_reasons + filter_result.stage2_reasons
     model.pros = filter_result.pros
     model.cons = filter_result.cons
+    model.discrepancies = filter_result.discrepancies
 
     _apply_ai_fields(model, filter_result)
     _apply_llm_cache_fields(model, llm_cache)
