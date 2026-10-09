@@ -17,13 +17,14 @@ on:
       - "*.md"
       - "assets/**"
       - ".gitignore"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   lint:
@@ -124,7 +125,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [lint, test, docker]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
     permissions:
       contents: write
     steps:
@@ -178,7 +179,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [release]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main' && needs.release.outputs.released == 'true' && github.repository == 'p-sternik/Universal-Real-Estate-Hunter'
     permissions:
       contents: read
       packages: write

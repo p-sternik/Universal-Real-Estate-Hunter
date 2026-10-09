@@ -203,6 +203,7 @@ class FilterResult(BaseModel):
     stage2_reasons: list[str] = Field(default_factory=list)
     pros: list[str] = Field(default_factory=list)
     cons: list[str] = Field(default_factory=list)
+    discrepancies: list[str] = Field(default_factory=list)
     is_corner: bool = False
     has_parking_or_garage: bool = False
     matched_whitelist_area: str | None = None
@@ -320,6 +321,7 @@ class ListingSchema(BaseModel):
     access_road_type: RoadType = RoadType.NIEZNANA
     market: MarketType = MarketType.NIEOKRESLONY
     finish_condition: FinishCondition = FinishCondition.NIEOKRESLONY
+    discrepancies: list[str] = Field(default_factory=list)
     has_visualisations: bool = False
     sewerage: SewerageType = SewerageType.NIEZNANA
     heating: HeatingType = HeatingType.NIEZNANE

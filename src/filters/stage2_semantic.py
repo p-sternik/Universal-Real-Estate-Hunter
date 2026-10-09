@@ -101,6 +101,26 @@ class Stage2SemanticFilter:
         r"(do\s+wykończenia|do\s+wykonczenia|do\s+własnego\s+wykończenia|do\s+samodzielnego\s+wykończenia|wymaga\s+wykończenia|stan\s+do\s+wykończenia|częściowo\s+wykończon\w*|do\s+doprowadzenia\s+do\s+stanu\s+używalnośc\w*|do\s+dokończenia|wymaga\s+dokończenia|w\s+trakcie\s+wykończenia)",
         re.IGNORECASE,
     )
+    RE_FINISH_ANCILLARY_ITEM = re.compile(
+        r"\b(?:taras\w*|ogr[oó]d\w*|elewacj\w*|poddasz\w*|podjazd\w*|ogrodzeni\w*|"
+        r"kostk\w*\s+brukow\w*)\b",
+        re.IGNORECASE,
+    )
+    RE_FINISH_INTERIOR_ITEM = re.compile(
+        r"\b(?:wnętrz\w*|kuchni\w*|łazien\w*|podłog\w*|posadzk\w*|wylewk\w*|tynk\w*|"
+        r"instalacj\w*|ścian\w*|sypialni\w*|salon\w*)\b",
+        re.IGNORECASE,
+    )
+    RE_FINISH_HISTORICAL_CLAIM = re.compile(
+        r"\b(?:kupion\w*|zakupion\w*|naby\w*)\b[^.!?\n]{0,200}"
+        r"\b(?:stan(?:ie)?\s+)?dewelopersk\w*\b[^.!?\n]{0,200}\bwykończon\w*[^.!?\n]*",
+        re.IGNORECASE,
+    )
+    RE_FINISH_OTHER_UNIT_CLAIM = re.compile(
+        r"\b(?:dostępne\s+)?inne\s+(?:segment\w*|lokal\w*|dom\w*|mieszkan\w*)\b"
+        r"[^,.;!?\n]{0,100}\b(?:do\s+wykończenia|do\s+wykonczenia|stan\s+dewelopersk\w*)\b",
+        re.IGNORECASE,
+    )
     RE_FINISH_SUROWY_ZAMKNIETY = re.compile(
         r"(stan(?:ie)?\s+surow(?:ym|y)?\s+zamknięt\w*|surowy\s+zamknięty|\bssz\b)",
         re.IGNORECASE,
@@ -195,21 +215,36 @@ class Stage2SemanticFilter:
         self, text: str, existing_finish: FinishCondition = FinishCondition.NIEOKRESLONY
     ) -> FinishCondition:
         """Detect finish condition via regex heuristics, prioritizing hard construction evidence."""
+        # Remove explicit historical claims and references to other units before
+        # classifying the property described by this listing.
+        subject_text = self.RE_FINISH_HISTORICAL_CLAIM.sub(" ", text)
+        subject_text = self.RE_FINISH_OTHER_UNIT_CLAIM.sub(" ", subject_text)
+
         # 1. Raw states
-        if self.RE_FINISH_SUROWY_OTWARTY.search(text):
+        if self.RE_FINISH_SUROWY_OTWARTY.search(subject_text):
             return FinishCondition.SUROWY_OTWARTY
-        if self.RE_FINISH_SUROWY_ZAMKNIETY.search(text):
+        if self.RE_FINISH_SUROWY_ZAMKNIETY.search(subject_text):
             return FinishCondition.SUROWY_ZAMKNIETY
 
         # 2. Renovation needed
-        if self.RE_FINISH_DO_REMONTU.search(text):
+        if self.RE_FINISH_DO_REMONTU.search(subject_text):
             return FinishCondition.DO_REMONTU
 
         # 3. Explicit developer state or unfinished or under construction / option for turnkey
-        is_dev = bool(self.RE_FINISH_DEWELOPERSKI.search(text))
-        is_to_finish = bool(self.RE_FINISH_DO_WYKONCZENIA.search(text))
-        is_option_turnkey = bool(self.RE_FINISH_OPTION_UNDER_KEY.search(text))
-        is_under_construction = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(text))
+        is_dev = bool(self.RE_FINISH_DEWELOPERSKI.search(subject_text))
+        is_to_finish = False
+        for clause in re.split(r"[,;.!?\n]+", subject_text):
+            if not self.RE_FINISH_DO_WYKONCZENIA.search(clause):
+                continue
+            # Unfinished terrace, garden, facade, paving, etc. does not make
+            # completed living quarters uninhabitable. Only ignore the phrase
+            # when that clause contains no unfinished interior work.
+            if self.RE_FINISH_ANCILLARY_ITEM.search(clause) and not self.RE_FINISH_INTERIOR_ITEM.search(clause):
+                continue
+            is_to_finish = True
+            break
+        is_option_turnkey = bool(self.RE_FINISH_OPTION_UNDER_KEY.search(subject_text))
+        is_under_construction = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(subject_text))
 
         if is_to_finish:
             return FinishCondition.DO_WYKONCZENIA
@@ -217,7 +252,7 @@ class Stage2SemanticFilter:
             return FinishCondition.DEWELOPERSKI
 
         # 4. Ready to use / turnkey (only if NOT overridden by developer/construction markers)
-        if self.RE_FINISH_DO_ZAMIESZKANIA.search(text):
+        if self.RE_FINISH_DO_ZAMIESZKANIA.search(subject_text):
             return FinishCondition.DO_ZAMIESZKANIA
 
         return existing_finish
@@ -410,23 +445,16 @@ class Stage2SemanticFilter:
             and desc_finish != existing_finish
         ):
             detected_finish: FinishCondition
-            if existing_finish == FinishCondition.DO_ZAMIESZKANIA and desc_finish in (
-                FinishCondition.DEWELOPERSKI,
-                FinishCondition.DO_WYKONCZENIA,
-                FinishCondition.SUROWY_ZAMKNIETY,
-                FinishCondition.SUROWY_OTWARTY,
-                FinishCondition.DO_REMONTU,
-            ):
-                # Description facts override deceptive portal tag
-                detected_finish = desc_finish
-                cons.append(
-                    f"⚠️ Skorygowano stan wykończenia: portal podaje '{existing_finish.value}', ale opis wykazuje stan '{desc_finish.value}'"
-                )
-            else:
-                detected_finish = existing_finish
-                cons.append(
-                    f"⚠️ Rozbieżność stanu wykończenia: dane portalu '{existing_finish.value}', opis sugeruje '{desc_finish.value}'"
-                )
+            # Portal finish tags are unverified claims; use the description as
+            # the source of truth for every detected contradiction.
+            detected_finish = desc_finish
+            discrepancy = (
+                f"⚠️ Skorygowano stan wykończenia: portal podaje '{existing_finish.value}', "
+                f"ale opis wykazuje stan '{desc_finish.value}'"
+            )
+            if discrepancy not in listing.discrepancies:
+                listing.discrepancies.append(discrepancy)
+            cons.append(discrepancy)
         elif desc_finish != FinishCondition.NIEOKRESLONY:
             detected_finish = desc_finish
         else:

@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -674,7 +675,19 @@ class ConfigManager:
                         self._last_mtime = mtime
                     return self._config
             except Exception as e:
-                logger.warning(f"[ConfigManager] Błąd odczytu {self.config_path}, przywracam domyślne: {e}")
+                logger.warning(
+                    f"[ConfigManager] Błąd odczytu {self.config_path}; zachowuję ostatnią poprawną konfigurację: {e}"
+                )
+                # A malformed or partially written file must never be replaced with
+                # defaults. Keep the last known good config (or use in-memory defaults
+                # on first startup) and wait for the file to be corrected.
+                try:
+                    self._last_mtime = self.config_path.stat().st_mtime
+                except OSError:
+                    pass
+                if self._config is None:
+                    self._config = self._get_default_config()
+                return self._config
 
         # Check fallback root configs (e.g. inside Docker image when volume config_path doesn't exist yet)
         for fallback_name in ("search_config.json", "search_config.example.json"):
@@ -700,11 +713,23 @@ class ConfigManager:
     def save_config(self) -> None:
         if self._config is None:
             self._config = self._get_default_config()
+        temp_path: str | None = None
         try:
             self.config_path.parent.mkdir(parents=True, exist_ok=True)
-            with self.config_path.open("w", encoding="utf-8", newline="\n") as f:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                newline="\n",
+                dir=self.config_path.parent,
+                prefix=f".{self.config_path.name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as f:
+                temp_path = f.name
                 json.dump(self._config.model_dump(), f, ensure_ascii=False, indent=2)
                 f.write("\n")
+            Path(temp_path).replace(self.config_path)
+            temp_path = None
             try:
                 self._last_mtime = self.config_path.stat().st_mtime
             except OSError:
@@ -712,6 +737,12 @@ class ConfigManager:
             logger.info(f"[ConfigManager] Zapisano konfigurację do {self.config_path}")
         except Exception as e:
             logger.error(f"[ConfigManager] Nie udało się zapisać konfiguracji: {e}")
+        finally:
+            if temp_path is not None:
+                try:
+                    Path(temp_path).unlink()
+                except OSError:
+                    pass
 
     def get_config(self) -> SearchConfig:
         if self._config is None:

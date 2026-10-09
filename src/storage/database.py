@@ -367,6 +367,7 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("filter_reasons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
     ("pros", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
     ("cons", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
+    ("discrepancies", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
     ("physical_fingerprint", "VARCHAR(64)", "VARCHAR(64)"),
     ("listing_status", "VARCHAR(30) DEFAULT 'ACTIVE'", "VARCHAR(30) DEFAULT 'ACTIVE'"),
     ("first_seen_at", "DATETIME", "TIMESTAMP WITH TIME ZONE"),

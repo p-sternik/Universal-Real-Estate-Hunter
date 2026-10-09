@@ -195,6 +195,7 @@ class ListingModel(Base):
     _filter_reasons: Mapped[str] = mapped_column("filter_reasons", Text, default="[]")
     _pros: Mapped[str] = mapped_column("pros", Text, default="[]")
     _cons: Mapped[str] = mapped_column("cons", Text, default="[]")
+    _discrepancies: Mapped[str] = mapped_column("discrepancies", Text, default="[]")
     _gallery_images: Mapped[str] = mapped_column("gallery_images", Text, default="[]")
 
     # AI Due Diligence & Contact Info
@@ -285,6 +286,17 @@ class ListingModel(Base):
     @cons.setter
     def cons(self, value: list[str]):
         self._cons = json.dumps(value or [], ensure_ascii=False)
+
+    @property
+    def discrepancies(self) -> list[str]:
+        try:
+            return json.loads(self._discrepancies)
+        except Exception:
+            return []
+
+    @discrepancies.setter
+    def discrepancies(self, value: list[str] | None):
+        self._discrepancies = json.dumps(value or [], ensure_ascii=False)
 
     @property
     def gallery_images(self) -> list[str]:

@@ -101,6 +101,17 @@ def test_config_manager_reloads_when_file_modified_on_disk(tmp_path):
     assert cfg2.scheduler.night_mode is False
 
 
+def test_config_manager_preserves_malformed_file(tmp_path):
+    from src.services.config_manager import ConfigManager
+
+    cfg_file = tmp_path / "search_config.json"
+    cfg_file.write_text("{partially-written", encoding="utf-8")
+    manager = ConfigManager(config_path=cfg_file)
+
+    assert cfg_file.read_text(encoding="utf-8") == "{partially-written"
+    assert manager.get_config().profiles
+
+
 def test_scheduler_heartbeat_lifecycle(tmp_path, monkeypatch):
     import src.scheduler.runner as runner_module
 
