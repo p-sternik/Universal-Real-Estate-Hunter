@@ -2,11 +2,11 @@
 # PostgreSQL (the recommended database). Pulls the prebuilt image from GHCR —
 # no source checkout required.
 #
-# Two services: PostgreSQL 16 + the dashboard. Scraping runs in-process via the
-# one-click "scrape" button in the UI, so no separate scraper daemon is needed.
+# Two services: PostgreSQL 16 + the dashboard. The dashboard runs the scheduler
+# in-process, so no separate scheduler/scraper daemon is needed. One-click scraping
+# in the UI remains available as well.
 #
-# For continuous background monitoring, use the full docker-compose.yml instead
-# (adds a dedicated scheduler/scraper daemon).
+# For an isolated scraper service, use the full docker-compose.yml instead.
 #
 # Usage:
 #   docker compose -f docker-compose.minimal.yml up -d
@@ -42,6 +42,7 @@ services:
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate_hunter_secret_pass}@db:5432/${POSTGRES_DB:-estate_hunter}
       - SEARCH_CONFIG_PATH=/app/data/search_config.json
+      - WITH_SCHEDULER=true
       - TZ=Europe/Warsaw
       # Optional: local Ollama for LLM / Vision AI running on the host.
       # If enabled, also uncomment the `extra_hosts` block below.

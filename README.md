@@ -181,7 +181,7 @@ docker compose logs -f scraper
 
 **Image-based (no build):** services pull the prebuilt release image from GHCR (`ghcr.io/p-sternik/universal-real-estate-hunter`), so `docker compose up -d` needs no source checkout. Pin a release via `IMAGE_TAG` (default `latest`). To build locally from source instead: `docker build -t ghcr.io/p-sternik/universal-real-estate-hunter:local .`
 
-**Minimal setup:** want the simplest possible start while still using PostgreSQL (the recommended database)? Use [`docker-compose.minimal.yml`](docker-compose.minimal.yml) — PostgreSQL 16 + a single dashboard container (no separate scraper daemon), with one-click in-process scraping:
+**Minimal setup:** want the simplest possible start while still using PostgreSQL (the recommended database)? Use [`docker-compose.minimal.yml`](docker-compose.minimal.yml) - PostgreSQL 16 + a single dashboard container. The dashboard runs the scheduler in-process, and one-click scraping is also available in the UI. Use the full [`docker-compose.yml`](docker-compose.yml) for an isolated scraper service:
 
 ```bash
 docker compose -f docker-compose.minimal.yml up -d
