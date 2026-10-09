@@ -6,6 +6,15 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.20.2 (2026-10-09)
+
+### Bug Fixes
+
+- Harden AI evidence and daemon status
+  ([#36](https://github.com/p-sternik/Universal-Real-Estate-Hunter/pull/36),
+  [`3ceccb7`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/3ceccb7813dc40e1c535c1b92bdc214b121d738f))
+
+
 ## v1.20.1 (2026-10-09)
 
 ### Bug Fixes
