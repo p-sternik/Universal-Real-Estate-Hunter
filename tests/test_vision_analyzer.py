@@ -5,6 +5,22 @@ import pytest
 from src.filters.vision_analyzer import VisionAnalyzer, is_vision_model
 
 
+class MockImageStream:
+    def __init__(self, *, status_code: int, content: bytes, content_type: str = "image/jpeg"):
+        self.status_code = status_code
+        self.headers = {"content-type": content_type, "content-length": str(len(content))}
+        self.content = content
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return False
+
+    async def aiter_bytes(self):
+        yield self.content
+
+
 def test_is_vision_model_matches_suggested_and_families():
     assert is_vision_model("qwen2.5vl:7b") is True
     assert is_vision_model("llama3.2-vision:11b") is True
@@ -25,9 +41,9 @@ def test_is_vision_model_rejects_text_models():
 def test_build_openai_vision_payload():
     analyzer = VisionAnalyzer()
     images = [
-        "https://example.com/salon.jpg",
-        "https://example.com/kuchnia.jpg",
-        "https://example.com/rzut.jpg",
+        "https://images.otodom.pl/salon.jpg",
+        "https://images.otodom.pl/kuchnia.jpg",
+        "https://images.otodom.pl/rzut.jpg",
     ]
     payload = analyzer.build_openai_vision_payload(images, declared_finish="do zamieszkania", model_name="gpt-4o-mini")
     assert payload["model"] == "gpt-4o-mini"
@@ -37,7 +53,7 @@ def test_build_openai_vision_payload():
     assert content[0]["type"] == "text"
     assert "do zamieszkania" in content[0]["text"]
     assert content[1]["type"] == "image_url"
-    assert content[1]["image_url"]["url"] == "https://example.com/salon.jpg"
+    assert content[1]["image_url"]["url"] == "https://images.otodom.pl/salon.jpg"
 
 
 def test_parse_vision_response_valid():
@@ -45,7 +61,7 @@ def test_parse_vision_response_valid():
     raw = """```json
     {
       "is_render": false,
-      "render_confidence": 0.02,
+      "render_confidence": 0.98,
       "visual_finish_condition": "DO_ZAMIESZKANIA",
       "has_floorplan": true,
       "floorplan_details": {
@@ -59,6 +75,7 @@ def test_parse_vision_response_valid():
     ```"""
     res = analyzer.parse_vision_response(raw, declared_finish="do zamieszkania")
     assert res["vision_is_render"] is False
+    assert res["vision_render_confidence"] == 0.98
     assert res["vision_finish_condition"] == "DO_ZAMIESZKANIA"
     assert res["discrepancy_detected"] is False
     assert res["vision_floorplan_details"]["orientation"] == "Ogród od południa"
@@ -79,7 +96,7 @@ def test_parse_vision_response_discrepancy():
     res = analyzer.parse_vision_response(raw, declared_finish="do zamieszkania")
     assert res["vision_finish_condition"] == "DEWELOPERSKI"
     assert res["discrepancy_detected"] is True
-    assert "deklaruje stan 'do zamieszkania'" in res["discrepancy_note"]
+    assert "Opis ogłoszenia wskazuje stan 'do zamieszkania'" in res["discrepancy_note"]
     assert len(res["vision_defects"]) == 2
 
 
@@ -87,18 +104,23 @@ def test_parse_vision_response_discrepancy():
 async def test_audit_images_mocked():
     analyzer = VisionAnalyzer()
     client = AsyncMock()
+    client.stream = MagicMock(return_value=MockImageStream(status_code=404, content=b""))
     mock_resp = MagicMock()
     mock_resp.status_code = 200
     mock_resp.json.return_value = {
         "choices": [
-            {"message": {"content": '{"is_render": true, "visual_finish_condition": "DEWELOPERSKI", "defects": []}'}}
+            {
+                "message": {
+                    "content": '{"is_render": true, "render_confidence": 0.99, "visual_finish_condition": "DEWELOPERSKI", "defects": []}'
+                }
+            }
         ]
     }
     client.post.return_value = mock_resp
 
     res = await analyzer.audit_images(
         client,
-        image_urls=["https://example.com/render1.jpg"],
+        image_urls=["https://images.otodom.pl/render1.jpg"],
         declared_finish="deweloperski",
         api_base="https://mock-api.com/v1",
         api_key="mock-test-key",
@@ -122,15 +144,13 @@ async def test_fetch_image_as_data_uri_success():
 
     analyzer = VisionAnalyzer()
     client = AsyncMock()
-    mock_get = MagicMock()
-    mock_get.status_code = 200
-    mock_get.content = raw_bytes
-    mock_get.headers = {"content-type": "image/jpeg"}
-    client.get.return_value = mock_get
+    client.stream = MagicMock(return_value=MockImageStream(status_code=200, content=raw_bytes))
 
-    data_uri = await analyzer.fetch_image_as_data_uri(client, "https://images.example.com/photo.jpg", max_dimension=800)
+    data_uri = await analyzer.fetch_image_as_data_uri(client, "https://images.otodom.pl/photo.jpg", max_dimension=800)
     assert data_uri is not None
     assert data_uri.startswith("data:image/jpeg;base64,")
+    client.stream.assert_called_once()
+    assert client.stream.call_args.kwargs["follow_redirects"] is False
 
 
 @pytest.mark.asyncio
@@ -140,20 +160,54 @@ async def test_fetch_image_as_data_uri_passthrough():
     existing_uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
     res = await analyzer.fetch_image_as_data_uri(client, existing_uri)
     assert res == existing_uri
-    client.get.assert_not_called()
+    client.stream.assert_not_called()
 
 
 @pytest.mark.asyncio
 async def test_fetch_image_as_data_uri_http_error():
     analyzer = VisionAnalyzer()
     client = AsyncMock()
-    mock_get = MagicMock()
-    mock_get.status_code = 404
-    mock_get.content = b""
-    client.get.return_value = mock_get
+    client.stream = MagicMock(return_value=MockImageStream(status_code=404, content=b""))
 
-    res = await analyzer.fetch_image_as_data_uri(client, "https://example.com/nonexistent.jpg")
+    res = await analyzer.fetch_image_as_data_uri(client, "https://images.otodom.pl/nonexistent.jpg")
     assert res is None
+
+
+@pytest.mark.asyncio
+async def test_fetch_image_rejects_untrusted_hosts():
+    analyzer = VisionAnalyzer()
+    client = AsyncMock()
+
+    assert await analyzer.fetch_image_as_data_uri(client, "http://127.0.0.1/admin") is None
+    assert await analyzer.fetch_image_as_data_uri(client, "https://example.com/photo.jpg") is None
+    client.stream.assert_not_called()
+
+
+def test_parse_vision_response_requires_confident_render_classification():
+    analyzer = VisionAnalyzer()
+    uncertain = analyzer.parse_vision_response(
+        '{"is_render": true, "render_confidence": 0.6, "visual_finish_condition": "DO_ZAMIESZKANIA"}'
+    )
+    assert uncertain["vision_is_render"] is None
+    assert uncertain["vision_render_confidence"] == 0.6
+
+    malformed = analyzer.parse_vision_response(
+        '{"is_render": "false", "render_confidence": 0.99, "visual_finish_condition": "DO_ZAMIESZKANIA"}'
+    )
+    assert malformed["audit_success"] is False
+    assert malformed["vision_is_render"] is None
+
+
+def test_select_vision_images_samples_full_gallery():
+    from src.filters.vision_analyzer import select_vision_image_urls
+
+    urls = [f"https://images.otodom.pl/{index}.jpg" for index in range(12)]
+    selected = select_vision_image_urls(urls)
+
+    assert len(selected) == 6
+    assert selected[0] == urls[0]
+    assert selected[-1] == urls[-1]
+    assert urls[9] in selected
 
 
 def test_parse_vision_response_resilient_markdown_and_chatter():
@@ -161,7 +215,7 @@ def test_parse_vision_response_resilient_markdown_and_chatter():
     raw = """Oto wynik analizy zdjęć ofertowych:
     {
       "is_render": false,
-      "render_confidence": 0.01,
+      "render_confidence": 0.99,
       "visual_finish_condition": "DO_ZAMIESZKANIA",
       "has_floorplan": false,
       "defects": [],
@@ -226,7 +280,7 @@ def test_parse_vision_response_text_fallback():
     raw = "The image features a large finished white house, fully furnished with ready kitchen and modern rooms."
     res = vision_analyzer.parse_vision_response(raw)
     assert res["vision_finish_condition"] == "DO_ZAMIESZKANIA"
-    assert res["vision_is_render"] is False
+    assert res["vision_is_render"] is None
     assert res["audit_success"] is True
 
 

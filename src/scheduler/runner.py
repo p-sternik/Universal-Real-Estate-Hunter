@@ -4,6 +4,7 @@ import os
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from loguru import logger
 
@@ -14,14 +15,20 @@ from src.storage import init_db
 
 def get_heartbeat_path() -> Path:
     from config import settings
+    from src.services.config_manager import config_manager
 
     db_url = settings.DATABASE_URL
     if "sqlite" in db_url and db_url.startswith("sqlite+aiosqlite:///"):
         path = db_url.replace("sqlite+aiosqlite:///", "")
         p = Path(path)
         if p.parent and str(p.parent) not in (".", ""):
-            return p.parent / ".scheduler_heartbeat.json"
-    return Path("data") / ".scheduler_heartbeat.json"
+            return (p.parent / ".scheduler_heartbeat.json").resolve()
+    config_path = getattr(config_manager, "config_path", None)
+    if config_path is not None:
+        config_parent = Path(config_path).parent
+        if str(config_parent) not in (".", ""):
+            return (config_parent / ".scheduler_heartbeat.json").resolve()
+    return (Path("data") / ".scheduler_heartbeat.json").resolve()
 
 
 def write_heartbeat(status: str = "running", interval_minutes: int = 20) -> None:
@@ -42,19 +49,35 @@ def write_heartbeat(status: str = "running", interval_minutes: int = 20) -> None
         logger.debug(f"[Scheduler] Failed to write heartbeat: {e}")
 
 
-def is_scheduler_active(max_age_seconds: float = 60.0) -> bool:
+def get_scheduler_heartbeat(max_age_seconds: float = 60.0) -> dict[str, Any]:
+    """Return heartbeat health details for the dashboard and health checks."""
     try:
         p = get_heartbeat_path()
         if not p.exists():
-            return False
+            return {"active": False, "status": "missing", "age_seconds": None}
         content = p.read_text(encoding="utf-8")
         data = json.loads(content)
-        if data.get("status") == "stopped":
-            return False
         age = time.time() - float(data.get("time_epoch", 0.0))
-        return age <= max_age_seconds
+        status = str(data.get("status") or "unknown")
+        fresh = 0.0 <= age <= max_age_seconds
+        active = status != "stopped" and fresh
+        return {
+            "active": active,
+            "status": "stopped"
+            if status == "stopped"
+            else status
+            if active
+            else "stale"
+            if age > max_age_seconds
+            else "offline",
+            "age_seconds": max(0.0, round(age, 1)) if age >= 0 else None,
+        }
     except Exception:
-        return False
+        return {"active": False, "status": "unreadable", "age_seconds": None}
+
+
+def is_scheduler_active(max_age_seconds: float = 60.0) -> bool:
+    return bool(get_scheduler_heartbeat(max_age_seconds).get("active"))
 
 
 class SchedulerRunner:

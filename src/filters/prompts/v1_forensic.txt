@@ -5,8 +5,8 @@
 #   {year_built} {market} {spatial_block} {desc_slice}
 Extract the forensic factual state ("stan faktyczny") from the Polish property listing below and return a JSON object.
 
-=== GROUND TRUTH HIERARCHY ===
-1. Physical Ground Truth Rule: The physical reality described in the listing text ALWAYS trumps unverified portal metadata tags. Portal tags are frequently stale defaults, automated errors, or agent copy-paste mistakes.
+=== EVIDENCE SOURCE ORDER ===
+1. Evidence provenance: Seller/agent text is an unverified claim, not confirmed physical reality. Use specific text evidence to correct weaker portal tags, but label the source and preserve material contradictions. Photos support only visible details and may be stale, staged, rendered, or from another unit; registry records are authoritative only for their recorded scope and location.
 2. Living Quarters Principle: The finish condition is governed solely by the readiness of the primary residential living quarters (kitchen, bathrooms, living room, bedrooms, floors, utility installations). Unfinished ancillary, exterior, or optional spaces do NOT degrade the core condition.
 
 === FINISH CONDITION TAXONOMY (Strict Resolution) ===

@@ -65,6 +65,7 @@ GUNB_FIELDS: tuple[str, ...] = (
 
 VISION_FIELDS: tuple[str, ...] = (
     "vision_is_render",
+    "vision_render_confidence",
     "vision_finish_condition",
     "vision_floorplan_details",
     "vision_defects",
@@ -268,6 +269,7 @@ class FilterResult(BaseModel):
     gunb_status: str | None = None
     # Extended Intelligence: Vision AI (Living Quarters & Renders)
     vision_is_render: bool | None = None
+    vision_render_confidence: float | None = None
     vision_finish_condition: str | None = None
     vision_floorplan_details: dict[str, Any] | None = None
     vision_defects: list[str] | None = None
@@ -400,6 +402,7 @@ class ListingSchema(BaseModel):
     gunb_status: str | None = None
     # Extended Intelligence: Vision AI (Living Quarters & Renders)
     vision_is_render: bool | None = None
+    vision_render_confidence: float | None = None
     vision_finish_condition: str | None = None
     vision_floorplan_details: dict[str, Any] | None = None
     vision_defects: list[str] | None = None

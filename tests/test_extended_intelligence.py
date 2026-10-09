@@ -48,8 +48,10 @@ def test_vision_render_and_discrepancy():
     engine = QualificationEngine()
     listing = make_base_listing(
         vision_is_render=True,
+        vision_render_confidence=0.95,
         vision_finish_condition="DEWELOPERSKI",
         vision_defects=["Brak białego montażu"],
+        vision_discrepancy_note="Niespójność stanu: opis deklaruje stan gotowy, a zdjęcia wskazują deweloperski.",
     )
     score, pros, cons = engine.apply_spatial_findings(listing, score=100.0, pros=[], cons=[], geo_audit=None)
     # -10 render, -15 discrepancy, defects listed
@@ -323,3 +325,38 @@ async def test_standalone_vision_runs_without_coordinates(monkeypatch):
     assert res is not None
     assert listing.vision_finish_condition == "DO_ZAMIESZKANIA"
     assert res["vision_summary"] == "Gotowe do zamieszkania."
+
+
+@pytest.mark.asyncio
+async def test_vision_compares_to_description_and_records_discrepancy(monkeypatch):
+    from src.filters import vision_analyzer as vision_module
+    from src.services import pipeline as pipeline_module
+
+    captured: dict[str, str | None] = {}
+
+    async def fake_audit_images(client=None, image_urls=None, declared_finish=None, **kwargs):
+        captured["declared_finish"] = declared_finish
+        return {
+            "audit_success": True,
+            "vision_is_render": False,
+            "vision_render_confidence": 0.98,
+            "vision_finish_condition": "DEWELOPERSKI",
+            "vision_floorplan_details": {},
+            "vision_defects": [],
+            "discrepancy_detected": True,
+            "discrepancy_note": "Opis podaje stan gotowy, a zdjęcia sugerują deweloperski.",
+            "vision_summary": "Widać stan deweloperski.",
+        }
+
+    monkeypatch.setattr(vision_module.vision_analyzer, "audit_images", fake_audit_images)
+    listing = make_base_listing(
+        finish_condition=FinishCondition.DEWELOPERSKI,
+        raw_description="W pełni wykończony dom, gotowy do zamieszkania pod klucz.",
+        gallery_images=["https://images.otodom.pl/photo.jpg"],
+    )
+
+    await pipeline_module.audit_vision_data(listing)
+
+    assert captured["declared_finish"] == FinishCondition.DO_ZAMIESZKANIA.value
+    assert listing.vision_render_confidence == 0.98
+    assert listing.discrepancies == ["Opis podaje stan gotowy, a zdjęcia sugerują deweloperski."]

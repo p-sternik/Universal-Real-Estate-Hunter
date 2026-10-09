@@ -1405,7 +1405,14 @@
                 if (sched.daemon_active === true) {
                     schedStatusBadge = ' <span style="font-size:11px;color:var(--success,#10b981);font-weight:600;">(daemon aktywny)</span>';
                 } else if (sched.daemon_active === false) {
-                    schedStatusBadge = ' <span style="font-size:11px;color:var(--warning,#eab308);font-weight:600;" title="Brak aktywnego procesu python main.py run ani flagi --with-scheduler">(daemon offline)</span>';
+                    const status = sched.daemon_status || 'offline';
+                    const age = Number.isFinite(sched.heartbeat_age_seconds)
+                        ? ` Ostatni heartbeat: ${Math.round(sched.heartbeat_age_seconds)} s temu.`
+                        : '';
+                    const hint = status === 'missing'
+                        ? 'Nie znaleziono heartbeat. Uruchom python main.py run, dashboard --with-scheduler albo sprawdź usługę scraper w Docker Compose.'
+                        : `Brak świeżego heartbeat harmonogramu (${escapeHtml(status)}). Sprawdź proces python main.py run lub usługę scraper.${age}`;
+                    schedStatusBadge = ` <span style="font-size:11px;color:var(--warning,#eab308);font-weight:600;" title="${hint}">(daemon offline)</span>`;
                 }
             }
             const schedText = sched.enabled === false

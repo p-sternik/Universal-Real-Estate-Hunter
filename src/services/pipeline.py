@@ -217,36 +217,45 @@ async def audit_vision_data(target: Any, client: httpx.AsyncClient | None = None
     Returns the vision result dict, or None when skipped.
     """
     try:
-        from src.filters.vision_analyzer import declared_finish_label, vision_analyzer
+        from src.filters.stage2_semantic import Stage2SemanticFilter
+        from src.filters.vision_analyzer import select_vision_image_urls, vision_analyzer
+        from src.models.enums import FinishCondition
 
         gallery = list(getattr(target, "gallery_images", None) or [])
         main_img = getattr(target, "main_image_url", None)
         if main_img and main_img not in gallery:
             gallery = [main_img, *gallery]
+        gallery = select_vision_image_urls(gallery)
         if not gallery:
             return None
         existing_finish = getattr(target, "vision_finish_condition", None)
         if existing_finish and existing_finish != "NIEZNANY":
             return None
 
+        text_finish = Stage2SemanticFilter().detect_finish_condition(
+            getattr(target, "raw_description", "") or "", FinishCondition.NIEOKRESLONY
+        )
+        declared_finish = text_finish.value if text_finish != FinishCondition.NIEOKRESLONY else None
+
         if client is not None:
             vision_res = await vision_analyzer.audit_images(
                 client,
-                image_urls=gallery[:6],
-                declared_finish=declared_finish_label(target),
+                image_urls=gallery,
+                declared_finish=declared_finish,
             )
         else:
             async with httpx.AsyncClient() as vision_client:
                 vision_res = await vision_analyzer.audit_images(
                     vision_client,
-                    image_urls=gallery[:6],
-                    declared_finish=declared_finish_label(target),
+                    image_urls=gallery,
+                    declared_finish=declared_finish,
                 )
         if isinstance(vision_res, dict) and vision_res.get("audit_success", True):
             from src.models.listing import VISION_FIELDS
 
             vision_payload = {
                 "vision_is_render": vision_res.get("vision_is_render"),
+                "vision_render_confidence": vision_res.get("vision_render_confidence"),
                 "vision_finish_condition": vision_res.get("vision_finish_condition"),
                 "vision_floorplan_details": vision_res.get("vision_floorplan_details"),
                 "vision_defects": vision_res.get("vision_defects"),
@@ -255,6 +264,12 @@ async def audit_vision_data(target: Any, client: httpx.AsyncClient | None = None
                 or vision_res.get("vision_discrepancy_note"),
             }
             apply_if_present(target, vision_payload, VISION_FIELDS)
+            discrepancy = vision_payload["vision_discrepancy_note"]
+            target_discrepancies = getattr(target, "discrepancies", None)
+            if isinstance(discrepancy, str) and discrepancy.strip() and isinstance(target_discrepancies, list):
+                clean_discrepancy = discrepancy.strip()
+                if clean_discrepancy not in target_discrepancies:
+                    target_discrepancies.append(clean_discrepancy)
             return vision_res
     except Exception as e:
         logger.debug(f"[Pipeline] Vision audit note: {e}")
