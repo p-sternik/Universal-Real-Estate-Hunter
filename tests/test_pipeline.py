@@ -467,3 +467,45 @@ async def test_persist_batch_single_commit_for_many_listings(async_session, monk
     assert len(session_calls) == 2
     assert pipeline.discord.send_notification.await_count == 2
     assert pipeline.telegram.send_notification.await_count == 2
+
+
+def test_is_price_drop_helper():
+    from src.services.pipeline import _is_price_drop
+
+    assert _is_price_drop(1_000_000, 950_000) is True
+    assert _is_price_drop(1_000_000, 1_000_000) is False
+    assert _is_price_drop(1_000_000, 1_050_000) is False
+    assert _is_price_drop(None, 950_000) is False
+    assert _is_price_drop(1_000_000, None) is False
+
+
+def test_should_notify_retries_pending_and_honors_price_drops(monkeypatch):
+    from src.services.config_manager import SearchConfig
+    from src.services.pipeline import _should_notify
+
+    cfg = SearchConfig()
+    cfg.notifications.enabled = True
+    cfg.notifications.notify_on_new_qualified = True
+    cfg.notifications.notify_on_price_drop = True
+
+    import src.services.config_manager as cm
+
+    monkeypatch.setattr(cm.config_manager, "get_config", lambda: cfg)
+
+    # 1. Price increase must not notify
+    assert _should_notify(is_qualified=True, is_new=False, price_changed=False, score=80.0) is False
+
+    # 2. Price drop must notify
+    assert _should_notify(is_qualified=True, is_new=False, price_changed=True, score=80.0) is True
+
+    # 3. Pending listing (never notified previously) must notify as new
+    assert (
+        _should_notify(
+            is_qualified=True,
+            is_new=False,
+            price_changed=False,
+            score=80.0,
+            pending=True,
+        )
+        is True
+    )

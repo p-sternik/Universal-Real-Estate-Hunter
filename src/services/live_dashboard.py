@@ -14,6 +14,7 @@ import aiohttp
 from aiohttp import web
 from loguru import logger
 from PIL import Image, ImageOps
+from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.orm import selectinload
 
@@ -529,11 +530,25 @@ class LiveDashboardServer:
         )
 
     async def handle_update_config(self, request: web.Request) -> web.Response:
-        data = await request.json()
+        try:
+            data = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return web.json_response({"error": "Nieprawidłowy format JSON."}, status=400)
         old_cfg = config_manager.get_config()
         old_profiles = {p.id: p for p in old_cfg.profiles}
 
-        updated = config_manager.update_config(data)
+        if not isinstance(data, dict):
+            return web.json_response({"error": "Konfiguracja musi być obiektem JSON."}, status=400)
+        if "profiles" in data and data["profiles"] == []:
+            return web.json_response({"error": "Pozostaw co najmniej jeden profil wyszukiwania."}, status=400)
+        try:
+            updated = config_manager.update_config(data)
+        except ValidationError as exc:
+            errors = [
+                {"field": ".".join(str(part) for part in error["loc"]), "message": error["msg"]}
+                for error in exc.errors(include_input=False, include_context=False)
+            ]
+            return web.json_response({"error": "Popraw wartości konfiguracji.", "fields": errors}, status=400)
 
         # If profiles array was provided, clean up listings for any deleted profiles
         if "profiles" in data and isinstance(data["profiles"], list):

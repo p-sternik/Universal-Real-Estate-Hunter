@@ -243,7 +243,7 @@ class ListingRepository:
     async def mark_passive_delisted(
         self,
         inactive_days: int = 7,
-        profile_id: str | None = None,
+        profile_id: str | list[str] | None = None,
     ) -> int:
         """Passively marks listings as DELISTED if not seen on portals within inactive_days."""
         cutoff = datetime.now(UTC) - timedelta(days=inactive_days)
@@ -252,7 +252,9 @@ class ListingRepository:
             ListingModel.last_scraped_at.isnot(None),
             ListingModel.last_scraped_at < cutoff,
         ]
-        if profile_id:
+        if isinstance(profile_id, (list, tuple, set)):
+            conditions.append(ListingModel.profile_id.in_(list(profile_id)))
+        elif profile_id:
             conditions.append(ListingModel.profile_id == profile_id)
         stmt = update(ListingModel).where(*conditions).values(listing_status="DELISTED")
         res = await self.session.execute(stmt)

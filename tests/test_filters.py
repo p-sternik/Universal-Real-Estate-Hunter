@@ -948,3 +948,48 @@ async def test_qualification_engine_deep_spatial_evaluation():
     assert any("Wąski front działki" in c for c in res.cons)
     assert any("Strome nachylenie terenu" in c for c in res.cons)
     assert any("Geoportal" in c for c in res.cons)
+
+
+@pytest.mark.asyncio
+async def test_apartment_without_plot_is_qualified_not_needs_review():
+    from src.models.enums import PropertyCategory
+
+    engine = QualificationEngine(llm_enabled=False)
+    listing = create_sample_listing(
+        area_plot=None,
+        category=PropertyCategory.MIESZKANIE,
+        building_type=BuildingType.INNY,
+        raw_description="Piękne mieszkanie 65 m2, 3 pokoje, pełne media miejskie, ogrzewanie gazowe, pod klucz.",
+    )
+    res = await engine.evaluate_listing(listing, profile=PermissiveProfile())
+    assert res.is_qualified is True
+    assert res.status == QualificationStatus.QUALIFIED
+    assert res.spatial_applied is True
+
+
+def test_stage2_negation_awareness():
+    filter2 = Stage2SemanticFilter()
+    listing = create_sample_listing(
+        raw_description=(
+            "Dom po remoncie, nie wymaga remontu. "
+            "Działka płaska, brak osuwisk i skarp. "
+            "Dojazd drogą asfaltową, nie jest to droga polna. "
+            "Kanalizacja miejska, bez szamba."
+        )
+    )
+    res = filter2.analyze(listing)
+    assert res.passed is True
+    assert res.detected_finish != FinishCondition.DO_REMONTU
+    assert not any("Zagrożenie geologiczne" in r for r in res.rejection_reasons)
+    assert not any("Nieodpowiedni standard dojazdu" in r for r in res.rejection_reasons)
+    assert res.detected_sewerage != SewerageType.SZAMBO
+
+
+def test_detached_house_internal_stairs_not_middle_segment():
+    filter2 = Stage2SemanticFilter()
+    listing = create_sample_listing(
+        building_type=BuildingType.WOLNOSTOJACY,
+        raw_description="Dom wolnostojący, nowoczesne schody wewnętrzne, przestronny salon, garaż.",
+    )
+    res = filter2.analyze(listing)
+    assert res.detected_subtype != SegmentSubtype.SRODKOWY

@@ -26,16 +26,31 @@ from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
 
 
+def _is_price_drop(previous_price: float | None, new_price: float | None) -> bool:
+    """True when the price fell by at least 1 PLN compared with the stored one."""
+    if not previous_price or not new_price:
+        return False
+    return new_price <= previous_price - 1.0
+
+
 def _should_notify(
     *,
     is_qualified: bool,
     is_new: bool,
     price_changed: bool,
     score: float = 0.0,
+    pending: bool = False,
 ) -> bool:
+    """Decide whether to alert about a qualified listing.
+
+    `price_changed` must mean a real price *drop*. `pending` marks a listing that was
+    never notified; it is then treated like a new qualified offer so alerts suppressed
+    earlier (quiet hours, score threshold, delivery failure) are retried.
+    """
     if not is_qualified:
         return False
-    if not (is_new or price_changed):
+    effective_new = is_new or (pending and not price_changed)
+    if not (effective_new or price_changed):
         return False
 
     try:
@@ -50,9 +65,9 @@ def _should_notify(
                 return False
             if score < notif.min_score_threshold:
                 return False
-            if is_new and not notif.notify_on_new_qualified:
+            if effective_new and not notif.notify_on_new_qualified:
                 return False
-            if price_changed and not is_new and not notif.notify_on_price_drop:
+            if price_changed and not effective_new and not notif.notify_on_price_drop:
                 return False
     except Exception as e:
         logger.debug(f"[Pipeline] Error checking notification settings: {e}")
@@ -397,6 +412,9 @@ class ScraperPipeline:
 
         # 1. Look up existing record in database
         existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(listing.portal, listing.id)
+        previous_price: float | None = (
+            float(existing_model.price) if existing_model is not None and existing_model.price else None
+        )
 
         # 1.1 Compute physical fingerprint & check duplicate / re-listing
         if not listing.physical_fingerprint:
@@ -422,6 +440,7 @@ class ScraperPipeline:
                 listing.initial_price = relist_model.initial_price or relist_model.price
                 listing.relist_count = (relist_model.relist_count or 0) + 1
                 listing.listing_status = "RELISTED"
+                result["relisted"] = True
                 logger.info(
                     f"[Pipeline] 🔁 Wykryto re-listing dla '{listing.title[:40]}' "
                     f"(pierwotnie ID #{relist_model.id} z {relist_model.portal}, "
@@ -447,8 +466,18 @@ class ScraperPipeline:
             logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
             stage1_passed = True
 
-        geo_audit = None
+        stage2_rejected = False
         if stage1_passed:
+            try:
+                precheck_stage2 = getattr(self.engine, "precheck_stage2", None)
+                if callable(precheck_stage2):
+                    res2_chk = precheck_stage2(listing, profile=profile)
+                    stage2_rejected = (await res2_chk if asyncio.iscoroutine(res2_chk) else res2_chk) is True
+            except Exception as e:
+                logger.debug(f"[Pipeline] Stage 2 pre-check error: {e}")
+
+        geo_audit = None
+        if stage1_passed and not stage2_rejected:
             # Resolve coordinates if missing (skip if already resolved in existing_model)
             if not listing.coordinates:
                 from src.services.geocoder import geocoder
@@ -549,12 +578,19 @@ class ScraperPipeline:
                 getattr(listing.category, "value", listing.category),
                 override_medians=market_medians,
             )
+        cached_raw = (
+            getattr(existing_model, "llm_json_data", None)
+            if skip_llm and self.llm_analysis_enabled and existing_model is not None
+            else None
+        )
+        cached_llm_insights = cached_raw if isinstance(cached_raw, dict) else None
         filter_result = await self.engine.evaluate_listing(
             listing,
             profile=profile,
             skip_llm=skip_llm,
             geo_audit=geo_audit,
             market_median_m2=local_median,
+            cached_llm_insights=cached_llm_insights,
         )
         # The engine may fail to get an answer from the provider — propagate that
         # so cycle summaries stay honest.
@@ -599,9 +635,13 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # Apply spatial findings if not already reflected on qualified result
-        # (e.g. when engine is mocked in tests or evaluate_listing was bypassed)
-        if filter_result.is_qualified and not filter_result.mpzp_zone and (geo_audit or listing.mpzp_zone):
+        # Apply spatial findings only if the engine did not already reflect them
+        # (e.g. when engine is mocked in tests or evaluate_listing was bypassed).
+        if (
+            filter_result.is_qualified
+            and not getattr(filter_result, "spatial_applied", False)
+            and (geo_audit or listing.mpzp_zone)
+        ):
             new_score, new_pros, new_cons = self.engine.apply_spatial_findings(
                 listing=listing,
                 score=filter_result.score,
@@ -612,6 +652,7 @@ class ScraperPipeline:
             filter_result.score = min(100.0, max(0.0, new_score))
             filter_result.pros = new_pros
             filter_result.cons = new_cons
+            filter_result.spatial_applied = True
             copy_spatial_fields(filter_result, listing)
             filter_result.mpzp_zone = listing.mpzp_zone
             filter_result.flood_risk_zone = listing.flood_risk_zone
@@ -659,6 +700,7 @@ class ScraperPipeline:
                 "filter_result": filter_result,
                 "is_exact_coords": is_exact_coords,
                 "llm": llm_bundle,
+                "previous_price": previous_price,
             }
             return result
 
@@ -668,15 +710,16 @@ class ScraperPipeline:
         result["is_new"] = is_new
         result["price_changed"] = price_changed
 
-        # 5. Dispatch notification if qualified and unnotified
+        # 5. Dispatch notification if qualified and unnotified (or on a real price drop)
         should_notify = _should_notify(
             is_qualified=filter_result.is_qualified,
             is_new=is_new,
-            price_changed=price_changed,
+            price_changed=_is_price_drop(previous_price, listing.price),
             score=filter_result.score,
+            pending=db_model.notified_at is None,
         )
 
-        if should_notify and db_model.notified_at is None:
+        if should_notify:
             if market_medians is None:
                 market_medians = await repo.get_market_medians()
             valuation_intel = valuation_engine.evaluate(
@@ -730,13 +773,15 @@ class ScraperPipeline:
                 )
                 res["is_new"] = is_new
                 res["price_changed"] = price_changed
+                price_dropped = _is_price_drop(bundle.get("previous_price"), listing.price)
                 should_notify = _should_notify(
                     is_qualified=filt.is_qualified,
                     is_new=is_new,
-                    price_changed=price_changed,
+                    price_changed=price_dropped,
                     score=filt.score,
+                    pending=db_model.notified_at is None,
                 )
-                if should_notify and db_model.notified_at is None:
+                if should_notify:
                     valuation_intel = valuation_engine.evaluate(
                         listing=listing,
                         filter_result=filt,
@@ -902,11 +947,13 @@ class ScraperPipeline:
         total_llm_skipped = 0
         total_llm_failed = 0
 
+        delist_profile_ids: list[str] | None = None
         if self._custom_scrapers:
             execution_plan: list[tuple[SearchProfile | None, list[BaseScraper]]] = [(None, self.scrapers)]
             fresh_urls: set = set()
         else:
             profiles = cfg.get_active_profiles(target_profile)
+            delist_profile_ids = [p.id for p in profiles] if target_profile else None
             if not profiles:
                 logger.warning("[Pipeline] No active search profiles found to scrape.")
                 return {
@@ -955,6 +1002,14 @@ class ScraperPipeline:
                             max_pages=cfg.scrapers.morizon.max_pages, profile=prof, skip_detail_urls=fresh_urls
                         )
                     )
+                portal_settings = {
+                    OtodomScraper: cfg.scrapers.otodom,
+                    OLXScraper: cfg.scrapers.olx,
+                    NieruchomosciOnlineScraper: cfg.scrapers.nieruchomosci_online,
+                    MorizonScraper: cfg.scrapers.morizon,
+                }
+                for scraper in scs:
+                    scraper.request_delay_seconds = portal_settings[type(scraper)].delay_seconds
                 execution_plan.append((prof, scs))
 
         flat_scrapers = []
@@ -1105,11 +1160,14 @@ class ScraperPipeline:
                         total_llm_skipped += 1
                         if res.get("llm_skip_reason") == "provider_error":
                             total_llm_failed += 1
+                    is_duplicate = bool(res.get("relisted"))
+                    if is_duplicate:
+                        total_duplicates += 1
 
                     global_tracker.record_items(
-                        count=1,
+                        count=0,
                         qualified=1 if res["qualified"] and res["is_new"] else 0,
-                        duplicates=0,
+                        duplicates=1 if is_duplicate else 0,
                     )
 
                 global_tracker.set_processing_fraction(step_idx, total_steps, 1, 1)
@@ -1134,7 +1192,7 @@ class ScraperPipeline:
                     delist_repo = ListingRepository(session)
                     delisted_cnt = await delist_repo.mark_passive_delisted(
                         inactive_days=7,
-                        profile_id=target_profile,
+                        profile_id=delist_profile_ids,
                     )
                     if delisted_cnt > 0:
                         logger.info(
@@ -1315,15 +1373,23 @@ class ScraperPipeline:
             try:
                 geo_audit = await audit_and_apply_spatial_data(item, client=client) or {}
 
-                score, item.pros, item.cons = self.engine.apply_spatial_findings(
+                # Compute spatial findings in isolation (from a zero base), then merge them
+                # into the stored result only once. Re-applying them to an already-adjusted
+                # score on every cycle would stack penalties.
+                delta, fresh_pros, fresh_cons = self.engine.apply_spatial_findings(
                     listing=item,
-                    score=float(item.qualification_score or 50.0),
-                    pros=list(item.pros or []),
-                    cons=list(item.cons or []),
+                    score=0.0,
+                    pros=[],
+                    cons=[],
                     geo_audit=geo_audit,
                 )
-                if item.qualification_score is not None:
-                    item.qualification_score = min(100.0, max(0.0, score))
+                stored_pros = list(item.pros or [])
+                stored_cons = list(item.cons or [])
+                already_applied = any(p in stored_pros for p in fresh_pros) or any(c in stored_cons for c in fresh_cons)
+                item.pros = list(dict.fromkeys(stored_pros + fresh_pros))
+                item.cons = stored_cons + [c for c in fresh_cons if c not in stored_cons]
+                if item.qualification_score is not None and not already_applied:
+                    item.qualification_score = min(100.0, max(0.0, float(item.qualification_score) + delta))
 
                 item.updated_at = datetime.now(UTC)
                 updated_count += 1

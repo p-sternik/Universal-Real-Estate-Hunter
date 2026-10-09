@@ -53,7 +53,7 @@
                     setTimeout(() => inputEl.focus(), 60);
                 }
 
-                const onDocKey = (e) => { if (e.key === 'Escape') finish(hasInput ? null : false); };
+                const onDocKey = (e) => { if (e.key === 'Escape') { e.preventDefault(); e.stopImmediatePropagation(); finish(hasInput ? null : false); } };
                 const finish = (value) => {
                     modal.style.display = 'none';
                     document.removeEventListener('keydown', onDocKey);
@@ -512,6 +512,148 @@
         // ========================
         // Configuration modal
         // ========================
+        let settingsBaseline = '';
+        let settingsProfileBaselines = {};
+        let settingsProfileForms = {};
+        let settingsDirty = false;
+        let settingsSaving = false;
+        let settingsClosePending = false;
+        let settingsFormCategory = null;
+        let settingsCategoryDrafts = {};
+
+        function settingsSnapshot() {
+            const fields = Array.from(document.querySelectorAll('#configModal input, #configModal select, #configModal textarea'))
+                .filter(el => !el.closest('#configTabProfiles') && el.id && !['cfgProfileSelect', 'cfgResetScope', 'cfgNewDestLabel', 'cfgNewDestAddress'].includes(el.id))
+                .map(el => [el.id, el.type === 'checkbox' ? el.checked : el.value]);
+            // Checkboxes without IDs (finish, heating, building) also belong to the draft.
+            return JSON.stringify({ fields, profiles: allProfiles, commute: commuteDestinations });
+        }
+
+        function settingsProfileFormSnapshot() {
+            return JSON.stringify(Array.from(document.querySelectorAll('#configTabProfiles input, #configTabProfiles select, #configTabProfiles textarea'))
+                .filter(el => el.id !== 'cfgProfileSelect')
+                .map(el => [el.id || el.className + el.value, el.type === 'checkbox' ? el.checked : el.value]));
+        }
+
+        function updateSettingsStatus(message = null) {
+            if (currentProfileId) settingsProfileForms[currentProfileId] = settingsProfileFormSnapshot();
+            const profileChanged = allProfiles.some(p => settingsProfileBaselines[p.id] !== settingsProfileForms[p.id]);
+            settingsDirty = profileChanged || settingsBaseline !== settingsSnapshot();
+            const status = document.getElementById('settingsSaveStatus');
+            if (status) {
+                status.textContent = message || (settingsSaving ? 'Zapisywanie…' : settingsDirty ? 'Niezapisane zmiany' : 'Brak niezapisanych zmian');
+                status.dataset.state = settingsSaving ? 'saving' : settingsDirty ? 'dirty' : 'saved';
+            }
+        }
+
+        function setupSettingsWorkspace() {
+            const modal = document.getElementById('configModal');
+            if (modal.dataset.workspaceReady) return;
+            modal.dataset.workspaceReady = 'true';
+            modal.addEventListener('input', updateSettingsFromEvent);
+            modal.addEventListener('change', updateSettingsFromEvent);
+            modal.addEventListener('keydown', e => {
+                if (document.getElementById('confirmModal')?.classList.contains('open')) return;
+                if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+                    e.preventDefault();
+                    saveConfiguration(false);
+                }
+                if (e.key === 'Tab') {
+                    const focusable = Array.from(modal.querySelectorAll('button, input, select, textarea, summary, [tabindex="0"]'))
+                        .filter(el => !el.disabled && el.offsetParent !== null);
+                    const first = focusable[0], last = focusable[focusable.length - 1];
+                    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus(); }
+                    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus(); }
+                }
+            });
+            const tabs = document.getElementById('configTabsBar');
+            tabs.addEventListener('keydown', e => {
+                if (!['ArrowRight', 'ArrowLeft', 'ArrowDown', 'ArrowUp', 'Home', 'End'].includes(e.key)) return;
+                const buttons = Array.from(tabs.querySelectorAll('.config-tab-btn'));
+                const index = buttons.indexOf(document.activeElement);
+                if (index < 0) return;
+                e.preventDefault();
+                const next = e.key === 'Home' ? 0 : e.key === 'End' ? buttons.length - 1
+                    : (index + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + buttons.length) % buttons.length;
+                buttons[next].click();
+                buttons[next].focus();
+            });
+            window.addEventListener('beforeunload', e => {
+                if (!settingsDirty || !modal.classList.contains('open')) return;
+                e.preventDefault();
+                e.returnValue = '';
+            });
+        }
+
+        function updateSettingsFromEvent(e) {
+            if (e.target.id === 'cfgResetScope') return;
+            e.target.classList.remove('input-error');
+            e.target.removeAttribute('aria-invalid');
+            const error = document.getElementById(e.target.id + 'Error');
+            if (error) error.remove();
+            e.target.removeAttribute('aria-describedby');
+            updateSettingsStatus();
+        }
+
+        function settingsNumber(id, fallback = null) {
+            const raw = document.getElementById(id)?.value?.trim();
+            return raw ? Number(raw) : fallback;
+        }
+
+        function settingsFieldError(id, message) {
+            const el = document.getElementById(id);
+            if (!el) return false;
+            el.classList.add('input-error');
+            el.setAttribute('aria-invalid', 'true');
+            const errorId = id + 'Error';
+            let error = document.getElementById(errorId);
+            if (!error) {
+                error = document.createElement('p');
+                error.id = errorId;
+                error.className = 'settings-field-error';
+                el.insertAdjacentElement('afterend', error);
+            }
+            error.textContent = message;
+            el.setAttribute('aria-describedby', errorId);
+            return false;
+        }
+
+        function validateProfileForm() {
+            let firstBad = null;
+            const fail = (id, message) => { settingsFieldError(id, message); firstBad ||= id; };
+            for (const id of ['cfgProfileName', 'cfgCity']) {
+                if (!document.getElementById(id).value.trim()) fail(id, 'Uzupełnij to pole.');
+            }
+            const pairs = [['cfgMinPrice', 'cfgMaxPrice'], ['cfgMinPriceM2', 'cfgMaxPriceM2'],
+                ['cfgMinAreaHome', 'cfgMaxAreaHome'], ['cfgMinAreaApt', 'cfgMaxAreaApt'],
+                ['cfgMinAreaPlot', 'cfgMaxAreaPlot'], ['cfgMinAreaPlotOnly', 'cfgMaxAreaPlotOnly'],
+                ['cfgMinRooms', 'cfgMaxRooms'], ['cfgMinFloor', 'cfgMaxFloor'], ['cfgMinYearBuilt', 'cfgMaxYearBuilt']];
+            for (const [minId, maxId] of pairs) {
+                const minEl = document.getElementById(minId), maxEl = document.getElementById(maxId);
+                if (minEl.disabled) continue;
+                for (const el of [minEl, maxEl]) {
+                    const raw = el.value.trim();
+                    const num = Number(raw);
+                    const integer = /Rooms|Floor|Year/.test(el.id);
+                    if (el.validity.badInput || (raw && (!Number.isFinite(num) || (!/Floor/.test(el.id) && num < 0)
+                        || (integer && !Number.isInteger(num))))) fail(el.id, integer ? 'Podaj poprawną liczbę całkowitą.' : 'Podaj liczbę nieujemną.');
+                }
+                if (minEl.value !== '' && maxEl.value !== '' && Number(minEl.value) > Number(maxEl.value)) {
+                    fail(maxId, 'Wartość „do” musi być większa lub równa wartości „od”.');
+                }
+            }
+            const front = document.getElementById('cfgMinFront');
+            if (!front.disabled && (front.validity.badInput || (front.value && (!Number.isFinite(Number(front.value)) || Number(front.value) < 0)))) {
+                fail(front.id, 'Podaj liczbę nieujemną.');
+            }
+            if (firstBad) {
+                switchConfigTab('profiles');
+                document.getElementById(firstBad)?.focus();
+                updateSettingsStatus('Popraw zaznaczone pola profilu.');
+            }
+            return !firstBad;
+        }
+
         function switchConfigTab(tab) {
             const tabs = [
                 ['tabBtnOverview', 'configTabOverview', 'overview'],
@@ -527,13 +669,23 @@
                 const btn = document.getElementById(btnId);
                 if (btn) {
                     btn.classList.toggle('active', tab === name);
+                    btn.setAttribute('role', 'tab');
+                    btn.setAttribute('aria-selected', String(tab === name));
+                    btn.setAttribute('aria-controls', tabId);
+                    btn.tabIndex = tab === name ? 0 : -1;
                     if (tab === name) {
                         btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
                     }
                 }
                 const tabEl = document.getElementById(tabId);
-                if (tabEl) tabEl.style.display = (tab === name) ? 'block' : 'none';
+                if (tabEl) {
+                    tabEl.style.display = (tab === name) ? 'block' : 'none';
+                    tabEl.setAttribute('role', 'tabpanel');
+                    tabEl.setAttribute('aria-labelledby', btnId);
+                }
             });
+            const body = document.querySelector('#configModal .config-body');
+            if (body) body.scrollTop = 0;
             setTimeout(updateConfigTabsScrollButtons, 150);
             if (tab === 'ai' && typeof checkLlmStatusIfEmpty === 'function') {
                 checkLlmStatusIfEmpty();
@@ -547,33 +699,25 @@
         }
 
         function toggleSchedulerInputs(enabled) {
-            const day = document.getElementById('dayIntervalField');
-            const nightRow = document.getElementById('cfgNightMode')?.closest('div');
-            const row = document.getElementById('nightSettingsRow');
-            const interval = document.getElementById('nightIntervalField');
-            [day, nightRow, row, interval].forEach(el => {
-                if (!el) return;
-                el.style.opacity = enabled ? '1' : '0.4';
-                el.style.pointerEvents = enabled ? 'auto' : 'none';
+            ['dayIntervalField'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.querySelectorAll('input, select').forEach(input => { input.disabled = !enabled; });
             });
+            const night = document.getElementById('cfgNightMode');
+            if (night) night.disabled = !enabled;
+            toggleNightModeInputs(night?.checked ?? true);
         }
 
         function toggleNightModeInputs(enabled) {
-            const row = document.getElementById('nightSettingsRow');
-            const interval = document.getElementById('nightIntervalField');
-            if (row) {
-                row.style.opacity = enabled ? '1' : '0.4';
-                row.style.pointerEvents = enabled ? 'auto' : 'none';
-            }
-            if (interval) {
-                interval.style.opacity = enabled ? '1' : '0.4';
-                interval.style.pointerEvents = enabled ? 'auto' : 'none';
-            }
+            const effective = enabled && (document.getElementById('cfgSchedulerEnabled')?.checked ?? true);
+            ['nightSettingsRow', 'nightIntervalField'].forEach(id => {
+                const el = document.getElementById(id);
+                if (!el) return;
+                el.style.opacity = effective ? '1' : '0.5';
+                el.querySelectorAll('input, select').forEach(input => { input.disabled = !effective; });
+            });
         }
 
-        // ========================
-        // Configuration tabs scrolling
-        // ========================
         function scrollConfigTabs(direction) {
             const tabsEl = document.getElementById('configTabsBar');
             if (!tabsEl) return;
@@ -743,12 +887,28 @@
         }
 
         function onCategorySelectChange(cat) {
-            const bDom = document.getElementById('catBoxDom');
-            const bApt = document.getElementById('catBoxMieszkanie');
-            const bPlot = document.getElementById('catBoxDzialka');
-            if (bDom) bDom.style.display = (cat === 'dom') ? 'block' : 'none';
-            if (bApt) bApt.style.display = (cat === 'mieszkanie') ? 'block' : 'none';
-            if (bPlot) bPlot.style.display = (cat === 'dzialka') ? 'block' : 'none';
+            const fields = ['cfgMinYearBuilt', 'cfgMaxYearBuilt', 'cfgMarket', 'cfgMinFront', 'cfgRejectSeptic'];
+            const options = Array.from(document.querySelectorAll('.cfg-finish, .cfg-building, .cfg-heating'));
+            if (settingsFormCategory && settingsFormCategory !== cat) {
+                settingsCategoryDrafts[settingsFormCategory] = {
+                    fields: fields.map(id => { const el = document.getElementById(id); return [id, el.type === 'checkbox' ? el.checked : el.value]; }),
+                    options: options.map(el => el.checked)
+                };
+                const draft = settingsCategoryDrafts[cat];
+                fields.forEach(id => {
+                    const el = document.getElementById(id);
+                    const stored = draft?.fields.find(([key]) => key === id)?.[1];
+                    if (el.type === 'checkbox') el.checked = stored ?? false;
+                    else el.value = stored ?? (id === 'cfgMarket' ? 'all' : '');
+                });
+                options.forEach((el, i) => { el.checked = draft?.options[i] ?? false; });
+            }
+            settingsFormCategory = cat;
+            document.querySelectorAll('[data-profile-categories]').forEach(section => {
+                const visible = section.dataset.profileCategories.split(' ').includes(cat);
+                section.style.display = visible ? '' : 'none';
+                section.querySelectorAll('input, select').forEach(input => { input.disabled = !visible; });
+            });
         }
 
         async function fetchConfig() {
@@ -759,8 +919,7 @@
                     otodom: { enabled: true, max_pages: 5 },
                     olx: { enabled: true, max_pages: 5 },
                     nieruchomosci_online: { enabled: true, max_pages: 5 },
-                    morizon: { enabled: true, max_pages: 5 },
-                    request_delay: 1.0
+                    morizon: { enabled: true, max_pages: 5, delay_seconds: 1.0 }
                 };
                 if (allProfiles.length === 0) {
                     allProfiles = [{
@@ -837,23 +996,29 @@
             const p = allProfiles.find(x => x.id === profId) || allProfiles[0];
             if (!p) return;
             currentProfileId = p.id;
+            document.querySelectorAll('#configTabProfiles .settings-field-error').forEach(el => el.remove());
+            document.querySelectorAll('#configTabProfiles .input-error').forEach(el => {
+                el.classList.remove('input-error'); el.removeAttribute('aria-invalid'); el.removeAttribute('aria-describedby');
+            });
+            document.getElementById('cfgProfileSelect').value = p.id;
 
-            document.getElementById('cfgProfileName').value = p.name || '';
-            document.getElementById('cfgProfileCategory').value = p.category || 'dom';
+            document.getElementById('cfgProfileName').value = p.name ?? '';
+            document.getElementById('cfgProfileCategory').value = p.category ?? 'dom';
             document.getElementById('cfgProfileEnabled').checked = p.enabled !== false;
-            document.getElementById('cfgCity').value = p.city || 'Rzeszów';
+            document.getElementById('cfgCity').value = p.city ?? 'Rzeszów';
             document.getElementById('cfgRadius').value = p.distance_radius ?? 15;
-            document.getElementById('cfgMarket').value = p.market_type || 'all';
-            document.getElementById('cfgOwnerType').value = p.owner_type || 'all';
-            document.getElementById('cfgMinPrice').value = p.min_price || 0;
-            document.getElementById('cfgMaxPrice').value = p.max_price || 1300000;
+            document.getElementById('cfgMarket').value = p.market_type ?? 'all';
+            document.getElementById('cfgOwnerType').value = p.owner_type ?? 'all';
+            document.getElementById('cfgMinPrice').value = p.min_price ?? 0;
+            document.getElementById('cfgMaxPrice').value = p.max_price ?? '';
             document.getElementById('cfgMinPriceM2').value = p.min_price_per_m2 || '';
             document.getElementById('cfgMaxPriceM2').value = p.max_price_per_m2 || '';
-            document.getElementById('cfgMinYearBuilt').value = p.min_year_built || '';
-            document.getElementById('cfgMaxYearBuilt').value = p.max_year_built || '';
+            document.getElementById('cfgMinYearBuilt').value = p.min_year_built ?? '';
+            document.getElementById('cfgMaxYearBuilt').value = p.max_year_built ?? '';
             document.getElementById('cfgBlacklist').value = (p.blacklist_keywords || []).join(', ');
-            document.getElementById('cfgDiscordWebhook').value = p.discord_webhook_url || '';
+            document.getElementById('cfgDiscordWebhook').value = p.discord_webhook_url ?? '';
 
+            document.querySelectorAll('.cfg-profile-portal').forEach(cb => { cb.checked = (p.enabled_portals || []).includes(cb.value); });
             const finishAllowed = p.allowed_finish_conditions || [];
             const finishAll = finishAllowed.includes('all');
             document.querySelectorAll('.cfg-finish').forEach(cb => { cb.checked = !finishAll && finishAllowed.includes(cb.value); });
@@ -869,31 +1034,44 @@
             if (document.getElementById('cfgRejectHV')) document.getElementById('cfgRejectHV').checked = !!p.reject_high_voltage;
             if (document.getElementById('cfgMinFront')) document.getElementById('cfgMinFront').value = (p.min_parcel_front_m !== null && p.min_parcel_front_m !== undefined) ? p.min_parcel_front_m : '';
 
-            document.getElementById('cfgMinAreaHome').value = p.min_area_home || '';
-            document.getElementById('cfgMaxAreaHome').value = p.max_area_home || '';
-            document.getElementById('cfgMinAreaPlot').value = p.min_area_plot || '';
-            document.getElementById('cfgMaxAreaPlot').value = p.max_area_plot || '';
+            document.getElementById('cfgMinAreaHome').value = p.category === 'dom' ? (p.min_area_home ?? '') : '';
+            document.getElementById('cfgMaxAreaHome').value = p.category === 'dom' ? (p.max_area_home ?? '') : '';
+            document.getElementById('cfgMinAreaPlot').value = p.category === 'dom' ? (p.min_area_plot ?? '') : '';
+            document.getElementById('cfgMaxAreaPlot').value = p.category === 'dom' ? (p.max_area_plot ?? '') : '';
 
-            document.getElementById('cfgMinAreaApt').value = p.min_area_home || '';
-            document.getElementById('cfgMaxAreaApt').value = p.max_area_home || '';
-            document.getElementById('cfgMinRooms').value = p.min_rooms || '';
-            document.getElementById('cfgMaxRooms').value = p.max_rooms || '';
+            document.getElementById('cfgMinAreaApt').value = p.category === 'mieszkanie' ? (p.min_area_home ?? '') : '';
+            document.getElementById('cfgMaxAreaApt').value = p.category === 'mieszkanie' ? (p.max_area_home ?? '') : '';
+            document.getElementById('cfgMinRooms').value = p.min_rooms ?? '';
+            document.getElementById('cfgMaxRooms').value = p.max_rooms ?? '';
             document.getElementById('cfgMinFloor').value = (p.min_floor !== undefined && p.min_floor !== null) ? p.min_floor : '';
             document.getElementById('cfgMaxFloor').value = (p.max_floor !== undefined && p.max_floor !== null) ? p.max_floor : '';
 
-            document.getElementById('cfgMinAreaPlotOnly').value = p.min_area_plot || '';
-            document.getElementById('cfgMaxAreaPlotOnly').value = p.max_area_plot || '';
+            document.getElementById('cfgMinAreaPlotOnly').value = p.category === 'dzialka' ? (p.min_area_plot ?? '') : '';
+            document.getElementById('cfgMaxAreaPlotOnly').value = p.category === 'dzialka' ? (p.max_area_plot ?? '') : '';
 
+            settingsFormCategory = null;
+            settingsCategoryDrafts = {};
             onCategorySelectChange(p.category || 'dom');
+            const persisted = (activeConfig.profiles || []).some(profile => profile.id === p.id);
+            document.querySelector('#configTabProfiles .config-profile-delete').disabled = allProfiles.length <= 1 || (persisted && activeConfig.profiles.length <= 1);
+            settingsProfileForms[p.id] = settingsProfileFormSnapshot();
+            settingsProfileBaselines[p.id] ??= settingsProfileForms[p.id];
         }
 
         function onProfileSelectChange(val) {
+            updateSettingsStatus();
+            if (!validateProfileForm()) {
+                document.getElementById('cfgProfileSelect').value = currentProfileId;
+                return;
+            }
             saveCurrentFormIntoMemory();
             currentProfileId = val;
             loadProfileIntoForm(val);
+            updateSettingsStatus();
         }
 
         function duplicateCurrentProfile() {
+            if (!validateProfileForm()) return;
             saveCurrentFormIntoMemory();
             const curP = allProfiles.find(x => x.id === currentProfileId) || allProfiles[0];
             if (!curP) return;
@@ -916,7 +1094,7 @@
             currentProfileId = newId;
             refreshProfileSelect();
             loadProfileIntoForm(newId);
-            renderProfileTabs();
+            updateSettingsStatus();
             showToast(`Zduplikowano profil "${curP.name}" → "${cloned.name}". Zmień miasto lub parametry i kliknij Zapisz.`);
 
             const cityInput = document.getElementById('cfgCity');
@@ -927,6 +1105,7 @@
         }
 
         function createNewProfile() {
+            if (!validateProfileForm()) return;
             saveCurrentFormIntoMemory();
             const newId = "profile_" + Date.now();
             const newP = {
@@ -959,7 +1138,8 @@
             currentProfileId = newId;
             refreshProfileSelect();
             loadProfileIntoForm(newId);
-            showToast("Utworzono nowy profil");
+            updateSettingsStatus();
+            showToast("Utworzono szkic profilu. Kliknij Zapisz zmiany, aby go zachować.");
         }
 
         async function deleteCurrentProfile() {
@@ -968,9 +1148,16 @@
                 return;
             }
             const profName = document.getElementById('cfgProfileName').value || currentProfileId;
+            const persisted = (activeConfig.profiles || []).some(p => p.id === currentProfileId);
+            if (persisted && activeConfig.profiles.length <= 1) {
+                showToast('Zapisz drugi profil przed usunięciem ostatniego zapisanego profilu.');
+                return;
+            }
             const confirmed = await showConfirmDialog({
                 title: 'Usuń profil',
-                message: `Czy na pewno chcesz usunąć profil "${profName}" oraz WSZYSTKIE powiązane z nim oferty z bazy danych?\nTej operacji nie można cofnąć.`,
+                message: persisted
+                    ? `Usuniesz zapisany profil "${profName}" i wszystkie jego oferty z historią cen oraz notatkami. Operacja jest natychmiastowa i nieodwracalna.`
+                    : `Usunąć niezapisany szkic profilu "${profName}"?`,
                 confirmLabel: 'Usuń profil',
                 danger: true
             });
@@ -980,8 +1167,16 @@
 
             const idToDelete = currentProfileId;
             try {
-                const resData = await Transport.deleteProfile(idToDelete);
+                const resData = persisted ? await Transport.deleteProfile(idToDelete) : { deleted_listings: 0 };
                 const deletedListingsCount = resData.deleted_listings || 0;
+                if (persisted) {
+                    activeConfig.profiles = activeConfig.profiles.filter(p => p.id !== idToDelete);
+                    const baseline = JSON.parse(settingsBaseline);
+                    baseline.profiles = baseline.profiles.filter(p => p.id !== idToDelete);
+                    settingsBaseline = JSON.stringify(baseline);
+                }
+                delete settingsProfileBaselines[idToDelete];
+                delete settingsProfileForms[idToDelete];
 
                 const idx = allProfiles.findIndex(p => p.id === idToDelete);
                 if (idx >= 0) {
@@ -989,7 +1184,7 @@
                 }
 
                 if (selectedProfileId === idToDelete) {
-                    selectedProfileId = allProfiles[0].id;
+                    selectedProfileId = activeConfig.profiles[0]?.id || 'ALL';
                 }
                 currentProfileId = allProfiles[0].id;
 
@@ -998,9 +1193,8 @@
 
                 showToast(`Usunięto profil "${profName}" oraz ${deletedListingsCount} ofert z bazy danych.`);
 
-                await fetchListings();
-                renderProfileTabs();
-                switchActiveProfile(currentProfileId);
+                if (persisted) await fetchListings();
+                updateSettingsStatus();
             } catch (err) {
                 console.error("Failed to delete profile:", err);
                 showToast("Błąd podczas usuwania profilu.");
@@ -1015,19 +1209,21 @@
             p.category = cat;
             p.enabled = document.getElementById('cfgProfileEnabled').checked;
             p.city = document.getElementById('cfgCity').value.trim() || p.city || '';
-            p.distance_radius = parseInt(document.getElementById('cfgRadius').value) || 15;
+            p.distance_radius = settingsNumber('cfgRadius', 15);
             p.market_type = document.getElementById('cfgMarket').value;
             p.owner_type = document.getElementById('cfgOwnerType').value;
-            p.min_price = parseFloat(document.getElementById('cfgMinPrice').value) || 0;
-            p.max_price = parseFloat(document.getElementById('cfgMaxPrice').value) || 1300000;
-            p.min_price_per_m2 = parseFloat(document.getElementById('cfgMinPriceM2').value) || null;
-            p.max_price_per_m2 = parseFloat(document.getElementById('cfgMaxPriceM2').value) || null;
-            p.min_year_built = parseInt(document.getElementById('cfgMinYearBuilt').value) || null;
-            p.max_year_built = parseInt(document.getElementById('cfgMaxYearBuilt').value) || null;
+            p.min_price = settingsNumber('cfgMinPrice');
+            p.max_price = settingsNumber('cfgMaxPrice');
+            p.min_price_per_m2 = settingsNumber('cfgMinPriceM2');
+            p.max_price_per_m2 = settingsNumber('cfgMaxPriceM2');
+            p.min_year_built = settingsNumber('cfgMinYearBuilt');
+            p.max_year_built = settingsNumber('cfgMaxYearBuilt');
             const blRaw = document.getElementById('cfgBlacklist').value;
             p.blacklist_keywords = blRaw.split(',').map(s => s.trim().toLowerCase()).filter(s => s.length > 0);
             p.discord_webhook_url = document.getElementById('cfgDiscordWebhook').value.trim() || null;
 
+            const portals = Array.from(document.querySelectorAll('.cfg-profile-portal:checked')).map(cb => cb.value);
+            p.enabled_portals = portals.length ? portals : null;
             const finishSel = Array.from(document.querySelectorAll('.cfg-finish:checked')).map(cb => cb.value);
             p.allowed_finish_conditions = finishSel.length > 0 ? finishSel : ["all"];
             p.building_types = Array.from(document.querySelectorAll('.cfg-building:checked')).map(cb => cb.value);
@@ -1041,30 +1237,53 @@
             const minFrontRaw = document.getElementById('cfgMinFront')?.value;
             p.min_parcel_front_m = (minFrontRaw !== undefined && minFrontRaw !== null && String(minFrontRaw).trim() !== '') ? parseFloat(minFrontRaw) : null;
 
+            if (cat !== 'dom') {
+                p.building_types = [];
+                p.reject_septic_tank = false;
+            }
+            if (cat === 'mieszkanie') {
+                p.min_area_plot = p.max_area_plot = p.min_parcel_front_m = null;
+            } else {
+                p.min_rooms = p.max_rooms = p.min_floor = p.max_floor = null;
+            }
+            if (cat === 'dzialka') {
+                p.min_area_home = p.max_area_home = null;
+                p.min_year_built = p.max_year_built = null;
+                p.market_type = 'all';
+                p.allowed_finish_conditions = ['all'];
+                p.allowed_heating_types = ['all'];
+            }
+
             if (cat === 'dom') {
-                p.min_area_home = parseFloat(document.getElementById('cfgMinAreaHome').value) || 0;
-                p.max_area_home = parseFloat(document.getElementById('cfgMaxAreaHome').value) || null;
-                p.min_area_plot = parseFloat(document.getElementById('cfgMinAreaPlot').value) || 0;
-                p.max_area_plot = parseFloat(document.getElementById('cfgMaxAreaPlot').value) || null;
+                p.min_area_home = settingsNumber('cfgMinAreaHome');
+                p.max_area_home = settingsNumber('cfgMaxAreaHome');
+                p.min_area_plot = settingsNumber('cfgMinAreaPlot');
+                p.max_area_plot = settingsNumber('cfgMaxAreaPlot');
             } else if (cat === 'mieszkanie') {
-                p.min_area_home = parseFloat(document.getElementById('cfgMinAreaApt').value) || 0;
-                p.max_area_home = parseFloat(document.getElementById('cfgMaxAreaApt').value) || null;
-                p.min_rooms = parseInt(document.getElementById('cfgMinRooms').value) || null;
-                p.max_rooms = parseInt(document.getElementById('cfgMaxRooms').value) || null;
+                p.min_area_home = settingsNumber('cfgMinAreaApt');
+                p.max_area_home = settingsNumber('cfgMaxAreaApt');
+                p.min_rooms = settingsNumber('cfgMinRooms');
+                p.max_rooms = settingsNumber('cfgMaxRooms');
                 const minF = document.getElementById('cfgMinFloor').value;
                 p.min_floor = minF !== '' ? parseInt(minF) : null;
                 const maxF = document.getElementById('cfgMaxFloor').value;
                 p.max_floor = maxF !== '' ? parseInt(maxF) : null;
             } else if (cat === 'dzialka') {
-                p.min_area_plot = parseFloat(document.getElementById('cfgMinAreaPlotOnly').value) || 0;
-                p.max_area_plot = parseFloat(document.getElementById('cfgMaxAreaPlotOnly').value) || null;
+                p.min_area_plot = settingsNumber('cfgMinAreaPlotOnly');
+                p.max_area_plot = settingsNumber('cfgMaxAreaPlotOnly');
             }
         }
 
         function openConfigModal() {
             if (!activeConfig) return;
+            if (document.getElementById('configModal').classList.contains('open')) return;
+            settingsProfileBaselines = {};
+            settingsProfileForms = {};
+            allProfiles = structuredClone(activeConfig.profiles || allProfiles);
+            scrapersConfig = structuredClone(activeConfig.scrapers || {});
+            setupSettingsWorkspace();
             storeModalFocus('configModal');
-            switchConfigTab('overview');
+            switchConfigTab('profiles');
 
             const sc = scrapersConfig || {};
             document.getElementById('cfgScraperOtodom').checked = sc.otodom ? sc.otodom.enabled !== false : true;
@@ -1075,7 +1294,9 @@
             document.getElementById('cfgPagesNieruchomosci').value = sc.nieruchomosci_online?.max_pages || 5;
             document.getElementById('cfgScraperMorizon').checked = sc.morizon ? sc.morizon.enabled !== false : true;
             document.getElementById('cfgPagesMorizon').value = sc.morizon?.max_pages || 5;
-            document.getElementById('cfgRequestDelay').value = sc.request_delay ?? 1.0;
+            for (const [suffix, portal] of [['Otodom', 'otodom'], ['Olx', 'olx'], ['Nieruchomosci', 'nieruchomosci_online'], ['Morizon', 'morizon']]) {
+                document.getElementById('cfgDelay' + suffix).value = sc[portal]?.delay_seconds ?? 1;
+            }
 
             const sched = activeConfig.scheduler || {};
             if (document.getElementById('cfgSchedulerEnabled')) {
@@ -1242,23 +1463,46 @@
             }
             refreshProfileSelect();
             loadProfileIntoForm(currentProfileId);
+            const resetScope = document.getElementById('cfgResetScope');
+            resetScope.innerHTML = '<option value="">Wszystkie oferty</option>' + (activeConfig.profiles || []).map(p => `<option value="${escapeHtml(p.id)}">Profil: ${escapeHtml(p.name)}</option>`).join('');
+            resetScope.value = (activeConfig.profiles || []).some(p => p.id === currentProfileId) ? currentProfileId : '';
             updateAllNotificationInputs();
 
             document.getElementById('configModal').classList.add('open');
             document.body.classList.add('config-open');
             closeProfileMenu();
+            document.querySelectorAll('#configModal .settings-field-error').forEach(el => el.remove());
+            document.querySelectorAll('#configModal .input-error').forEach(el => { el.classList.remove('input-error'); el.removeAttribute('aria-invalid'); });
+            settingsBaseline = settingsSnapshot();
+            updateSettingsStatus();
+            document.getElementById('tabBtnProfiles').focus();
             setTimeout(() => {
                 initConfigTabsScroll();
                 updateConfigTabsScrollButtons();
             }, 60);
         }
 
-        function closeConfigModal(e) {
-            if (!e || e.target.id === 'configModal' || e === null) {
-                document.getElementById('configModal').classList.remove('open');
-                document.body.classList.remove('config-open');
-                restoreModalFocus('configModal');
+        async function closeConfigModal(e, discardConfirmed = false) {
+            if (e && e.target.id !== 'configModal') return;
+            if (settingsSaving || settingsClosePending) return;
+            updateSettingsStatus();
+            if (settingsDirty && !discardConfirmed) {
+                settingsClosePending = true;
+                const discard = await showConfirmDialog({
+                    title: 'Niezapisane zmiany',
+                    message: 'Zamknięcie ustawień odrzuci zmiany w profilach i pozostałych sekcjach.',
+                    confirmLabel: 'Odrzuć zmiany'
+                });
+                settingsClosePending = false;
+                if (!discard) return;
             }
+            allProfiles = structuredClone(activeConfig.profiles || []);
+            commuteDestinations = structuredClone(activeConfig.commute_destinations || []);
+            settingsDirty = false;
+            document.getElementById('configModal').classList.remove('open');
+            document.body.classList.remove('config-open');
+            renderProfileTabs();
+            restoreModalFocus('configModal');
         }
 
         // ========================
@@ -1289,11 +1533,11 @@
             list.innerHTML = commuteDestinations.map((d, idx) => `
                 <div class="commute-dest-item">
                     <div class="commute-dest-fields">
-                        <input type="text" class="config-chips-input" value="${escapeHtml(d.label)}" placeholder="Nazwa"
+                        <input type="text" id="cfgCommuteLabel${idx}" aria-label="Nazwa celu dojazdu ${idx + 1}" class="config-chips-input" value="${escapeHtml(d.label)}" placeholder="Nazwa"
                                oninput="commuteDestinations[${idx}].label = this.value">
-                        <input type="number" class="config-chips-input" value="${d.latitude}" placeholder="Szerokość geogr. (lat)" step="0.000001"
+                        <input type="number" id="cfgCommuteLat${idx}" aria-label="Szerokość geograficzna celu ${idx + 1}" min="-90" max="90" class="config-chips-input" value="${Number.isFinite(d.latitude) ? d.latitude : ''}" placeholder="Szerokość geogr. (lat)" step="0.000001"
                                oninput="commuteDestinations[${idx}].latitude = parseFloat(this.value)">
-                        <input type="number" class="config-chips-input" value="${d.longitude}" placeholder="Długość geogr. (lon)" step="0.000001"
+                        <input type="number" id="cfgCommuteLon${idx}" aria-label="Długość geograficzna celu ${idx + 1}" min="-180" max="180" class="config-chips-input" value="${Number.isFinite(d.longitude) ? d.longitude : ''}" placeholder="Długość geogr. (lon)" step="0.000001"
                                oninput="commuteDestinations[${idx}].longitude = parseFloat(this.value)">
                     </div>
                     <button type="button" class="btn btn-sm btn-ghost" onclick="removeCommuteDestination(${idx})" title="Usuń cel dojazdu">${svgIcon('x')}</button>
@@ -1304,12 +1548,14 @@
         function addCommuteDestination(label, lat, lon) {
             commuteDestinations.push({ label: label || '', latitude: lat || 0, longitude: lon || 0 });
             renderCommuteDestinations();
+            if (document.getElementById('configModal').classList.contains('open')) updateSettingsStatus();
         }
 
         function removeCommuteDestination(index) {
             if (index >= 0 && index < commuteDestinations.length) {
                 commuteDestinations.splice(index, 1);
                 renderCommuteDestinations();
+            if (document.getElementById('configModal').classList.contains('open')) updateSettingsStatus();
             }
         }
 
@@ -1460,6 +1706,7 @@
 
         function setCfgCity(city) {
             document.getElementById('cfgCity').value = city;
+            updateSettingsStatus();
         }
 
         // Inline numeric validation for the config modal: marks bad fields instead of
@@ -1467,26 +1714,31 @@
         function validateConfigNumber(id, opts) {
             opts = opts || {};
             const el = document.getElementById(id);
-            if (!el || el.offsetParent === null) return true;
+            if (!el || el.disabled || el.type === 'hidden') return true;
+            for (let parent = el.parentElement; parent && parent.id !== 'configModal'; parent = parent.parentElement) {
+                if (parent.id.startsWith('configTab')) continue;
+                if (parent.hidden || parent.style.display === 'none') return true;
+            }
             el.classList.remove('input-error');
             const raw = (el.value || '').trim();
             let ok;
             if (opts.pattern) {
                 ok = opts.pattern.test(raw);
             } else {
-                const num = opts.integer ? parseInt(raw, 10) : parseFloat(raw);
-                ok = raw !== '' && !isNaN(num);
+                const num = Number(raw);
+                ok = raw !== '' && Number.isFinite(num) && (!opts.integer || Number.isInteger(num));
                 if (ok && opts.min !== undefined) ok = num >= opts.min;
                 if (ok && opts.max !== undefined) ok = num <= opts.max;
             }
-            if (!ok) el.classList.add('input-error');
+            if (!ok) settingsFieldError(id, opts.pattern ? 'Podaj prawidłową godzinę (HH:MM).' : `Podaj liczbę${opts.integer ? ' całkowitą' : ''} od ${opts.min ?? 0}${opts.max !== undefined ? ' do ' + opts.max : ''}.`);
             return ok;
         }
 
         function configTabForField(id) {
-            if (/cfg(Pages|Scraper|RequestDelay)/.test(id)) return 'scrapers';
+            if (/cfg(Pages|Scraper|Delay)/.test(id)) return 'scrapers';
             if (/cfg(Scheduler|Interval|Night|Quiet)/.test(id)) return 'scheduler';
             if (/cfgCapex/.test(id)) return 'capex';
+            if (/cfgCommute/.test(id)) return 'commute';
             if (/cfg(Notify|Telegram|Discord)/.test(id)) return 'notifications';
             return 'ai';
         }
@@ -1497,29 +1749,44 @@
                 ['cfgPagesOlx', { integer: true, min: 1, max: 50 }],
                 ['cfgPagesNieruchomosci', { integer: true, min: 1, max: 50 }],
                 ['cfgPagesMorizon', { integer: true, min: 1, max: 50 }],
-                ['cfgRequestDelay', { min: 0, max: 30 }],
+                ['cfgDelayOtodom', { min: 0, max: 30 }],
+                ['cfgDelayOlx', { min: 0, max: 30 }],
+                ['cfgDelayNieruchomosci', { min: 0, max: 30 }],
+                ['cfgDelayMorizon', { min: 0, max: 30 }],
+                ['cfgCapexDiscount', { min: 0.01, max: 1 }],
+                ['cfgVisionTimeout', { min: 10, max: 600 }],
                 ['cfgIntervalMinutes', { integer: true, min: 1, max: 1440 }],
                 ['cfgNightIntervalMinutes', { integer: true, min: 1, max: 1440 }],
-                ['cfgQuietStart', { pattern: /^\d{2}:\d{2}$/ }],
-                ['cfgQuietEnd', { pattern: /^\d{2}:\d{2}$/ }],
+                ['cfgQuietStart', { pattern: /^(?:[01]\d|2[0-3]):[0-5]\d$/ }],
+                ['cfgQuietEnd', { pattern: /^(?:[01]\d|2[0-3]):[0-5]\d$/ }],
                 ['cfgCapexDeveloper', { min: 0 }],
                 ['cfgCapexRenovation', { min: 0 }],
                 ['cfgCapexAgency', { min: 0, max: 100 }],
                 ['cfgNotifyMinScore', { min: 0, max: 100 }],
-                ['cfgNotifyQuietStart', { pattern: /^\d{2}:\d{2}$/ }],
-                ['cfgNotifyQuietEnd', { pattern: /^\d{2}:\d{2}$/ }],
-                ['cfgLocalTimeout', { min: 1, max: 3600 }],
+                ['cfgNotifyQuietStart', { pattern: /^(?:[01]\d|2[0-3]):[0-5]\d$/ }],
+                ['cfgNotifyQuietEnd', { pattern: /^(?:[01]\d|2[0-3]):[0-5]\d$/ }],
+                ['cfgLocalTimeout', { min: 10, max: 3600 }],
                 ['cfgOllamaTimeout', { min: 1, max: 3600 }],
                 ['cfgCloudTimeout', { min: 1, max: 600 }],
-                ['cfgLocalTemperature', { min: 0, max: 2 }],
-                ['cfgOllamaTemperature', { min: 0, max: 2 }],
-                ['cfgLocalNumCtx', { integer: true, min: 512, max: 1048576 }],
+                ['cfgLocalTemperature', { min: 0, max: 1 }],
+                ['cfgOllamaTemperature', { min: 0, max: 1 }],
+                ['cfgLocalNumCtx', { integer: true, min: 1024, max: 1048576 }],
                 ['cfgOllamaNumCtx', { integer: true, min: 512, max: 1048576 }]
             ];
             let firstBad = null;
             for (const [id, opts] of checks) {
                 if (!validateConfigNumber(id, opts) && !firstBad) firstBad = id;
             }
+            commuteDestinations.forEach((destination, index) => {
+                const checks = [
+                    ['cfgCommuteLabel' + index, Boolean(destination.label?.trim()), 'Podaj nazwę celu dojazdu.'],
+                    ['cfgCommuteLat' + index, Number.isFinite(destination.latitude) && Math.abs(destination.latitude) <= 90, 'Szerokość geograficzna musi mieścić się od −90 do 90.'],
+                    ['cfgCommuteLon' + index, Number.isFinite(destination.longitude) && Math.abs(destination.longitude) <= 180, 'Długość geograficzna musi mieścić się od −180 do 180.']
+                ];
+                checks.forEach(([id, valid, message]) => {
+                    if (!valid) { settingsFieldError(id, message); firstBad ||= id; }
+                });
+            });
             if (firstBad) {
                 try {
                     switchConfigTab(configTabForField(firstBad));
@@ -1532,32 +1799,39 @@
         }
 
         async function saveConfiguration(triggerScrapingImmediately = false) {
+            if (settingsSaving) return;
+            if (!validateProfileForm() || !validateConfiguration()) return;
             const listingsKeyBefore = JSON.stringify({
                 profiles: (activeConfig && activeConfig.profiles) || [],
                 scrapers: scrapersConfig || {}
             });
             saveCurrentFormIntoMemory();
 
-            if (!validateConfiguration()) return;
-
             const scrapersPayload = {
                 otodom: {
                     enabled: document.getElementById('cfgScraperOtodom').checked,
-                    max_pages: parseInt(document.getElementById('cfgPagesOtodom').value) || 5
+                    ...scrapersConfig?.otodom,
+                    max_pages: settingsNumber('cfgPagesOtodom', 5),
+                    delay_seconds: settingsNumber('cfgDelayOtodom', 1)
                 },
                 olx: {
                     enabled: document.getElementById('cfgScraperOlx').checked,
-                    max_pages: parseInt(document.getElementById('cfgPagesOlx').value) || 5
+                    ...scrapersConfig?.olx,
+                    max_pages: settingsNumber('cfgPagesOlx', 5),
+                    delay_seconds: settingsNumber('cfgDelayOlx', 1)
                 },
                 nieruchomosci_online: {
                     enabled: document.getElementById('cfgScraperNieruchomosci').checked,
-                    max_pages: parseInt(document.getElementById('cfgPagesNieruchomosci').value) || 5
+                    ...scrapersConfig?.nieruchomosci_online,
+                    max_pages: settingsNumber('cfgPagesNieruchomosci', 5),
+                    delay_seconds: settingsNumber('cfgDelayNieruchomosci', 1)
                 },
                 morizon: {
                     enabled: document.getElementById('cfgScraperMorizon').checked,
-                    max_pages: parseInt(document.getElementById('cfgPagesMorizon').value) || 5
-                },
-                request_delay: parseFloat(document.getElementById('cfgRequestDelay').value) || 1.0
+                    ...scrapersConfig?.morizon,
+                    max_pages: settingsNumber('cfgPagesMorizon', 5),
+                    delay_seconds: settingsNumber('cfgDelayMorizon', 1)
+                }
             };
 
             const schedulerPayload = {
@@ -1570,8 +1844,8 @@
             };
 
             const capexPayload = {
-                developer_rate: parseFloat(document.getElementById('cfgCapexDeveloper')?.value) || 1800,
-                renovation_rate: parseFloat(document.getElementById('cfgCapexRenovation')?.value) || 2200,
+                developer_rate: settingsNumber('cfgCapexDeveloper', 1800),
+                renovation_rate: settingsNumber('cfgCapexRenovation', 2200),
                 agency_fee_pct: parseFloat(document.getElementById('cfgCapexAgency')?.value ?? '2') || 0,
                 pcc_exempt_first_home: !!document.getElementById('cfgCapexPccExempt')?.checked,
                 transaction_discount: parseFloat(document.getElementById('cfgCapexDiscount')?.value ?? '0.92') || 1
@@ -1636,12 +1910,19 @@
                 vision_timeout_seconds: parseFloat(document.getElementById('cfgVisionTimeout')?.value) || 120
             };
 
+            settingsSaving = true;
+            const saveButtons = document.querySelectorAll('#configModal .btn-save-cfg, #configModal .btn-save-sync');
+            saveButtons.forEach(btn => { btn.disabled = true; });
+            document.getElementById('configModal').setAttribute('aria-busy', 'true');
+            updateSettingsStatus();
             try {
                 activeConfig = await Transport.saveConfig(payload);
                 allProfiles = activeConfig.profiles || allProfiles;
                 scrapersConfig = activeConfig.scrapers || scrapersPayload;
-                closeConfigModal(null);
-                showToast("Zapisano konfigurację");
+                settingsSaving = false;
+                settingsBaseline = settingsSnapshot();
+                await closeConfigModal(null, true);
+                showToast("Zapisano ustawienia wszystkich sekcji.");
 
                 await fetchConfig();
 
@@ -1655,13 +1936,20 @@
                 }
             } catch (err) {
                 console.error("Failed to save config:", err);
-                showToast("Błąd zapisu konfiguracji.");
+                updateSettingsStatus('Nie zapisano zmian. Spróbuj ponownie.');
+                showToast(err.message || "Błąd zapisu konfiguracji.");
+            } finally {
+                settingsSaving = false;
+                saveButtons.forEach(btn => { btn.disabled = false; });
+                document.getElementById('configModal').removeAttribute('aria-busy');
+                if (document.getElementById('configModal').classList.contains('open')) updateSettingsStatus();
             }
         }
 
         async function resetDatabaseData() {
-            const scope = currentProfileId || null;
-            const scopeLabel = scope ? `profilu "${scope}"` : 'CAŁEJ bazy danych';
+            const scope = document.getElementById('cfgResetScope')?.value || null;
+            const profile = (activeConfig.profiles || []).find(p => p.id === scope);
+            const scopeLabel = profile ? `profilu "${profile.name}"` : 'CAŁEJ bazy danych';
             const typed = await showConfirmDialog({
                 title: 'Reset bazy danych',
                 message: `UWAGA: Usuniesz WSZYSTKIE oferty z ${scopeLabel}\n(wraz z historią cen, notatkami i statusami CRM).\n\nAby potwierdzić, wpisz: RESET`,
@@ -3960,7 +4248,7 @@
             const requestedModel = localModelInput ? localModelInput.value.trim() : null;
             const requestedLocalUrl = document.getElementById('cfgLocalBaseUrl')?.value?.trim() || document.getElementById('cfgOllamaBaseUrl')?.value?.trim() || null;
             const requestedLocalTimeout = parseFloat(document.getElementById('cfgLocalTimeout')?.value || document.getElementById('cfgOllamaTimeout')?.value) || null;
-            const requestedLocalTemp = parseFloat(document.getElementById('cfgLocalTemperature')?.value || document.getElementById('cfgOllamaTemperature')?.value) ?? null;
+            const requestedLocalTemp = settingsNumber('cfgLocalTemperature', settingsNumber('cfgOllamaTemperature'));
             const requestedLocalCtx = parseInt(document.getElementById('cfgLocalNumCtx')?.value || document.getElementById('cfgOllamaNumCtx')?.value, 10) || null;
             const requestedLocalKey = activeConfig?.local_llm_api_key || null;
             const requestedLocalPreset = document.getElementById('cfgLocalPreset')?.value || 'ollama';
@@ -4273,7 +4561,7 @@
                 return;
             }
             const cfgM = document.getElementById('configModal');
-            if (cfgM && cfgM.classList.contains('open') && e.key === 'Escape') {
+            if (cfgM && cfgM.classList.contains('open') && !document.getElementById('confirmModal')?.classList.contains('open') && e.key === 'Escape') {
                 e.preventDefault();
                 closeConfigModal(null);
                 return;

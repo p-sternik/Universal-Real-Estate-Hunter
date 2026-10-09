@@ -207,6 +207,7 @@ class FilterResult(BaseModel):
     discrepancies: list[str] = Field(default_factory=list)
     is_corner: bool = False
     has_parking_or_garage: bool = False
+    spatial_applied: bool = False
     matched_whitelist_area: str | None = None
     finish_condition: FinishCondition = FinishCondition.NIEOKRESLONY
     has_visualisations: bool = False
