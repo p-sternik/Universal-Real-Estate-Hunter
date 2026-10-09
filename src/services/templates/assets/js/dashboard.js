@@ -1400,15 +1400,24 @@
             const syncStatus = sync.is_running
                 ? `w trakcie — ${esc(sync.current_portal || '')} ${esc(sync.current_step || '')} (${fmtInt(sync.items_scraped)})`
                 : 'bezczynne';
+            let schedStatusBadge = '';
+            if (sched.enabled !== false) {
+                if (sched.daemon_active === true) {
+                    schedStatusBadge = ' <span style="font-size:11px;color:var(--success,#10b981);font-weight:600;">(daemon aktywny)</span>';
+                } else if (sched.daemon_active === false) {
+                    schedStatusBadge = ' <span style="font-size:11px;color:var(--warning,#eab308);font-weight:600;" title="Brak aktywnego procesu python main.py run ani flagi --with-scheduler">(daemon offline)</span>';
+                }
+            }
             const schedText = sched.enabled === false
                 ? 'wyłączony'
                 : `co ${esc(sched.interval_minutes || 20)} min` +
-                  (sched.night_mode === false ? '' : ` · noc ${esc(sched.quiet_hours_start || '22:00')}–${esc(sched.quiet_hours_end || '07:00')} co ${esc(sched.night_interval_minutes || 60)} min`);
+                  (sched.night_mode === false ? '' : ` · noc ${esc(sched.quiet_hours_start || '22:00')}–${esc(sched.quiet_hours_end || '07:00')} co ${esc(sched.night_interval_minutes || 60)} min`) +
+                  schedStatusBadge;
             const syncRows =
                 rawRow('Status', syncStatus) +
                 row('Ostatnia synchronizacja', `${esc(sync.last_sync_at ? sync.last_sync_at.slice(0, 16).replace('T', ' ') : 'brak')} · ${esc(timeAgoPl(sync.last_sync_at))}`) +
                 row('Nowe (24 h)', fmtInt(sync.new_last_24h)) +
-                row('Harmonogram', schedText);
+                rawRow('Harmonogram', schedText);
 
             const profRows = ((li.by_profile || []).slice(0, 6)).map(p =>
                 `<div class="ov-row"><span class="ov-label">${esc(p.profile_name || p.profile_id)}</span><span class="ov-value num">${fmtInt(p.count)}</span></div>`

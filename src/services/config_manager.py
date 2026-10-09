@@ -591,6 +591,7 @@ class ConfigManager:
     def __init__(self, config_path: Path | str = CONFIG_FILE_PATH):
         self.config_path = Path(config_path) if isinstance(config_path, str) else config_path
         self._config: SearchConfig | None = None
+        self._last_mtime: float = 0.0
         self.load_config()
 
     def _get_default_profile(self) -> SearchProfile:
@@ -661,12 +662,16 @@ class ConfigManager:
     def load_config(self) -> SearchConfig:
         if self.config_path.exists():
             try:
+                mtime = self.config_path.stat().st_mtime
                 with self.config_path.open(encoding="utf-8") as f:
                     data = json.load(f)
+                    is_legacy = "profiles" not in data or not isinstance(data.get("profiles"), list)
                     self._config = self._migrate_legacy_dict(data)
                     logger.info(f"[ConfigManager] Załadowano konfigurację ({len(self._config.profiles)} profili).")
-                    # Save back migrated format
-                    self.save_config()
+                    if is_legacy:
+                        self.save_config()
+                    else:
+                        self._last_mtime = mtime
                     return self._config
             except Exception as e:
                 logger.warning(f"[ConfigManager] Błąd odczytu {self.config_path}, przywracam domyślne: {e}")
@@ -700,6 +705,10 @@ class ConfigManager:
             with self.config_path.open("w", encoding="utf-8", newline="\n") as f:
                 json.dump(self._config.model_dump(), f, ensure_ascii=False, indent=2)
                 f.write("\n")
+            try:
+                self._last_mtime = self.config_path.stat().st_mtime
+            except OSError:
+                pass
             logger.info(f"[ConfigManager] Zapisano konfigurację do {self.config_path}")
         except Exception as e:
             logger.error(f"[ConfigManager] Nie udało się zapisać konfiguracji: {e}")
@@ -707,6 +716,14 @@ class ConfigManager:
     def get_config(self) -> SearchConfig:
         if self._config is None:
             self.load_config()
+        elif self.config_path.exists():
+            try:
+                mtime = self.config_path.stat().st_mtime
+                if mtime > getattr(self, "_last_mtime", 0.0):
+                    logger.info("[ConfigManager] Wykryto zmianę pliku konfiguracyjnego na dysku — przeładowuję.")
+                    self.load_config()
+            except OSError:
+                pass
         assert self._config is not None
         return self._config
 

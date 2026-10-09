@@ -1,5 +1,6 @@
 import argparse
 import asyncio
+import os
 import sys
 
 from loguru import logger
@@ -404,11 +405,25 @@ def main():
     dash_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
     dash_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     dash_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
+    dash_parser.add_argument(
+        "--with-scheduler",
+        "-s",
+        action="store_true",
+        default=os.getenv("WITH_SCHEDULER", "").lower() in ("1", "true", "yes"),
+        help="Run continuous scheduler daemon in background alongside web dashboard",
+    )
 
     server_parser = subparsers.add_parser("server", help="Alias for dashboard")
     server_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
     server_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     server_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
+    server_parser.add_argument(
+        "--with-scheduler",
+        "-s",
+        action="store_true",
+        default=os.getenv("WITH_SCHEDULER", "").lower() in ("1", "true", "yes"),
+        help="Run continuous scheduler daemon in background alongside web dashboard",
+    )
 
     # Geocode missing coordinates
     subparsers.add_parser("geocode", help="Geocode listings missing GPS coordinates using Nominatim cache")
@@ -451,7 +466,8 @@ def main():
         from src.services.live_dashboard import LiveDashboardServer
 
         host = getattr(args, "host", "0.0.0.0")
-        srv = LiveDashboardServer(host=host, port=args.port)
+        with_scheduler = getattr(args, "with_scheduler", False)
+        srv = LiveDashboardServer(host=host, port=args.port, with_scheduler=with_scheduler)
         try:
             asyncio.run(srv.run(auto_open=not args.no_open))
         except (KeyboardInterrupt, SystemExit):

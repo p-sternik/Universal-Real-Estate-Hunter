@@ -280,11 +280,14 @@ class LiveDashboardServer:
             resp.enable_compression()
         return resp
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080):
+    def __init__(self, host: str = "0.0.0.0", port: int = 8080, with_scheduler: bool = False):
         self.host = host
         self.port = port
+        self.with_scheduler = with_scheduler
         self.app = web.Application(middlewares=[self._compression_middleware])
         self._active_scrape_task: asyncio.Task[Any] | None = None
+        self._scheduler_task: asyncio.Task[Any] | None = None
+        self._scheduler_runner: Any | None = None
         self._listings_cache: dict[str, tuple[str, str, bytes]] = {}
         self._http: aiohttp.ClientSession | None = None
         self._img_inflight: dict[str, asyncio.Task[Any]] = {}
@@ -460,6 +463,12 @@ class LiveDashboardServer:
                 if (provider == "auto" or "openrouter" in provider)
                 else (cfg.local_llm_model or cfg.ollama_model)
             )
+            from src.scheduler.runner import is_scheduler_active
+
+            daemon_active = (
+                self._scheduler_task is not None and not self._scheduler_task.done()
+            ) or is_scheduler_active()
+
             cfg_payload = {
                 "profiles_total": len(profiles),
                 "profiles_enabled": [p.name for p in profiles if p.enabled],
@@ -474,6 +483,7 @@ class LiveDashboardServer:
                     "night_interval_minutes": sched.night_interval_minutes,
                     "quiet_hours_start": sched.quiet_hours_start,
                     "quiet_hours_end": sched.quiet_hours_end,
+                    "daemon_active": daemon_active,
                 },
                 "llm": {
                     "enabled": bool(cfg.llm_analysis_enabled),
@@ -2071,12 +2081,26 @@ class LiveDashboardServer:
             except Exception as e:
                 logger.debug(f"Could not open browser automatically: {e}")
 
+        if self.with_scheduler:
+            from src.scheduler.runner import SchedulerRunner
+
+            self._scheduler_runner = SchedulerRunner()
+            self._scheduler_task = asyncio.create_task(self._scheduler_runner.start())
+            logger.info("[LiveDashboard] Uruchomiono wbudowany harmonogram w tle (--with-scheduler).")
+
         try:
             while True:
                 await asyncio.sleep(3600)
         except (asyncio.CancelledError, KeyboardInterrupt):
             pass
         finally:
+            if self._scheduler_runner is not None:
+                self._scheduler_runner.stop()
+            if self._scheduler_task is not None:
+                try:
+                    await asyncio.wait_for(self._scheduler_task, timeout=5.0)
+                except (TimeoutError, asyncio.CancelledError):
+                    self._scheduler_task.cancel()
             await runner.cleanup()
             if self._http is not None:
                 await self._http.close()
