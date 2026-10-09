@@ -411,19 +411,18 @@ class QualificationEngine:
             pros.append("🏛️ Rejestr GUNB/RWDZ: wyłącznie standardowe pozwolenia w promieniu 200 m")
 
         # Vision AI (Living Quarters verification from photos)
-        if getattr(listing, "vision_is_render", None) is True:
+        if (
+            getattr(listing, "vision_is_render", None) is True
+            and (getattr(listing, "vision_render_confidence", None) or 0.0) >= 0.75
+        ):
             cons.append(
                 "🖼️ [Vision AI] Zdjęcia ofertowe to wizualizacje 3D / rendery — stan faktyczny wymaga weryfikacji na żywo"
             )
             score -= 10.0
-        vision_finish = getattr(listing, "vision_finish_condition", None)
-        if vision_finish and vision_finish != "NIEZNANY":
-            declared = declared_finish_label(listing) or ""
-            if "ZAMIESZKANI" in declared.upper() and vision_finish in ("DO_WYKONCZENIA", "DEWELOPERSKI", "SUROWY"):
-                cons.append(
-                    f"🔍 [Vision AI] Niespójność stanu: deklarowano '{declared}', a zdjęcia wskazują '{vision_finish}'"
-                )
-                score -= 15.0
+        vision_discrepancy = getattr(listing, "vision_discrepancy_note", None)
+        if vision_discrepancy and vision_discrepancy not in cons:
+            cons.append(f"🔍 [Vision AI] {vision_discrepancy}")
+            score -= 15.0
         for defect in list(getattr(listing, "vision_defects", None) or [])[:3]:
             cons.append(f"🔧 [Vision AI] Wada wizualna: {defect}")
 
@@ -614,17 +613,17 @@ class QualificationEngine:
                     level="info",
                     category="ai",
                 )
-                if llm_insights.get("is_corner"):
+                if llm_insights.get("is_corner") is True:
                     is_corner = True
                     listing.segment_subtype = SegmentSubtype.SKRAJNY
-                elif llm_insights.get("is_middle"):
+                elif llm_insights.get("is_middle") is True:
                     listing.segment_subtype = SegmentSubtype.SRODKOWY
-                if llm_insights.get("road_is_bad") and passed_stage2:
+                if llm_insights.get("road_is_bad") is True and passed_stage2:
                     passed_stage2 = False
                     stage2_reasons.append("LLM: Wykryto nieutwardzoną / polną drogę dojazdową")
-                if llm_insights.get("has_parking_or_garage"):
+                if llm_insights.get("has_parking_or_garage") is True:
                     has_parking = True
-                if llm_insights.get("terrain_risk"):
+                if llm_insights.get("terrain_risk") is True:
                     cons.append("⚠️ [LLM] Wykryto ryzyko ukształtowania terenu (skarpa / osuwisko / podmokłość)")
                 if llm_insights.get("extracted_plot_m2") and not listing.area_plot:
                     try:
@@ -660,7 +659,7 @@ class QualificationEngine:
                     else:
                         cons.append(f"🔧 [LLM] Stan: {finish_note}")
 
-                if llm_insights.get("has_visualisations") and not has_visualisations:
+                if llm_insights.get("has_visualisations") is True and not has_visualisations:
                     listing.has_visualisations = True
                     has_visualisations = True
                     vis_note = str(llm_insights.get("visualisation_note") or "").strip()
@@ -700,8 +699,8 @@ class QualificationEngine:
                 ai_summary = llm_insights.get("summary") or None
                 ai_verdict = llm_insights.get("verdict") or None
                 worth_interest = llm_insights.get("worth_interest")
-                if worth_interest is not None:
-                    worth_interest = bool(worth_interest)
+                if not isinstance(worth_interest, bool):
+                    worth_interest = None
                 ai_questions = llm_insights.get("questions_for_agent") or []
                 raw_sq = llm_insights.get("stakeholder_questions")
                 if isinstance(raw_sq, dict):

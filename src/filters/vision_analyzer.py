@@ -13,6 +13,12 @@ from PIL import Image
 
 from config import settings
 from src.filters.ai_gate import is_local_engine, local_ai_gate
+from src.services.image_security import (
+    MAX_IMAGE_BYTES,
+    MAX_IMAGE_PIXELS,
+    is_allowed_image_reference,
+    is_allowed_image_url,
+)
 
 SUGGESTED_OLLAMA_VISION_MODELS: list[dict[str, Any]] = [
     {
@@ -307,13 +313,28 @@ def declared_finish_label(source: Any) -> str | None:
     return str(getattr(finish_val, "value", finish_val) or "") or None
 
 
+def select_vision_image_urls(image_urls: list[str], limit: int = 6) -> list[str]:
+    """Sample images across the full gallery so late floorplans are not always omitted."""
+    unique_urls = list(dict.fromkeys(url for url in image_urls if url))
+    if limit <= 0:
+        return []
+    if len(unique_urls) <= limit:
+        return unique_urls
+    if limit == 1:
+        return [unique_urls[0]]
+    indexes = [round(index * (len(unique_urls) - 1) / (limit - 1)) for index in range(limit)]
+    return [unique_urls[index] for index in indexes]
+
+
 VISION_AUDIT_PROMPT = """Jesteś rzeczoznawcą budowlanym i audytorem due diligence nieruchomości.
-Przeprowadź forensic audyt załączonych zdjęć, ustalając stan faktyczny (Ground Truth) oraz wady wpływające na wycenę, CAPEX i bezpieczeństwo.
+Przeprowadź audyt widocznych cech załączonych zdjęć oraz wad wpływających na wycenę, CAPEX i bezpieczeństwo. Oddziel obserwacje od wniosków i nie uznawaj zdjęć za potwierdzenie, że przedstawiają dokładnie tę nieruchomość.
 
 Kroki (wykonaj wszystkie, po kolei):
 1. Render vs fotografia: Sklasyfikuj zestaw zdjęć. Czy to rendery 3D/CAD/wizualizacje, czy fotografie fizycznego budynku? Kryterium ukończenia: is_render (true/false) oraz render_confidence (0.0-1.0).
+   - Zdjęcia mogą być nieaktualne, inscenizowane lub przedstawiać inny lokal. Oceniaj wyłącznie widoczne cechy i obniż confidence, gdy identyfikacja jest niepewna. Confidence oznacza pewność poprawności klasyfikacji niezależnie od tego, czy is_render jest true, czy false.
 2. Stan wykończenia (Living Quarters): Przypisz jeden visual_finish_condition ze słownika: DO_ZAMIESZKANIA | DO_WYKONCZENIA | DEWELOPERSKI | SUROWY | DO_REMONTU | NIEZNANY.
-   - Poprzeczka DO_ZAMIESZKANIA wymaga: gotowej kuchni (meble, zlew, płyta), wykończonej łazienki z armaturą, ułożonych podłóg i pomalowanych ścian.
+   - Poprzeczka DO_ZAMIESZKANIA wymaga widocznych dowodów gotowej kuchni, wykończonej łazienki z armaturą, podłóg i pomalowanych ścian albo wyraźnych oznak zamieszkania.
+   - Brak pomieszczenia na zdjęciach nie dowodzi, że go brakuje lub jest niewykończone. Jeśli kluczowe pomieszczenia nie są pokazane, zwróć NIEZNANY zamiast DO_WYKONCZENIA.
    - Zasada elementów zewnętrznych: Niewykończony taras, brak kostki brukowej, ogród do zagospodarowania czy poddasze do adaptacji NIE degradują stanu wnętrza — pozostaw DO_ZAMIESZKANIA, a prace zewnętrzne opisz w summary.
    - Kryterium ukończenia: Etykieta odpowiada najsłabszemu widocznemu pomieszczeniu mieszkalnemu.
 3. Rzut architektoniczny: Ustaw has_floorplan (true/false). Gdy widoczny jest rzut, podaj orientation, usability_score (1-10) i room_layout_notes.
@@ -327,7 +348,7 @@ Kroki (wykonaj wszystkie, po kolei):
 Zwróć poprawny obiekt JSON dokładnie o tym schemacie, bez otaczającego tekstu:
 {
   "is_render": false,
-  "render_confidence": 0.05,
+  "render_confidence": 0.98,
   "visual_finish_condition": "DO_ZAMIESZKANIA",
   "has_floorplan": false,
   "floorplan_details": {
@@ -377,17 +398,37 @@ class VisionAnalyzer:
         if not url:
             return None
         if url.startswith("data:image/"):
-            return url
-        if not url.startswith(("http://", "https://")):
+            return url if is_allowed_image_reference(url) else None
+        if not is_allowed_image_url(url):
             return None
 
         try:
-            resp = await client.get(url, headers=self.IMAGE_HEADERS, timeout=timeout)
-            if resp.status_code != 200 or not resp.content:
-                return None
+            async with client.stream(
+                "GET", url, headers=self.IMAGE_HEADERS, timeout=timeout, follow_redirects=False
+            ) as resp:
+                if resp.status_code != 200:
+                    return None
+                content_type = resp.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+                if not content_type.startswith("image/"):
+                    return None
+                content_length = resp.headers.get("content-length")
+                if content_length and int(content_length) > MAX_IMAGE_BYTES:
+                    return None
+                chunks: list[bytes] = []
+                total_bytes = 0
+                async for chunk in resp.aiter_bytes():
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_IMAGE_BYTES:
+                        return None
+                    chunks.append(chunk)
+                image_bytes = b"".join(chunks)
+                if not image_bytes:
+                    return None
 
             try:
-                with Image.open(io.BytesIO(resp.content)) as raw_img:
+                with Image.open(io.BytesIO(image_bytes)) as raw_img:
+                    if raw_img.width * raw_img.height > MAX_IMAGE_PIXELS:
+                        return None
                     proc_img = raw_img.convert("RGB") if raw_img.mode not in ("RGB", "L") else raw_img
                     w, h = proc_img.size
                     if max(w, h) > max_dimension:
@@ -397,10 +438,6 @@ class VisionAnalyzer:
                     b64 = base64.b64encode(buffer.getvalue()).decode("ascii")
                     return f"data:image/jpeg;base64,{b64}"
             except Exception as img_err:
-                if len(resp.content) <= 2 * 1024 * 1024:
-                    ct = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
-                    b64 = base64.b64encode(resp.content).decode("ascii")
-                    return f"data:{ct};base64,{b64}"
                 logger.debug(f"[VisionAnalyzer] Image processing note for {url[:60]}: {img_err}")
                 return None
         except Exception as e:
@@ -422,7 +459,7 @@ class VisionAnalyzer:
         ]
 
         for url in image_urls[:6]:  # Limit to top 6 images for latency and cost efficiency
-            if url and url.startswith(("http://", "https://", "data:image/")):
+            if url and is_allowed_image_reference(url):
                 user_content.append(
                     {
                         "type": "image_url",
@@ -449,9 +486,6 @@ class VisionAnalyzer:
     ) -> dict[str, Any]:
         """Extracts structured signals from plain text responses for models that do not output JSON (e.g. moondream)."""
         low = raw_text.lower()
-        render_indicators = ("render", "wizualizacj", "3d model", "computer generated", "cad", "archviz", "grafika")
-        is_render = any(ind in low for ind in render_indicators)
-
         finish = "NIEZNANY"
         if any(
             x in low
@@ -478,7 +512,10 @@ class VisionAnalyzer:
 
         return {
             "audit_success": success,
-            "vision_is_render": is_render,
+            # Text-only fallback has no calibrated confidence, so it must not
+            # trigger the render penalty or masquerade as a verified class.
+            "vision_is_render": None,
+            "vision_render_confidence": None,
             "vision_finish_condition": finish,
             "vision_floorplan_details": {},
             "vision_defects": [],
@@ -496,7 +533,8 @@ class VisionAnalyzer:
         """Parses and validates Vision LLM response against Living Quarters rules."""
         default_res: dict[str, Any] = {
             "audit_success": success,
-            "vision_is_render": False,
+            "vision_is_render": None,
+            "vision_render_confidence": None,
             "vision_finish_condition": "NIEZNANY",
             "vision_floorplan_details": {},
             "vision_defects": [],
@@ -535,28 +573,62 @@ class VisionAnalyzer:
             return self._extract_fallback_from_text(raw_text, declared_finish=declared_finish, success=success)
 
         try:
-            is_render = bool(data.get("is_render", False))
+            is_render_value = data.get("is_render")
+            if not isinstance(is_render_value, bool):
+                return {**default_res, "audit_success": False}
+            confidence_value = data.get("render_confidence")
+            confidence = (
+                float(confidence_value)
+                if isinstance(confidence_value, (int, float))
+                and not isinstance(confidence_value, bool)
+                and 0.0 <= confidence_value <= 1.0
+                else None
+            )
+            is_render = is_render_value if confidence is not None and confidence >= 0.75 else None
             visual_finish = str(data.get("visual_finish_condition", "NIEZNANY")).strip().upper()
+            if visual_finish not in {
+                "DO_ZAMIESZKANIA",
+                "DO_WYKONCZENIA",
+                "DEWELOPERSKI",
+                "SUROWY",
+                "DO_REMONTU",
+                "NIEZNANY",
+            }:
+                visual_finish = "NIEZNANY"
             floorplan_details = data.get("floorplan_details") or {}
             defects = normalize_vision_defects(data.get("defects") or [])
             summary = data.get("summary", "")
             discrepancy_note = data.get("discrepancy_note")
 
-            # Check discrepancy with declared finish
-            discrepancy_detected = False
-            if declared_finish:
-                d_norm = declared_finish.upper()
-                if "ZAMIESZKANI" in d_norm and visual_finish in ("DO_WYKONCZENIA", "DEWELOPERSKI", "SUROWY"):
-                    discrepancy_detected = True
-                    if not discrepancy_note:
-                        discrepancy_note = (
-                            f"Sprzedający deklaruje stan '{declared_finish}', "
-                            f"lecz analiza zdjęć wykazuje stan surowy/deweloperski ({visual_finish})."
-                        )
+            # Compare photos with the finish inferred from the listing text,
+            # not with the portal's unverified finish tag.
+            text_finish = (declared_finish or "").upper().replace("_", " ")
+            text_says_ready = "ZAMIESZKANI" in text_finish or "POD KLUCZ" in text_finish
+            text_says_unfinished = any(
+                marker in text_finish for marker in ("DEWELOPERSK", "WYKOŃCZEN", "WYKONCZEN", "SUROW", "REMONT")
+            )
+            photos_say_ready = visual_finish == "DO_ZAMIESZKANIA"
+            photos_say_unfinished = visual_finish in (
+                "DO_WYKONCZENIA",
+                "DEWELOPERSKI",
+                "SUROW",
+                "DO_REMONTU",
+            )
+            discrepancy_detected = (text_says_ready and photos_say_unfinished) or (
+                text_says_unfinished and photos_say_ready
+            )
+            if not isinstance(discrepancy_note, str):
+                discrepancy_note = None
+            if discrepancy_detected and not discrepancy_note:
+                discrepancy_note = (
+                    f"Opis ogłoszenia wskazuje stan '{declared_finish}', "
+                    f"a zdjęcia sugerują stan '{visual_finish}'. Wymaga weryfikacji."
+                )
 
             return {
                 "audit_success": True,
                 "vision_is_render": is_render,
+                "vision_render_confidence": confidence,
                 "vision_finish_condition": visual_finish,
                 "vision_floorplan_details": floorplan_details,
                 "vision_defects": defects,
@@ -585,7 +657,7 @@ class VisionAnalyzer:
         Target precedence: explicit args > VISION_* settings > configured LLM provider > defaults.
         Local Ollama needs no key: VISION_BASE_URL=http://localhost:11434/v1 + VISION_MODEL.
         """
-        valid_urls = [u for u in (image_urls or []) if u and u.startswith(("http://", "https://", "data:image/"))]
+        valid_urls = [url for url in (image_urls or []) if url and is_allowed_image_reference(url)]
         if not valid_urls or client is None:
             return self.parse_vision_response("", declared_finish=declared_finish, success=False)
 

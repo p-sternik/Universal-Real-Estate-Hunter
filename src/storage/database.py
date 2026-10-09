@@ -393,6 +393,7 @@ LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     ("gunb_status", "VARCHAR(50)", "VARCHAR(50)"),
     # Extended Intelligence: Vision AI
     ("vision_is_render", "BOOLEAN", "BOOLEAN"),
+    ("vision_render_confidence", "FLOAT", "DOUBLE PRECISION"),
     ("vision_finish_condition", "VARCHAR(50)", "VARCHAR(50)"),
     ("vision_floorplan_details", "TEXT DEFAULT '{}'", "TEXT DEFAULT '{}'"),
     ("vision_defects", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),

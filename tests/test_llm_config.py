@@ -9,6 +9,16 @@ from src.filters.llm_analyzer import SUGGESTED_OLLAMA_MODELS, LLMAnalyzer
 from src.services.config_manager import SearchConfig, config_manager
 
 
+def test_llm_json_parser_rejects_non_objects_and_neutralizes_bad_types() -> None:
+    assert LLMAnalyzer._parse_json('["not", "an", "object"]') is None
+
+    parsed = LLMAnalyzer._parse_json('{"worth_interest":"false","road_is_bad":"false","discrepancies":"none"}')
+    assert parsed is not None
+    assert parsed["worth_interest"] is None
+    assert parsed["road_is_bad"] is None
+    assert parsed["discrepancies"] == []
+
+
 def test_suggested_models_schema() -> None:
     assert len(SUGGESTED_OLLAMA_MODELS) >= 5
     ids = [m["id"] for m in SUGGESTED_OLLAMA_MODELS]

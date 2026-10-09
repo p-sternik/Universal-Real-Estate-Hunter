@@ -18,6 +18,7 @@ from sqlalchemy import and_, case, desc, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.services.config_manager import config_manager
+from src.services.image_security import MAX_IMAGE_BYTES, is_allowed_image_url
 from src.services.market_analyzer import valuation_engine
 from src.services.pipeline import ScraperPipeline
 from src.storage import (
@@ -128,16 +129,7 @@ _LIST_OMIT_FIELDS = (
 # NOTE: portal image CDNs are NOT subdomains of the portal domain
 # (e.g. i.st-nieruchomosci-online.pl) — verify against real listing data
 # before assuming a suffix covers them.
-_ALLOWED_IMAGE_HOST_SUFFIXES = (
-    "olxcdn.com",
-    "staticmorizon.com.pl",
-    "nieruchomosci-online.pl",
-    "st-nieruchomosci-online.pl",
-    "otodom.pl",
-    "otodomcdn.com",
-    "unsplash.com",
-)
-_IMG_MAX_BYTES = 8 * 1024 * 1024
+_IMG_MAX_BYTES = MAX_IMAGE_BYTES
 _IMG_FETCH_TIMEOUT_SECONDS = 12.0
 
 # Server-side thumbnail derivatives: canonical sizes served via /img?size=.
@@ -199,10 +191,7 @@ def _img_cache_dir() -> Path:
 
 
 def _is_allowed_image_host(url: str) -> bool:
-    host = (urlparse(url).hostname or "").lower()
-    if not host:
-        return False
-    return any(host == suffix or host.endswith("." + suffix) for suffix in _ALLOWED_IMAGE_HOST_SUFFIXES)
+    return is_allowed_image_url(url)
 
 
 def _infer_image_content_type(upstream_ct: str | None) -> str:
@@ -463,11 +452,11 @@ class LiveDashboardServer:
                 if (provider == "auto" or "openrouter" in provider)
                 else (cfg.local_llm_model or cfg.ollama_model)
             )
-            from src.scheduler.runner import is_scheduler_active
+            from src.scheduler.runner import get_scheduler_heartbeat
 
-            daemon_active = (
-                self._scheduler_task is not None and not self._scheduler_task.done()
-            ) or is_scheduler_active()
+            embedded_daemon_active = self._scheduler_task is not None and not self._scheduler_task.done()
+            heartbeat = get_scheduler_heartbeat()
+            daemon_active = embedded_daemon_active or bool(heartbeat["active"])
 
             cfg_payload = {
                 "profiles_total": len(profiles),
@@ -484,6 +473,8 @@ class LiveDashboardServer:
                     "quiet_hours_start": sched.quiet_hours_start,
                     "quiet_hours_end": sched.quiet_hours_end,
                     "daemon_active": daemon_active,
+                    "daemon_status": "embedded" if embedded_daemon_active else heartbeat["status"],
+                    "heartbeat_age_seconds": heartbeat["age_seconds"],
                 },
                 "llm": {
                     "enabled": bool(cfg.llm_analysis_enabled),
@@ -907,7 +898,7 @@ class LiveDashboardServer:
         if not _is_allowed_image_host(raw_url):
             logger.warning(
                 f"[Dashboard] Image host not allowed: {(urlparse(raw_url).hostname or '').lower()} "
-                f"(add the CDN suffix to _ALLOWED_IMAGE_HOST_SUFFIXES if legitimate)"
+                f"(add the CDN suffix to ALLOWED_IMAGE_HOST_SUFFIXES if legitimate)"
             )
             return web.Response(status=403, text="Image host not allowed")
 
@@ -1428,6 +1419,7 @@ class LiveDashboardServer:
             "gunb_url": item.gunb_url,
             "gunb_status": item.gunb_status,
             "vision_is_render": item.vision_is_render,
+            "vision_render_confidence": item.vision_render_confidence,
             "vision_finish_condition": item.vision_finish_condition,
             "vision_floorplan_details": item.vision_floorplan_details,
             "vision_defects": item.vision_defects,

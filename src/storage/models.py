@@ -156,6 +156,7 @@ class ListingModel(Base):
 
     # Extended Intelligence: Vision AI
     vision_is_render: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    vision_render_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
     vision_finish_condition: Mapped[str | None] = mapped_column(String(50), nullable=True)
     _vision_floorplan_details: Mapped[str] = mapped_column("vision_floorplan_details", Text, default="{}")
     _vision_defects: Mapped[str] = mapped_column("vision_defects", Text, default="[]")

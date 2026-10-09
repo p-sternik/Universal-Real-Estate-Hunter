@@ -123,8 +123,38 @@ def test_scheduler_heartbeat_lifecycle(tmp_path, monkeypatch):
     runner_module.write_heartbeat(status="waiting", interval_minutes=360)
     assert fake_hb.exists()
     assert runner_module.is_scheduler_active() is True
+    assert runner_module.get_scheduler_heartbeat()["status"] == "waiting"
 
     runner_module.write_heartbeat(status="stopped", interval_minutes=360)
+    assert runner_module.is_scheduler_active() is False
+    assert runner_module.get_scheduler_heartbeat()["status"] == "stopped"
+
+
+def test_scheduler_heartbeat_uses_shared_config_volume_for_postgres(tmp_path, monkeypatch):
+    from config import settings
+    from src.scheduler.runner import get_heartbeat_path
+    from src.services.config_manager import config_manager
+
+    monkeypatch.setattr(settings, "DATABASE_URL", "postgresql+asyncpg://user:pass@db/example")
+    monkeypatch.setattr(config_manager, "config_path", tmp_path / "shared" / "search_config.json")
+
+    assert get_heartbeat_path() == (tmp_path / "shared" / ".scheduler_heartbeat.json").resolve()
+
+
+def test_scheduler_heartbeat_reports_stale_and_future_timestamps(tmp_path, monkeypatch):
+    import json
+    import time
+
+    import src.scheduler.runner as runner_module
+
+    heartbeat = tmp_path / ".scheduler_heartbeat.json"
+    monkeypatch.setattr(runner_module, "get_heartbeat_path", lambda: heartbeat)
+    heartbeat.write_text(json.dumps({"status": "waiting", "time_epoch": time.time() - 120}), encoding="utf-8")
+    assert runner_module.get_scheduler_heartbeat()["status"] == "stale"
+    assert runner_module.is_scheduler_active() is False
+
+    heartbeat.write_text(json.dumps({"status": "waiting", "time_epoch": time.time() + 120}), encoding="utf-8")
+    assert runner_module.get_scheduler_heartbeat()["status"] == "offline"
     assert runner_module.is_scheduler_active() is False
 
 

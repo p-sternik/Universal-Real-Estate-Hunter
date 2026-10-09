@@ -868,15 +868,46 @@ class LLMAnalyzer:
                 lines = lines[:-1]
             cleaned = "\n".join(lines).strip()
         try:
-            return json.loads(cleaned)
+            parsed = json.loads(cleaned)
+            return LLMAnalyzer._normalize_response(parsed)
         except Exception:
             pass
         try:
             obj, _ = json.JSONDecoder().raw_decode(cleaned)
-            return obj
+            return LLMAnalyzer._normalize_response(obj)
         except Exception as e:
             logger.warning(f"[LLMAnalyzer] Failed to parse JSON: {e}. Raw content: {cleaned[:200]}")
             return None
+
+    @staticmethod
+    def _normalize_response(value: Any) -> dict[str, Any] | None:
+        """Reject non-object output and neutralize malformed fields before use."""
+        if not isinstance(value, dict):
+            return None
+        for key in (
+            "worth_interest",
+            "has_visualisations",
+            "is_corner",
+            "is_middle",
+            "has_parking_or_garage",
+            "road_is_bad",
+            "terrain_risk",
+        ):
+            if key in value and value[key] is not None and not isinstance(value[key], bool):
+                value[key] = None
+        for key in (
+            "questions_for_agent",
+            "documents_to_obtain",
+            "hidden_costs",
+            "legal_risks",
+            "discrepancies",
+            "pros",
+            "cons",
+            "structured_risks",
+        ):
+            if key in value and not isinstance(value[key], list):
+                value[key] = []
+        return value
 
     @staticmethod
     def _slice_description(desc: str, head: int = 4000, tail: int = 1500) -> str:
