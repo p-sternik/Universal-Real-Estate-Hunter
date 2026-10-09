@@ -174,6 +174,10 @@ docker compose logs -f scraper
 **Wszystko w `.env` jest opcjonalne** (`env_file` ma `required: false`). Klucze, które zwykle tam dodasz: `DISCORD_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID` oraz jeden backend LLM (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, …).
 
 **Domyślne porty i wolumeny:**
+Panel domyślnie nasłuchuje lokalnie (CLI i Compose). Przy dostępie zdalnym ustaw `DASHBOARD_USERNAME` i `DASHBOARD_PASSWORD`, użyj HTTPS na reverse proxy oraz jawnie wybierz `DASHBOARD_BIND_ADDRESS` (Compose) lub `--host` (CLI). `/healthz` pozostaje dostępny bez logowania dla kontroli stanu. Żądania zmian z obcej strony są odrzucane.
+
+`GET /api/listings` zwraca tablicę JSON z paginacją: `limit` domyślnie 200 (maksymalnie 500), `offset` domyślnie 0. Każda strona obsługuje ETag, a interfejs pobiera wszystkie strony. `profile_results` zawiera osobne wyniki kwalifikacji dla każdego profilu; `?profile=<id>` wybiera profil zarówno dla listy, jak i szczegółów. Reset jednego profilu zachowuje nieruchomości należące do innych profili. `STALE` oznacza ofertę dawno niewidzianą, bez potwierdzenia wycofania. Powiązania profili powstają automatycznie przy uruchomieniu; świeżość szczegółów jest liczona od ich następnego udanego pobrania.
+
 - Dashboard: `http://localhost:8080`
 - PostgreSQL: `127.0.0.1:5432` (tylko localhost)
 - Wolumeny: `postgres_data` (baza), `estate_data` (trwałe dane aplikacji, w tym `search_config.json`)

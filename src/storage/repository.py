@@ -1,3 +1,4 @@
+import json
 import statistics
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
@@ -8,10 +9,10 @@ from sqlalchemy import delete, desc, or_, select, update
 from sqlalchemy import exc as sa_exc
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from src.models.listing import FilterResult, ListingSchema, copy_spatial_fields
+from src.models.listing import PROFILE_RESULT_FIELDS, FilterResult, ListingSchema, copy_spatial_fields
 
 from .database import safe_commit
-from .models import ListingModel, PriceHistoryModel
+from .models import ListingModel, ListingProfileModel, PriceHistoryModel
 
 
 def _val(v: Any) -> str:
@@ -81,9 +82,9 @@ def _populate_listing_model(
         model.floors_in_building = listing.floors_in_building
     if listing.is_private_owner is not None or is_new:
         model.is_private_owner = listing.is_private_owner
-    if listing.profile_id or is_new:
+    if is_new or not model.profile_id:
         model.profile_id = listing.profile_id
-    if listing.profile_name or is_new:
+    if is_new or not model.profile_name:
         model.profile_name = listing.profile_name
 
     model.building_type = listing.building_type.value
@@ -95,7 +96,7 @@ def _populate_listing_model(
 
     if listing.coordinates:
         model.latitude, model.longitude = listing.coordinates
-    if is_new or is_exact_coords:
+    if listing.coordinates or is_new:
         model.is_exact_coords = is_exact_coords
 
     model.access_road_type = _val(listing.access_road_type)
@@ -173,6 +174,10 @@ def _populate_listing_model(
     model.listing_status = "ACTIVE"
     now_utc = datetime.now(UTC)
     model.last_scraped_at = now_utc
+    if listing.spatial_audited_at is not None:
+        model.spatial_audited_at = listing.spatial_audited_at
+    if listing.detail_fetched_at is not None and not listing.skip_detail:
+        model.detail_fetched_at = listing.detail_fetched_at
     if not is_new:
         model.updated_at = now_utc
 
@@ -191,6 +196,50 @@ def clear_medians_cache() -> None:
 class ListingRepository:
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    async def save_profile_result(self, model: ListingModel, listing: ListingSchema, result: FilterResult) -> None:
+        profile_id = listing.profile_id or "default"
+        row = await self.session.get(ListingProfileModel, (model.id, profile_id))
+        if row is None:
+            row = ListingProfileModel(listing_id=model.id, profile_id=profile_id)
+            self.session.add(row)
+        payload = result.model_dump(
+            mode="json", exclude={"llm_json", "llm_model", "llm_prompt_version", "llm_skip_reason"}
+        )
+        payload["qualification_status"] = payload.pop("status")
+        payload["qualification_score"] = payload.pop("score")
+        payload["filter_reasons"] = payload.pop("stage1_reasons") + payload.pop("stage2_reasons")
+        payload = {key: value for key, value in payload.items() if key in PROFILE_RESULT_FIELDS}
+        row.result_json = json.dumps(payload, ensure_ascii=False)
+        row.profile_name = listing.profile_name
+        row.updated_at = datetime.now(UTC)
+
+    async def refresh_aggregate_qualification(self, model: ListingModel) -> None:
+        rows = (
+            (await self.session.execute(select(ListingProfileModel).where(ListingProfileModel.listing_id == model.id)))
+            .scalars()
+            .all()
+        )
+        if not rows:
+            return
+        best = max(
+            (row.result for row in rows),
+            key=lambda result: (bool(result.get("is_qualified")), float(result.get("qualification_score") or 0)),
+        )
+        for key in (
+            "is_qualified",
+            "qualification_status",
+            "qualification_score",
+            "filter_reasons",
+            "pros",
+            "cons",
+            "discrepancies",
+        ):
+            if key in best:
+                setattr(model, key, best[key])
+
+    async def get_profile_result(self, listing_id: int, profile_id: str | None) -> ListingProfileModel | None:
+        return await self.session.get(ListingProfileModel, (listing_id, profile_id or "default"))
 
     async def get_by_id(self, listing_id: int) -> ListingModel | None:
         stmt = select(ListingModel).where(ListingModel.id == listing_id)
@@ -216,7 +265,7 @@ class ListingRepository:
         stmt = select(ListingModel.url).where(
             ListingModel.portal.in_(portals),
             ListingModel.last_scraped_at.isnot(None),
-            ListingModel.last_scraped_at >= cutoff,
+            ListingModel.detail_fetched_at >= cutoff,
             ListingModel.raw_description != "",
         )
         res = await self.session.execute(stmt)
@@ -245,7 +294,7 @@ class ListingRepository:
         inactive_days: int = 7,
         profile_id: str | list[str] | None = None,
     ) -> int:
-        """Passively marks listings as DELISTED if not seen on portals within inactive_days."""
+        """Missing search results establish staleness, never confirmed removal."""
         cutoff = datetime.now(UTC) - timedelta(days=inactive_days)
         conditions = [
             ListingModel.listing_status == "ACTIVE",
@@ -253,10 +302,26 @@ class ListingRepository:
             ListingModel.last_scraped_at < cutoff,
         ]
         if isinstance(profile_id, (list, tuple, set)):
-            conditions.append(ListingModel.profile_id.in_(list(profile_id)))
+            conditions.append(
+                or_(
+                    ListingModel.profile_id.in_(list(profile_id)),
+                    ListingModel.id.in_(
+                        select(ListingProfileModel.listing_id).where(
+                            ListingProfileModel.profile_id.in_(list(profile_id))
+                        )
+                    ),
+                )
+            )
         elif profile_id:
-            conditions.append(ListingModel.profile_id == profile_id)
-        stmt = update(ListingModel).where(*conditions).values(listing_status="DELISTED")
+            conditions.append(
+                or_(
+                    ListingModel.profile_id == profile_id,
+                    ListingModel.id.in_(
+                        select(ListingProfileModel.listing_id).where(ListingProfileModel.profile_id == profile_id)
+                    ),
+                )
+            )
+        stmt = update(ListingModel).where(*conditions).values(listing_status="STALE", updated_at=datetime.now(UTC))
         res = await self.session.execute(stmt)
         return int(getattr(res, "rowcount", 0))
 
@@ -264,13 +329,15 @@ class ListingRepository:
         self,
         listing: ListingSchema,
         filter_result: FilterResult,
-        is_exact_coords: bool = True,
+        is_exact_coords: bool | None = None,
         llm_cache: dict[str, Any] | None = None,
     ) -> tuple[ListingModel, bool, bool]:
         """
         Saves new listing or updates existing.
         Returns (listing_model, is_new, price_changed).
         """
+        if is_exact_coords is None:
+            is_exact_coords = listing.is_exact_coords
         existing = await self.get_by_portal_id(listing.portal, listing.id)
         if not existing:
             existing = await self.get_by_url(listing.url)
@@ -305,7 +372,9 @@ class ListingRepository:
                 )
                 self.session.add(history_entry)
 
+            await self.save_profile_result(existing, listing, filter_result)
             await self.session.flush()
+            await self.refresh_aggregate_qualification(existing)
             return existing, False, price_changed
 
         # Brand new listing
@@ -325,13 +394,13 @@ class ListingRepository:
             is_new=True,
         )
 
-        self.session.add(new_model)
         try:
-            await self.session.flush()
+            async with self.session.begin_nested():
+                self.session.add(new_model)
+                await self.session.flush()
         except sa_exc.IntegrityError as err:
             # Another concurrent task might have already inserted this URL — roll back the
             # failed INSERT and check if the winner row exists to fall through to an UPDATE.
-            await self.session.rollback()
             existing = await self.get_by_url(listing.url)
             if existing is None:
                 existing = await self.get_by_portal_id(listing.portal, listing.id)
@@ -347,8 +416,12 @@ class ListingRepository:
                 llm_cache=llm_cache,
                 is_new=False,
             )
+            await self.save_profile_result(existing, listing, filter_result)
             await self.session.flush()
+            await self.refresh_aggregate_qualification(existing)
             return existing, False, False
+
+        await self.save_profile_result(new_model, listing, filter_result)
 
         # Add initial price history entry
         initial_history = PriceHistoryModel(
@@ -362,7 +435,10 @@ class ListingRepository:
 
         return new_model, True, False
 
-    async def mark_as_notified(self, listing_id: int) -> None:
+    async def mark_as_notified(self, listing_id: int, profile_id: str | None = None) -> None:
+        profile_result = await self.get_profile_result(listing_id, profile_id)
+        if profile_result:
+            profile_result.notified_at = datetime.now(UTC)
         stmt = select(ListingModel).where(ListingModel.id == listing_id)
         res = await self.session.execute(stmt)
         item = res.scalars().first()
@@ -435,19 +511,48 @@ class ListingRepository:
         if profile_id == "default":
             conditions.append(ListingModel.profile_id.is_(None))
 
-        stmt = select(ListingModel.id).where(or_(*conditions))
-        res = await self.session.execute(stmt)
-        listing_ids = list(res.scalars().all())
-        if not listing_ids:
+        scoped = [ListingProfileModel.profile_id == profile_id]
+        if profile_name:
+            scoped.append(ListingProfileModel.profile_name == profile_name)
+        scoped.append(ListingProfileModel.profile_name == profile_id)
+        ids = set(
+            (await self.session.execute(select(ListingProfileModel.listing_id).where(or_(*scoped)))).scalars().all()
+        )
+        ids.update((await self.session.execute(select(ListingModel.id).where(or_(*conditions)))).scalars().all())
+        if not ids:
             return 0
-
-        # Delete related price histories first
-        await self.session.execute(delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(listing_ids)))
-        # Delete listings
-        await self.session.execute(delete(ListingModel).where(ListingModel.id.in_(listing_ids)))
+        await self.session.execute(delete(ListingProfileModel).where(or_(*scoped)))
+        remaining = set(
+            (
+                await self.session.execute(
+                    select(ListingProfileModel.listing_id).where(ListingProfileModel.listing_id.in_(ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        orphan_ids = ids - remaining
+        if orphan_ids:
+            await self.session.execute(delete(PriceHistoryModel).where(PriceHistoryModel.listing_id.in_(orphan_ids)))
+            await self.session.execute(delete(ListingModel).where(ListingModel.id.in_(orphan_ids)))
+        # Keep legacy primary fields pointing at an association that still exists.
+        for listing_id in remaining:
+            model = await self.get_by_id(listing_id)
+            row = (
+                (
+                    await self.session.execute(
+                        select(ListingProfileModel).where(ListingProfileModel.listing_id == listing_id)
+                    )
+                )
+                .scalars()
+                .first()
+            )
+            if model and row and (model.profile_id == profile_id or model.profile_name in (profile_id, profile_name)):
+                model.profile_id, model.profile_name = row.profile_id, row.profile_name
+            if model:
+                await self.refresh_aggregate_qualification(model)
         await safe_commit(self.session)
-        logger.info(f"[ListingRepository] Deleted {len(listing_ids)} listings associated with profile '{profile_id}'")
-        return len(listing_ids)
+        return len(ids)
 
     async def get_market_medians(self, force_refresh: bool = False, exclude_url: str | None = None) -> dict[str, float]:
         """

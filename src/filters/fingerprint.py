@@ -113,6 +113,7 @@ def generate_physical_fingerprint(
     location_raw: str | None = None,
     title: str | None = None,
     category: str = "dom",
+    require_precise: bool = False,
 ) -> str | None:
     """
     Generate unique physical property signature independent of price:
@@ -132,12 +133,27 @@ def generate_physical_fingerprint(
     if street_token == "unknown_area" and not city_token and not district:
         return None
 
+    number = re.search(r"\b\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?\b", street or "")
+    if require_precise and (not city_token or not street or not number):
+        return None
+    if require_precise and cat_str == "mieszkanie" and (not number or "/" not in number[0]):
+        return None
+    address_number = number[0].lower() if number else ""
+    if require_precise:
+        # Full street identity is needed for automatic correlation; the last
+        # word alone can collide between different named streets.
+        street_name = re.sub(r"\b\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?\b", "", street or "")
+        street_name = re.sub(r"^(?:ul\.?|ulica|al\.?|aleja)\s+", "", street_name, flags=re.IGNORECASE)
+        street_token = normalize_text(street_name)
+
     home_bucket = int(round(area_home / 4.0) * 4) if area_home > 0 else 0
     plot_bucket = str(int(round(area_plot / 10.0) * 10)) if area_plot and area_plot > 0 else "noplot"
 
     room_token = str(rooms) if rooms and rooms > 0 else "0"
     dist_token = normalize_text(district) if district else ""
 
-    raw_sig = f"{cat_str}|{city_token}|{dist_token}|{street_token}|{home_bucket}|{plot_bucket}|{room_token}"
+    raw_sig = (
+        f"{cat_str}|{city_token}|{dist_token}|{street_token}|{address_number}|{home_bucket}|{plot_bucket}|{room_token}"
+    )
     digest = hashlib.sha256(raw_sig.encode("utf-8")).hexdigest()[:16]
-    return f"phys_{digest}"
+    return f"phys_v2_{digest}"

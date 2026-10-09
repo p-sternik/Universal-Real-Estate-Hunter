@@ -131,7 +131,7 @@ class GeoportalService:
         try:
             data_str = json.dumps(value, ensure_ascii=False)
             exp = datetime.now(UTC) + timedelta(days=ttl_days)
-            async with get_session() as session:
+            async with get_session(write=True) as session:
                 existing = await session.get(SpatialCacheModel, key)
                 if existing:
                     existing.data_json = data_str

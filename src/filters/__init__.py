@@ -1,5 +1,6 @@
 import re
 import time
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -65,11 +66,45 @@ class QualificationEngine:
         # Reason the LLM was skipped for the most recently evaluated listing:
         # None (ran or skipped via caller cache) | "provider_error".
         # No per-cycle budget: every listing that passes Stage I+II is analyzed.
-        self.last_skip_reason: str | None = None
+        self._call_metadata: ContextVar[dict[str, Any]] = ContextVar("qualification_metadata")
+        self._call_metadata.set({})
+        self.last_skip_reason = None
         # Metadata of the last successful LLM call (model/prompt version/raw JSON).
-        self.last_llm_model: str | None = None
-        self.last_llm_prompt_version: str | None = None
-        self.last_llm_json: dict[str, Any] | None = None
+        self.last_llm_model = None
+        self.last_llm_prompt_version = None
+        self.last_llm_json = None
+
+    @property
+    def last_skip_reason(self) -> str | None:
+        return self._call_metadata.get({}).get("last_skip_reason")
+
+    @last_skip_reason.setter
+    def last_skip_reason(self, value: str | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_skip_reason": value})
+
+    @property
+    def last_llm_model(self) -> str | None:
+        return self._call_metadata.get({}).get("last_llm_model")
+
+    @last_llm_model.setter
+    def last_llm_model(self, value: str | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_llm_model": value})
+
+    @property
+    def last_llm_prompt_version(self) -> str | None:
+        return self._call_metadata.get({}).get("last_llm_prompt_version")
+
+    @last_llm_prompt_version.setter
+    def last_llm_prompt_version(self, value: str | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_llm_prompt_version": value})
+
+    @property
+    def last_llm_json(self) -> dict[str, Any] | None:
+        return self._call_metadata.get({}).get("last_llm_json")
+
+    @last_llm_json.setter
+    def last_llm_json(self, value: dict[str, Any] | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_llm_json": value})
 
     def reset_llm_counters(self) -> None:
         self.llm_calls = 0
@@ -483,6 +518,27 @@ class QualificationEngine:
         return not finish_only
 
     async def evaluate_listing(
+        self,
+        listing: ListingSchema,
+        profile: Any | None = None,
+        skip_llm: bool = False,
+        geo_audit: dict[str, Any] | None = None,
+        market_median_m2: float | None = None,
+        cached_llm_insights: dict[str, Any] | None = None,
+    ) -> FilterResult:
+        # Each task owns its metadata; failures and early rejection cannot reuse
+        # the JSON of a previous listing. Return it with the actual result.
+        self._call_metadata.set({})
+        result = await self._evaluate_listing(
+            listing, profile, skip_llm, geo_audit, market_median_m2, cached_llm_insights
+        )
+        result.llm_json = self.last_llm_json
+        result.llm_model = self.last_llm_model
+        result.llm_prompt_version = self.last_llm_prompt_version
+        result.llm_skip_reason = self.last_skip_reason
+        return result
+
+    async def _evaluate_listing(
         self,
         listing: ListingSchema,
         profile: Any | None = None,

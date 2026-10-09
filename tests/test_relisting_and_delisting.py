@@ -117,7 +117,7 @@ async def test_mark_passive_delisted(async_session: AsyncSession):
     await async_session.refresh(listing_active)
     await async_session.refresh(listing_stale)
     assert listing_active.listing_status == "ACTIVE"
-    assert listing_stale.listing_status == "DELISTED"
+    assert listing_stale.listing_status == "STALE"
 
 
 def test_market_analyzer_relisting_leverage_and_arguments():

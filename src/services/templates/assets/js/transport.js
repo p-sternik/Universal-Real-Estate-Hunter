@@ -7,6 +7,7 @@
         // ============================================================================
         (function () {
             'use strict';
+            const listingPages = new Map();
 
             async function requestJson(url, options) {
                 const res = await fetch(url, options);
@@ -72,16 +73,30 @@
 
                 // 304 Not Modified resolves to { status: 304, etag: null, data: null }.
                 async fetchListings(etag) {
-                    const headers = {};
-                    if (etag) headers['If-None-Match'] = etag;
-                    const out = await requestJson('/api/listings', { headers: headers });
-                    if (out.res.status === 304) {
-                        return { status: 304, etag: null, data: null };
-                    }
-                    if (!out.res.ok) {
-                        throw errorOf(out.res, out.data);
-                    }
-                    return { status: out.res.status, etag: out.res.headers.get('ETag'), data: out.data };
+                    const limit = 200;
+                    const data = [];
+                    let offset = 0;
+                    let unchanged = true;
+                    do {
+                        const url = '/api/listings?limit=' + limit + '&offset=' + offset;
+                        const cached = listingPages.get(url);
+                        const out = await requestJson(url, { headers: cached ? { 'If-None-Match': cached.etag } : {} });
+                        let page;
+                        if (out.res.status === 304 && cached) {
+                            page = cached.data;
+                        } else {
+                            if (!out.res.ok) throw errorOf(out.res, out.data);
+                            if (!Array.isArray(out.data)) throw new Error('Invalid listings response');
+                            page = out.data;
+                            unchanged = false;
+                            listingPages.set(url, { etag: out.res.headers.get('ETag'), data: page });
+                        }
+                        data.push(...page);
+                        if (page.length < limit) break;
+                        offset += limit;
+                    } while (true);
+                    // An ETag for the first page cannot validate the complete collection.
+                    return { status: unchanged ? 304 : 200, etag: null, data: unchanged ? null : data };
                 },
 
                 async updateStatus(id, status) {
@@ -125,7 +140,8 @@
                 },
 
                 async listingDetail(listingId) {
-                    return await ensureOk('/api/listings/' + encodeURIComponent(listingId));
+                    const profile = localStorage.getItem('hunter_selected_profile_id') || 'ALL';
+                    return await ensureOk('/api/listings/' + encodeURIComponent(listingId) + '?profile=' + encodeURIComponent(profile));
                 },
 
                 async airQuality(listingId) {

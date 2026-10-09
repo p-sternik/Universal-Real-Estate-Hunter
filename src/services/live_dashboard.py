@@ -1,5 +1,6 @@
 import asyncio
 import hashlib
+import hmac
 import json
 import random
 import re
@@ -16,8 +17,12 @@ from loguru import logger
 from PIL import Image, ImageOps
 from pydantic import ValidationError
 from sqlalchemy import and_, case, desc, func, or_, select
+from sqlalchemy import inspect as sa_inspect
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import selectinload
 
+from config import settings
+from src.models.listing import PROFILE_RESULT_FIELDS
 from src.services.config_manager import config_manager
 from src.services.image_security import MAX_IMAGE_BYTES, is_allowed_image_url
 from src.services.market_analyzer import valuation_engine
@@ -31,6 +36,7 @@ from src.storage import (
     init_db,
     safe_commit,
 )
+from src.storage.models import ListingProfileModel
 from src.version import __version__
 
 
@@ -183,7 +189,7 @@ def _img_cache_dir() -> Path:
 
     url = settings.DATABASE_URL or ""
     if url.startswith("sqlite"):
-        db_path = url.split(":///", 1)[-1].strip("/")
+        db_path = make_url(url).database
         if db_path:
             parent = Path(db_path).parent
             if str(parent) not in (".", ""):
@@ -270,11 +276,34 @@ class LiveDashboardServer:
             resp.enable_compression()
         return resp
 
-    def __init__(self, host: str = "0.0.0.0", port: int = 8080, with_scheduler: bool = False):
+    @staticmethod
+    @web.middleware
+    async def _access_middleware(request: web.Request, handler: Any) -> web.StreamResponse:
+        if settings.DASHBOARD_USERNAME and request.path != "/healthz":
+            try:
+                credentials = aiohttp.BasicAuth.decode(request.headers.get("Authorization", ""))
+                valid = hmac.compare_digest(
+                    credentials.login.encode(), settings.DASHBOARD_USERNAME.encode()
+                ) and hmac.compare_digest(credentials.password.encode(), settings.DASHBOARD_PASSWORD.encode())
+            except ValueError:
+                valid = False
+            if not valid:
+                raise web.HTTPUnauthorized(headers={"WWW-Authenticate": 'Basic realm="Estate Hunter", charset="UTF-8"'})
+        if request.method not in ("GET", "HEAD", "OPTIONS"):
+            origin = request.headers.get("Origin")
+            if (origin and urlparse(origin).netloc != request.host) or request.headers.get(
+                "Sec-Fetch-Site"
+            ) == "cross-site":
+                raise web.HTTPForbidden(text="Cross-origin changes are forbidden")
+        return await handler(request)
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 8080, with_scheduler: bool = False):
         self.host = host
         self.port = port
         self.with_scheduler = with_scheduler
-        self.app = web.Application(middlewares=[self._compression_middleware])
+        if bool(settings.DASHBOARD_USERNAME) != bool(settings.DASHBOARD_PASSWORD):
+            raise ValueError("Set both DASHBOARD_USERNAME and DASHBOARD_PASSWORD")
+        self.app = web.Application(middlewares=[self._access_middleware, self._compression_middleware])
         self._active_scrape_task: asyncio.Task[Any] | None = None
         self._scheduler_task: asyncio.Task[Any] | None = None
         self._scheduler_runner: Any | None = None
@@ -288,6 +317,7 @@ class LiveDashboardServer:
         self._setup_routes()
 
     def _setup_routes(self):
+        self.app.router.add_get("/healthz", self.handle_health)
         self.app.router.add_get("/", self.handle_index)
         self.app.router.add_get("/favicon.ico", self.handle_favicon)
         self.app.router.add_get("/img", self.handle_image_proxy)
@@ -319,6 +349,13 @@ class LiveDashboardServer:
         self.app.router.add_post("/api/llm/test", self.handle_test_llm_connection)
         self.app.router.add_post("/api/notifications/test", self.handle_test_notifications)
         self.app.router.add_post("/api/data/reset", self.handle_reset_data)
+
+    async def handle_health(self, request: web.Request) -> web.Response:
+        from sqlalchemy import text
+
+        async with get_session() as session:
+            await session.execute(text("SELECT 1"))
+        return web.json_response({"status": "ok"})
 
     async def handle_get_config(self, request: web.Request) -> web.Response:
         cfg = config_manager.get_config()
@@ -396,12 +433,12 @@ class LiveDashboardServer:
             prof_rows = (
                 await session.execute(
                     select(
-                        ListingModel.profile_id,
-                        ListingModel.profile_name,
-                        func.count(ListingModel.id),
+                        ListingProfileModel.profile_id,
+                        ListingProfileModel.profile_name,
+                        func.count(ListingProfileModel.listing_id),
                     )
-                    .group_by(ListingModel.profile_id, ListingModel.profile_name)
-                    .order_by(desc(func.count(ListingModel.id)))
+                    .group_by(ListingProfileModel.profile_id, ListingProfileModel.profile_name)
+                    .order_by(desc(func.count(ListingProfileModel.listing_id)))
                     .limit(20)
                 )
             ).all()
@@ -555,7 +592,7 @@ class LiveDashboardServer:
             new_ids = {p.get("id") for p in data["profiles"] if p.get("id")}
             removed_ids = set(old_profiles.keys()) - new_ids
             if removed_ids:
-                async with get_session() as session:
+                async with get_session(write=True) as session:
                     repo = ListingRepository(session)
                     for rid in removed_ids:
                         r_name = old_profiles[rid].name if rid in old_profiles else None
@@ -595,7 +632,7 @@ class LiveDashboardServer:
         ok = config_manager.delete_profile(profile_id)
         deleted_count = 0
         if ok:
-            async with get_session() as session:
+            async with get_session(write=True) as session:
                 repo = ListingRepository(session)
                 deleted_count = await repo.delete_by_profile(profile_id=profile_id, profile_name=target_name)
                 logger.info(
@@ -807,7 +844,7 @@ class LiveDashboardServer:
             )
 
         profile_scope = str(data.get("profile") or "").strip()
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             repo = ListingRepository(session)
             if profile_scope and profile_scope.upper() != "ALL":
                 target_name = None
@@ -1158,7 +1195,7 @@ class LiveDashboardServer:
         try:
             cap = config_manager.get_config().capex
             capex_fp = hashlib.md5(
-                f"{cap.developer_rate}|{cap.renovation_rate}|{cap.agency_fee_pct}|{cap.pcc_exempt_first_home}|{cap.transaction_discount}".encode(),
+                json.dumps(cap.model_dump(mode="json"), sort_keys=True).encode(),
                 usedforsecurity=False,
             ).hexdigest()
         except Exception:
@@ -1177,22 +1214,28 @@ class LiveDashboardServer:
         # NOTE: deliberately no timestamps — persisting the version bumps
         # updated_at (onupdate), which must not invalidate the stamp just written.
         # All real input changes (price, history, medians, capex, code) are covered.
-        raw = "|".join(
+        inputs = {
+            attr.key: getattr(item, attr.key)
+            for attr in sa_inspect(ListingModel).column_attrs
+            if not attr.key.startswith("valuation_")
+            and attr.key
+            not in {"updated_at", "last_scraped_at", "notified_at", "spatial_audited_at", "detail_fetched_at"}
+        }
+        raw = json.dumps(
             [
-                str(VALUATION_CACHE_CODE_VERSION),
+                VALUATION_CACHE_CODE_VERSION,
+                datetime.now(UTC).date().isoformat(),
                 medians_fp,
                 capex_fp,
-                str(item.price),
-                str(drop_amount),
-                str(drop_pct),
-                str(ph_count),
-                str(getattr(item, "year_built", None)),
-                str(getattr(item, "ai_opening_offer", None)),
-                str(getattr(item, "ai_negotiation_ceiling", None)),
-                str(getattr(item, "ai_suggested_price_per_m2", None)),
-            ]
+                drop_amount,
+                drop_pct,
+                ph_count,
+                inputs,
+            ],
+            sort_keys=True,
+            default=str,
         )
-        return hashlib.md5(raw.encode("utf-8"), usedforsecurity=False).hexdigest()
+        return hashlib.md5(raw.encode(), usedforsecurity=False).hexdigest()
 
     async def _cached_valuation_dicts(
         self, session: Any, items: list[ListingModel], market_medians: dict[str, Any]
@@ -1479,6 +1522,34 @@ class LiveDashboardServer:
 
         return data
 
+    @staticmethod
+    def _attach_profile_results(data: dict[str, Any], item: ListingModel, profile: str | None, *, detail: bool) -> None:
+        # ORM rows produced by old callers/tests may not have loaded the relation.
+        rows = item.__dict__.get("profile_results", [])
+        results: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            result = {key: value for key, value in row.result.items() if key in PROFILE_RESULT_FIELDS}
+            if not detail:
+                result = {
+                    key: value
+                    for key, value in result.items()
+                    if key not in _LIST_OMIT_FIELDS
+                    and key not in {"stakeholder_questions", "documents_to_obtain", "structured_risks"}
+                }
+            results[row.profile_id] = {**result, "profile_id": row.profile_id, "profile_name": row.profile_name}
+        data["profile_results"] = results
+        chosen = next(
+            (row for row in rows if profile and (row.profile_id == profile or row.profile_name == profile)), None
+        )
+        if profile and profile.upper() != "ALL":
+            if chosen:
+                data.update(results[chosen.profile_id])
+        elif len(results) > 1:
+            best: dict[str, Any] = max(
+                results.values(), key=lambda r: (bool(r.get("is_qualified")), float(r.get("qualification_score") or 0))
+            )
+            data.update(best)
+
     async def handle_get_listing_detail(self, request: web.Request) -> web.Response:
         try:
             listing_id = int(request.match_info["id"])
@@ -1488,7 +1559,7 @@ class LiveDashboardServer:
         async with get_session() as session:
             stmt = (
                 select(ListingModel)
-                .options(selectinload(ListingModel.price_history))
+                .options(selectinload(ListingModel.price_history), selectinload(ListingModel.profile_results))
                 .where(ListingModel.id == listing_id)
             )
             res = await session.execute(stmt)
@@ -1506,27 +1577,42 @@ class LiveDashboardServer:
                 max_scraped_at=_as_utc(item.last_scraped_at),
                 detail=True,
             )
+            self._attach_profile_results(data, item, request.query.get("profile"), detail=True)
             return web.json_response(data)
 
     async def handle_get_listings(self, request: web.Request) -> web.Response:
         prof_filter = request.query.get("profile")
-        cache_key = (prof_filter or "").strip().lower()
+        try:
+            limit = min(500, max(1, int(request.query.get("limit", "200"))))
+            offset = max(0, int(request.query.get("offset", "0")))
+        except ValueError:
+            return web.json_response({"error": "Invalid pagination"}, status=400)
+        cache_key = f"{(prof_filter or '').strip().lower()}:{limit}:{offset}"
+        time_bucket = int(time.time() // 60)
 
         # Cheap global dirty-check: count + max(updated_at) change on any add/update/delete,
         # so a 45s poll can be answered from cache without re-querying or re-serializing.
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             row = (await session.execute(select(func.count(), func.max(ListingModel.updated_at)))).one()
-        fingerprint = f"{int(row[0] or 0)}:{row[1]}"
+            medians = await ListingRepository(session).get_market_medians()
+        config_fp = self._valuation_input_fingerprint(medians)
+        fingerprint = f"{int(row[0] or 0)}:{row[1]}:{time_bucket}:{config_fp}"
 
         cached = self._listings_cache.get(cache_key)
         if cached is not None and cached[0] == fingerprint:
             _, etag, body = cached
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304)
-            return web.Response(body=body, content_type="application/json", headers={"ETag": etag})
+            return web.Response(
+                body=body,
+                content_type="application/json",
+                headers={"ETag": etag, "X-Page-Limit": str(limit), "X-Page-Offset": str(offset)},
+            )
 
-        async with get_session() as session:
-            stmt = select(ListingModel).options(selectinload(ListingModel.price_history))
+        async with get_session(write=True) as session:
+            stmt = select(ListingModel).options(
+                selectinload(ListingModel.price_history), selectinload(ListingModel.profile_results)
+            )
             if prof_filter and prof_filter.upper() != "ALL":
                 cfg = config_manager.get_config()
                 matched_prof = None
@@ -1545,12 +1631,25 @@ class LiveDashboardServer:
                         conds.append(and_(legacy_cond, ListingModel.city == matched_prof.city))
                     else:
                         conds.append(legacy_cond)
+                ids = {prof_filter}
+                if matched_prof:
+                    ids.add(matched_prof.id)
+                conds.append(
+                    ListingModel.id.in_(
+                        select(ListingProfileModel.listing_id).where(ListingProfileModel.profile_id.in_(ids))
+                    )
+                )
                 stmt = stmt.where(or_(*conds))
 
-            stmt = stmt.order_by(
-                desc(ListingModel.is_qualified),
-                desc(ListingModel.qualification_score),
-                desc(ListingModel.created_at),
+            stmt = (
+                stmt.order_by(
+                    desc(ListingModel.is_qualified),
+                    desc(ListingModel.qualification_score),
+                    desc(ListingModel.created_at),
+                    ListingModel.id,
+                )
+                .limit(limit)
+                .offset(offset)
             )
             res = await session.execute(stmt)
             items = res.scalars().all()
@@ -1570,28 +1669,32 @@ class LiveDashboardServer:
 
             data: list[dict[str, Any]] = []
             for item in items:
-                data.append(
-                    self._build_listing_dict(
-                        item,
-                        market_medians=market_medians,
-                        now_utc=now_utc,
-                        max_scraped_at=max_scraped_at,
-                        detail=False,
-                        valuation_dict=valuation_cache.get(item.id),
-                    )
+                record = self._build_listing_dict(
+                    item,
+                    market_medians=market_medians,
+                    now_utc=now_utc,
+                    max_scraped_at=max_scraped_at,
+                    detail=False,
+                    valuation_dict=valuation_cache.get(item.id),
                 )
+                self._attach_profile_results(record, item, prof_filter, detail=False)
+                data.append(record)
 
             # Recompute the fingerprint: persisting valuation cache rows bumps
             # updated_at (onupdate), so the pre-request fingerprint is already stale
             # and the next poll would needlessly miss the response cache.
             row = (await session.execute(select(func.count(), func.max(ListingModel.updated_at)))).one()
-            fingerprint = f"{int(row[0] or 0)}:{row[1]}"
+            fingerprint = f"{int(row[0] or 0)}:{row[1]}:{time_bucket}:{config_fp}"
             body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
             etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
+            if len(self._listings_cache) >= 64:
+                self._listings_cache.pop(next(iter(self._listings_cache)))
             self._listings_cache[cache_key] = (fingerprint, etag, body)
             if request.headers.get("If-None-Match") == etag:
                 return web.Response(status=304)
-            return web.json_response(body=body, headers={"ETag": etag})
+            return web.json_response(
+                body=body, headers={"ETag": etag, "X-Page-Limit": str(limit), "X-Page-Offset": str(offset)}
+            )
 
     async def handle_update_status(self, request: web.Request) -> web.Response:
         try:
@@ -1601,7 +1704,7 @@ class LiveDashboardServer:
         data = await request.json()
         new_status = data.get("status", "NEW")
 
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             repo = ListingRepository(session)
             item = await repo.update_user_status(listing_id, new_status)
             if not item:
@@ -1618,7 +1721,7 @@ class LiveDashboardServer:
         data = await request.json()
         notes = data.get("notes", "")
 
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             repo = ListingRepository(session)
             item = await repo.update_user_notes(listing_id, notes)
             if not item:
@@ -1644,7 +1747,7 @@ class LiveDashboardServer:
             if tag and tag not in cleaned:
                 cleaned.append(tag)
 
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             repo = ListingRepository(session)
             item = await repo.update_user_tags(listing_id, cleaned)
             if not item:
@@ -1890,6 +1993,36 @@ class LiveDashboardServer:
 
                 item.cons = item_cons
 
+                from src.filters import QualificationEngine
+
+                profile_rows = (
+                    (
+                        await session.execute(
+                            select(ListingProfileModel).where(ListingProfileModel.listing_id == item.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                evaluator = QualificationEngine(llm_enabled=False)
+                for row in profile_rows:
+                    profile = config_manager.get_profile(row.profile_id)
+                    per_profile = schema.model_copy(
+                        deep=True, update={"profile_id": row.profile_id, "profile_name": row.profile_name}
+                    )
+                    fresh_result = await evaluator.evaluate_listing(
+                        per_profile, profile=profile, skip_llm=True, cached_llm_insights=insights
+                    )
+                    await repo.save_profile_result(item, per_profile, fresh_result)
+                    if row.profile_id == item.profile_id:
+                        item.is_qualified = fresh_result.is_qualified
+                        item.qualification_status = fresh_result.status.value
+                        item.qualification_score = fresh_result.score
+                        item.pros = fresh_result.pros
+                        item.cons = fresh_result.cons
+                        item.discrepancies = fresh_result.discrepancies
+
+                await repo.refresh_aggregate_qualification(item)
                 item.updated_at = datetime.now(UTC)
                 await safe_commit(session)
 

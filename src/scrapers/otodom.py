@@ -536,7 +536,8 @@ class OtodomScraper(BaseScraper):
                 developer_nip=extracted_dev_nip,
                 created_at=created_at,
                 scraped_at=datetime.now(UTC),
-                skip_detail=detail_skipped,
+                skip_detail=detail_skipped or not bool(detail_data.get("description")),
+                detail_fetched_at=datetime.now(UTC) if detail_data.get("description") else None,
             )
         except Exception as err:
             logger.error(f"[OtodomScraper] Failed to parse item: {err}")

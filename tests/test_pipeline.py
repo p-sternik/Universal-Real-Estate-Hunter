@@ -39,6 +39,7 @@ def make_listing() -> ListingSchema:
         segment_subtype=SegmentSubtype.NIEOKRESLONY,
         location_raw="Rzeszów, Słocina",
         coordinates=(50.04, 22.0),
+        is_exact_coords=True,
         raw_description="Dom z garażem, dojazd asfaltowy, kanalizacja miejska.",
     )
 
@@ -427,7 +428,7 @@ async def test_persist_batch_single_commit_for_many_listings(async_session, monk
     session_calls: list[int] = []
 
     @asynccontextmanager
-    async def fake_get_session():
+    async def fake_get_session(**kwargs):
         session_calls.append(1)
         yield async_session
 

@@ -175,6 +175,10 @@ docker compose logs -f scraper
 **Anything in `.env` is optional** (`env_file` uses `required: false`). Keys you'll typically add there: `DISCORD_WEBHOOK_URL`, `TELEGRAM_BOT_TOKEN`/`TELEGRAM_CHAT_ID`, and one LLM backend (`OPENROUTER_API_KEY`, `OPENAI_API_KEY`, …).
 
 **Ports & volumes exposed by default:**
+The dashboard binds to localhost by default (CLI and Compose). For remote access, set `DASHBOARD_USERNAME` and `DASHBOARD_PASSWORD`, use HTTPS at a reverse proxy, and deliberately choose `DASHBOARD_BIND_ADDRESS` (Compose) or `--host` (CLI). `/healthz` remains available without login for health checks. Cross-origin write requests are rejected.
+
+`GET /api/listings` returns a paginated JSON array: `limit` defaults to 200 (maximum 500), with an `offset` default of 0. Each page supports ETags; the bundled UI loads all pages. `profile_results` contains independent qualification results per profile, and `?profile=<id>` selects a profile for both list and detail endpoints. Resetting one profile preserves properties still associated with other profiles. `STALE` means an offer has not been seen recently; it does not confirm removal. Existing records receive profile associations automatically at startup; detail freshness starts from the next successful detail fetch.
+
 - Dashboard: `http://localhost:8080`
 - PostgreSQL: `127.0.0.1:5432` (bound to localhost only)
 - Volumes: `postgres_data` (database), `estate_data` (persisted app data incl. `search_config.json`)

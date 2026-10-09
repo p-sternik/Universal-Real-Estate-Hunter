@@ -527,6 +527,7 @@ class OLXScraper(BaseScraper):
                                                 or det_params.get("construction_status")
                                             )
                                     if det_ad.get("description"):
+                                        item.detail_fetched_at = datetime.now(UTC)
                                         item.raw_description = (
                                             BeautifulSoup(det_ad["description"], "html.parser")
                                             .get_text(separator="\n")

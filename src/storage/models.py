@@ -66,6 +66,10 @@ class ListingModel(Base):
     initial_price: Mapped[float | None] = mapped_column(Float, nullable=True)
     relist_count: Mapped[int] = mapped_column(Integer, default=0)
 
+    profile_results: Mapped[list["ListingProfileModel"]] = relationship(
+        back_populates="listing", cascade="all, delete-orphan", lazy="raise"
+    )
+
     title: Mapped[str] = mapped_column(String(500), nullable=False)
     price: Mapped[float] = mapped_column(Float, nullable=False)
     price_per_m2: Mapped[float] = mapped_column(Float, nullable=False)
@@ -102,8 +106,11 @@ class ListingModel(Base):
     main_image_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     last_scraped_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
+    detail_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    spatial_audited_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
     # Location precision & Geoportal data
-    is_exact_coords: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_exact_coords: Mapped[bool] = mapped_column(Boolean, default=False)
     parcel_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
     cadastral_area: Mapped[float | None] = mapped_column(Float, nullable=True)
     geoportal_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
@@ -522,3 +529,21 @@ class SpatialCacheModel(Base):
     data_json: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
+
+
+class ListingProfileModel(Base):
+    """A property's independent qualification and notification state per search."""
+
+    __tablename__ = "listing_profiles"
+
+    listing_id: Mapped[int] = mapped_column(ForeignKey("listings.id", ondelete="CASCADE"), primary_key=True)
+    profile_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    profile_name: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    result_json: Mapped[str] = mapped_column(Text, default="{}")
+    notified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    listing: Mapped[ListingModel] = relationship(back_populates="profile_results")
+
+    @property
+    def result(self) -> dict[str, Any]:
+        return json.loads(self.result_json or "{}")

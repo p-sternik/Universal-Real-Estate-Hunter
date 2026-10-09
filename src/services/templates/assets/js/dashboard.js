@@ -441,6 +441,7 @@
                 const isActive = selectedProfileId === p.id;
                 const pCity = (p.city || '').toLowerCase();
                 const count = allListings.filter(item => {
+                    if (item.profile_results && item.profile_results[p.id]) return true;
                     if (item.profile_id && item.profile_id === p.id) return true;
                     if (item.profile_name && item.profile_name === p.name) return true;
                     if (!item.profile_id || item.profile_id === 'default') {
@@ -498,6 +499,7 @@
             const profCity = (prof.city || '').toLowerCase();
 
             return allListings.filter(item => {
+                if (item.profile_results && item.profile_results[selectedProfileId]) return true;
                 if (item.profile_id && item.profile_id === selectedProfileId) return true;
                 if (profName && item.profile_name === profName) return true;
                 if (!item.profile_id || item.profile_id === 'default') {
@@ -506,7 +508,7 @@
                     }
                 }
                 return false;
-            });
+            }).map(item => ({ ...item, ...((item.profile_results || {})[selectedProfileId] || {}) }));
         }
 
         // ========================
@@ -3175,6 +3177,9 @@
             if (item.relist_count && item.relist_count > 0) {
                 deltaBadge = `<span class="card-badge badge-relist" title="Wykryto powrót oferty na rynek (${item.relist_count}x re-listing)">Re-list (${item.relist_count}x)</span>`;
                 deltaPill = `<span class="meta-tag tag-profile" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4);">Re-list ${item.relist_count}x</span>`;
+            } else if (item.listing_status === 'STALE') {
+                deltaBadge = `<span class="card-badge badge-delisted" title="Nie pojawiła się ostatnio w pobranych wynikach; dostępność niepotwierdzona">Dawno niewidziana</span>`;
+                deltaPill = `<span class="meta-tag tag-profile">Dostępność niepotwierdzona</span>`;
             } else if (item.listing_status === 'DELISTED') {
                 deltaBadge = `<span class="card-badge badge-delisted">Wycofana</span>`;
                 deltaPill = `<span class="meta-tag tag-profile">Wycofana</span>`;
