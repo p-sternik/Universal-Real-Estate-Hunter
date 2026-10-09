@@ -231,7 +231,7 @@ The application provides a unified CLI via [`main.py`](main.py):
 | :--- | :--- | :--- |
 | `run` | Start continuous monitoring daemon | `python main.py run` or `python main.py run --profile "Mieszkania Warszawa" --interval 15` |
 | `once` | Run a single scraping and qualification pass | `python main.py once` or `python main.py once --profile "Domy Kraków"` |
-| `dashboard` | Launch real-time web UI CRM & Leaflet map | `python main.py dashboard --port 8080` (`server` is an alias) |
+| `dashboard` | Launch real-time web UI CRM & Leaflet map (`--with-scheduler` / `-s` to also run monitoring daemon) | `python main.py dashboard --port 8080 --with-scheduler` (`server` is an alias) |
 | `geoportal` | Audit saved listings with GUGiK Geoportal | `python main.py geoportal --limit 50` (`--all` to include non-qualified) |
 | `view` | View qualified listings in formatted terminal table | `python main.py view --status QUALIFIED --limit 15` |
 | `reindex` | Re-evaluate all database listings with latest filters | `python main.py reindex` |

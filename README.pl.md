@@ -230,7 +230,7 @@ Aplikacja udostępnia ujednolicone CLI w [`main.py`](main.py):
 | :--- | :--- | :--- |
 | `run` | Start ciągłego demona monitorującego | `python main.py run` lub `python main.py run --profile "Mieszkania Warszawa" --interval 15` |
 | `once` | Pojedynczy przebieg scrapingu i kwalifikacji | `python main.py once` lub `python main.py once --profile "Domy Kraków"` |
-| `dashboard` | Uruchomienie Live Dashboard z CRM i mapą Leaflet | `python main.py dashboard --port 8080` (alias: `server`) |
+| `dashboard` | Uruchomienie Live Dashboard z CRM i mapą Leaflet (`--with-scheduler` / `-s` uruchamia demona równolegle) | `python main.py dashboard --port 8080 --with-scheduler` (alias: `server`) |
 | `geoportal` | Audyt zapisanych ofert w Geoportalu GUGiK | `python main.py geoportal --limit 50` (`--all` — z niezakwalifikowanymi) |
 | `view` | Podgląd zakwalifikowanych ofert w terminalu | `python main.py view --status QUALIFIED --limit 15` |
 | `reindex` | Ponowna ocena wszystkich ofert w bazie najnowszymi filtrami | `python main.py reindex` |
