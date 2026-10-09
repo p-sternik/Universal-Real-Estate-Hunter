@@ -6,6 +6,15 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.20.1 (2026-10-09)
+
+### Bug Fixes
+
+- **scheduler**: Dynamic config reloading, responsive sleep loop, and dashboard daemon support
+  ([#34](https://github.com/p-sternik/Universal-Real-Estate-Hunter/pull/34),
+  [`969f379`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/969f379c4b06c384827b5ab40eb68ab89527f25c))
+
+
 ## v1.20.0 (2026-10-08)
 
 ### Features
