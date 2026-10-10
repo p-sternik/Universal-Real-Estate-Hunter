@@ -25,6 +25,7 @@ from .models import (
     Base,
     GeocacheModel,
     ListingModel,
+    ListingProfileModel,
     PriceHistoryModel,
     SpatialCacheModel,
 )
@@ -32,12 +33,15 @@ from .models import (
 _engine: AsyncEngine | None = None
 _sessionmaker: async_sessionmaker[AsyncSession] | None = None
 _sqlite_write_lock: asyncio.Lock | None = None
+_sqlite_write_lock_loop: asyncio.AbstractEventLoop | None = None
 
 
 def get_sqlite_write_lock() -> asyncio.Lock:
-    global _sqlite_write_lock
-    if _sqlite_write_lock is None:
+    global _sqlite_write_lock, _sqlite_write_lock_loop
+    loop = asyncio.get_running_loop()
+    if _sqlite_write_lock is None or _sqlite_write_lock_loop is not loop:
         _sqlite_write_lock = asyncio.Lock()
+        _sqlite_write_lock_loop = loop
     return _sqlite_write_lock
 
 
@@ -67,6 +71,10 @@ async def safe_commit(session: AsyncSession, max_retries: int = 7, initial_backo
         else ("sqlite" in getattr(settings, "DATABASE_URL", "sqlite"))
     )
     if not is_sqlite:
+        await session.commit()
+        return
+
+    if session.info.get("sqlite_write_lock_held"):
         await session.commit()
         return
 
@@ -277,21 +285,35 @@ def get_session_factory() -> async_sessionmaker[AsyncSession]:
 
 
 @asynccontextmanager
-async def get_session() -> AsyncGenerator[AsyncSession, None]:
-    """Async context manager providing an isolated session with write-lock & retry protection for SQLite."""
+async def get_session(*, write: bool = False) -> AsyncGenerator[AsyncSession, None]:
+    """Write sessions lock before any reads/flushes, through commit or rollback.
+
+    Read sessions remain concurrent. Callers must request write=True whenever
+    they mutate rows; locking commit alone is too late for SQLite transactions.
+    """
     session_factory = get_session_factory()
     async with session_factory() as session:
+        lock = get_sqlite_write_lock() if write and session.bind and session.bind.dialect.name == "sqlite" else None
+        if lock:
+            await lock.acquire()
+            session.info["sqlite_write_lock_held"] = True
         try:
             yield session
             await safe_commit(session)
-        except Exception:
+        except BaseException:
             await session.rollback()
             raise
+        finally:
+            if lock:
+                session.info.pop("sqlite_write_lock_held", None)
+                lock.release()
 
 
 LISTINGS_SCHEMA_MIGRATIONS: list[tuple[str, str, str]] = [
     # (column_name, sqlite_type_def, postgresql_type_def)
-    ("is_exact_coords", "BOOLEAN DEFAULT 1", "BOOLEAN DEFAULT TRUE"),
+    ("detail_fetched_at", "DATETIME", "TIMESTAMPTZ"),
+    ("spatial_audited_at", "DATETIME", "TIMESTAMPTZ"),
+    ("is_exact_coords", "BOOLEAN DEFAULT 0", "BOOLEAN DEFAULT FALSE"),
     ("user_status", "VARCHAR(30) DEFAULT 'NEW'", "VARCHAR(30) DEFAULT 'NEW'"),
     ("user_notes", "TEXT", "TEXT"),
     ("user_tags", "TEXT DEFAULT '[]'", "TEXT DEFAULT '[]'"),
@@ -527,7 +549,7 @@ async def _migrate_database_columns(conn) -> None:
                     )
                 )
                 sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key = 'gios:stations_list_v1'"))
-                sync_conn.execute(text("DELETE FROM spatial_cache WHERE cache_key LIKE 'air_quality:%'"))
+
             except Exception as e:
                 logger.debug(f"[Database] Air quality stale cleanup note: {e}")
 
@@ -736,7 +758,20 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
                 return items
 
             for model_cls, tbl, dt_fields in (
-                (ListingModel, "listings", ("created_at", "updated_at", "last_scraped_at", "notified_at")),
+                (
+                    ListingModel,
+                    "listings",
+                    (
+                        "created_at",
+                        "updated_at",
+                        "first_seen_at",
+                        "last_scraped_at",
+                        "notified_at",
+                        "detail_fetched_at",
+                        "spatial_audited_at",
+                    ),
+                ),
+                (ListingProfileModel, "listing_profiles", ("notified_at", "updated_at")),
                 (PriceHistoryModel, "price_history", ("recorded_at",)),
                 (GeocacheModel, "geocache", ("cached_at",)),
                 (SpatialCacheModel, "spatial_cache", ("created_at", "expires_at")),
@@ -777,6 +812,63 @@ async def _auto_migrate_sqlite_to_postgres(pg_engine: AsyncEngine) -> None:
                 pass
 
 
+async def _migrate_profile_results(conn) -> None:
+    rows = (
+        (
+            await conn.execute(
+                text(
+                    "SELECT l.* FROM listings l LEFT JOIN listing_profiles p ON p.listing_id=l.id "
+                    "AND p.profile_id=COALESCE(l.profile_id, 'default') WHERE p.listing_id IS NULL"
+                )
+            )
+        )
+        .mappings()
+        .all()
+    )
+    scalar_fields = (
+        "is_qualified",
+        "qualification_status",
+        "qualification_score",
+        "ai_summary",
+        "ai_verdict",
+        "worth_interest",
+    )
+    json_fields = (
+        "filter_reasons",
+        "pros",
+        "cons",
+        "discrepancies",
+        "ai_questions",
+        "stakeholder_questions",
+        "documents_to_obtain",
+        "structured_risks",
+    )
+    for row in rows:
+        payload = {key: row[key] for key in scalar_fields}
+        payload["is_qualified"] = bool(payload["is_qualified"])
+        if payload["worth_interest"] is not None:
+            payload["worth_interest"] = bool(payload["worth_interest"])
+        for key in json_fields:
+            try:
+                payload[key] = json.loads(row[key]) if row[key] else ([] if key != "stakeholder_questions" else {})
+            except (TypeError, ValueError):
+                payload[key] = [] if key != "stakeholder_questions" else {}
+        await conn.execute(
+            text(
+                "INSERT INTO listing_profiles (listing_id, profile_id, profile_name, result_json, notified_at, updated_at) "
+                "VALUES (:id, :profile, :name, :result, :notified, :updated) ON CONFLICT DO NOTHING"
+            ),
+            {
+                "id": row["id"],
+                "profile": row["profile_id"] or "default",
+                "name": row["profile_name"],
+                "result": json.dumps(payload, ensure_ascii=False),
+                "notified": row["notified_at"],
+                "updated": row["updated_at"] or datetime.now(UTC),
+            },
+        )
+
+
 async def init_db() -> None:
     """Initialize database tables and run lightweight migrations with contention retry."""
     engine = get_engine()
@@ -795,8 +887,11 @@ async def init_db() -> None:
                     await conn.execute(text("SELECT pg_advisory_xact_lock(42424242);"))
                 await conn.run_sync(Base.metadata.create_all)
                 await _migrate_database_columns(conn)
+                await _migrate_profile_results(conn)
             if not is_sqlite:
                 await _auto_migrate_sqlite_to_postgres(engine)
+                async with engine.begin() as conn:
+                    await _migrate_profile_results(conn)
             logger.info("Database tables initialized and up-to-date.")
             return
         except Exception as exc:

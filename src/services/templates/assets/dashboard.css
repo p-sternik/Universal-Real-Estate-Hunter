@@ -4873,3 +4873,91 @@
         .drawer-footer .btn { flex: 1 1 0%; justify-content: center; }
 
         .empty-state-actions { display: flex; gap: 8px; justify-content: center; margin-top: 4px; }
+
+
+/* Settings workspace: stable navigation, readable forms and persistent save state. */
+#configModal .config-card {
+    max-width: 1080px;
+    height: min(820px, calc(100dvh - 48px));
+    display: grid;
+    grid-template-columns: 190px minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    background: var(--surface);
+    box-shadow: none;
+}
+#configModal .config-header { grid-column: 1 / -1; padding: 20px 24px; background: var(--surface); }
+#configModal .config-title { font-size: 22px; line-height: 1.3; }
+#configModal .config-subtitle { font-size: 13px; line-height: 1.5; margin-top: 5px; max-width: 65ch; }
+#configModal .config-close-btn { width: 40px; height: 40px; }
+#configModal .config-tabs-wrapper { grid-column: 1; grid-row: 2; align-items: stretch; border-bottom: 0; border-right: 1px solid var(--border); background: var(--surface); }
+#configModal .config-tabs { flex-direction: column; gap: 4px; padding: 16px 10px; overflow-y: auto; overflow-x: hidden; }
+#configModal .config-tabs-scroll-btn { display: none !important; }
+#configModal .config-tab-btn { text-align: left; border: 1px solid transparent; border-radius: 6px; padding: 12px; font-size: 13px; min-height: 44px; white-space: normal; }
+#configModal .config-tab-btn:hover { background: var(--surface-2); color: var(--text-primary); }
+#configModal .config-tab-btn.active { background: var(--surface-3); border-color: var(--border-strong); color: var(--text-primary); }
+#configModal .config-body { grid-column: 2; grid-row: 2; padding: 24px 28px 36px; background: var(--bg); display: block; scroll-padding: 24px; }
+#configModal .config-actions { grid-column: 1 / -1; padding: 16px 24px; background: var(--surface); display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+#configModal .settings-save-status { flex: 1 1 160px; font-size: 13px; color: var(--text-secondary); }
+#configModal .settings-save-status[data-state="dirty"] { color: var(--amber, #fbbf24); }
+#configModal .config-actions-main { margin-left: auto; gap: 8px; }
+#configModal .config-actions .btn { min-height: 42px; }
+#configModal .settings-section-intro { margin-bottom: 24px; }
+#configModal .settings-section-intro h3 { color: var(--text-primary); font-size: 19px; font-weight: 600; margin: 0 0 8px; }
+#configModal .settings-section-intro p, #configModal .settings-section-heading p, #configModal .settings-hint, #configModal .settings-maintenance p { color: var(--text-secondary); font-size: 13px; line-height: 1.6; max-width: 65ch; margin: 0; }
+#configModal .settings-section-heading { border-top: 1px solid var(--border-strong); margin: 28px 0 16px; padding-top: 20px; }
+#configModal .settings-section-heading h4 { color: var(--text-primary); font-size: 15px; font-weight: 600; margin: 0 0 6px; }
+#configModal .config-field { margin-bottom: 16px; min-width: 0; }
+#configModal .config-field > label { color: var(--text-secondary); font-size: 13px; line-height: 1.45; margin-bottom: 7px; }
+#configModal .config-row2 { gap: 16px; }
+#configModal input[type="text"], #configModal input[type="password"], #configModal input[type="number"], #configModal input[type="time"], #configModal input[type="search"], #configModal select, #configModal textarea { font: inherit; font-size: 14px; color: var(--text-primary); background: var(--input); border: 1px solid var(--border-strong); border-radius: 6px; min-height: 42px; padding: 10px 12px; max-width: 100%; }
+#configModal input::placeholder, #configModal textarea::placeholder { color: var(--text-faint); opacity: 1; }
+#configModal input[type="checkbox"] { accent-color: var(--blue); width: 16px; height: 16px; flex-shrink: 0; }
+#configModal :is(button, input, select, textarea, summary):focus-visible { outline: 2px solid var(--blue); outline-offset: 3px; }
+#configModal :is(input, select, textarea, button):disabled { opacity: 0.5; cursor: not-allowed; }
+#configModal .checkbox-group { gap: 8px 16px; }
+#configModal .check-item { font-size: 13px; min-height: 36px; line-height: 1.5; }
+#configModal .config-profile-bar { padding-bottom: 16px; margin-bottom: 20px; flex-wrap: wrap; }
+#configModal .config-profile-select-wrap { min-width: 220px; }
+#configModal .config-profile-actions { flex-wrap: wrap; gap: 6px; }
+#configModal .config-profile-btn, #configModal .config-profile-delete { min-height: 40px; }
+#configModal .settings-field-error { margin: 6px 0 0; color: #fca5a5; font-size: 13px; line-height: 1.4; }
+#configModal .input-error { border-color: #f87171 !important; }
+#configModal .settings-maintenance { margin-top: 28px; padding-top: 20px; border-top: 1px solid var(--border-strong); }
+#configModal .settings-maintenance summary { cursor: pointer; color: var(--text-secondary); font-size: 14px; padding: 10px 0; }
+#configModal .settings-maintenance p { margin: 8px 0 16px; }
+#configModal .portal-row { flex-wrap: wrap; gap: 12px; padding: 16px 0; }
+#configModal .portal-info { min-width: 170px; }
+#configModal .portal-pages { flex-wrap: wrap; gap: 8px; }
+#configModal .portal-pages input { width: 76px; }
+#configModal .city-chips button { font-family: inherit; cursor: pointer; border: 1px solid var(--border-strong); color: var(--text-secondary); min-height: 32px; }
+@media (max-width: 760px) {
+    #configModal .config-card { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto auto minmax(0, 1fr) auto; height: 100dvh; max-height: 100dvh; border-radius: 0; }
+    #configModal .config-header { padding: 16px; }
+    #configModal .config-tabs-wrapper { grid-column: 1; grid-row: 2; border-right: 0; border-bottom: 1px solid var(--border); }
+    #configModal .config-tabs { flex-direction: row; overflow-x: auto; overflow-y: hidden; padding: 6px 12px; }
+    #configModal .config-tab-btn { white-space: nowrap; padding: 10px 12px; }
+    #configModal .config-body { grid-column: 1; grid-row: 3; padding: 20px 16px 32px; }
+    #configModal .config-actions { grid-row: 4; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); gap: 10px; }
+    #configModal .settings-save-status { flex-basis: 100%; font-size: 12px; }
+    #configModal .config-actions-main { width: 100%; flex-direction: row; display: flex; flex-wrap: wrap; }
+    #configModal .config-actions-secondary { flex: 1 1 auto; display: flex; gap: 6px; }
+    #configModal .config-actions .btn { font-size: 12px; padding: 10px; }
+    #configModal .config-actions .btn-save-sync { flex: 1 1 auto; width: auto; }
+    #configModal .config-profile-select-wrap { width: 100%; min-width: 0; flex-basis: 100%; }
+    #configModal .config-profile-actions { width: 100%; justify-content: flex-start; }
+    #configModal .config-subtitle { max-width: 38ch; }
+}
+@media (max-width: 480px) {
+    #configModal .config-row2 { grid-template-columns: minmax(0, 1fr); flex-direction: column; gap: 0; }
+    #configModal .config-actions .btn-save-sync { flex-basis: 100%; }
+    #configModal .config-actions-secondary .btn-save-cfg { flex: 1; }
+    #configModal .portal-pages { width: 100%; }
+    #configModal :is(input, select, textarea) { font-size: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    #configModal *, #configModal *::before, #configModal *::after { scroll-behavior: auto !important; transition: none !important; }
+}
+
+#configModal .portal-pages label { font-size: 13px; color: var(--text-secondary); }
+#configModal .commute-dest-fields { min-width: 0; }
+#configModal .commute-dest-fields .settings-field-error { flex-basis: 100%; }

@@ -16,6 +16,32 @@ from .enums import (
     SewerageType,
 )
 
+PROFILE_RESULT_FIELDS = frozenset(
+    {
+        "is_qualified",
+        "qualification_status",
+        "qualification_score",
+        "filter_reasons",
+        "pros",
+        "cons",
+        "discrepancies",
+        "passed_stage1",
+        "passed_stage2",
+        "matched_whitelist_area",
+        "is_corner",
+        "has_parking_or_garage",
+        "ai_summary",
+        "ai_verdict",
+        "worth_interest",
+        "ai_questions",
+        "stakeholder_questions",
+        "documents_to_obtain",
+        "structured_risks",
+        "contact_phone",
+        "contact_person",
+    }
+)
+
 GEO_FIELDS: tuple[str, ...] = (
     "landslide_risk",
     "egib_building_status",
@@ -107,6 +133,8 @@ def apply_if_present(target: Any, source: Any, fields: tuple[str, ...], *, fill_
             continue
         if fill_missing and getattr(target, field, None) is not None:
             continue
+        if field == "walkability_pka_dist_m":
+            value = round(float(value))
         setattr(target, field, value)
 
 
@@ -127,7 +155,7 @@ def _enum_or_none(cls: Callable[[Any], _E], val: Any) -> _E | None:
 
 def restore_cached_details(listing: "ListingSchema", existing_model: Any) -> None:
     """Restore cached description, enums, flags, and spatial fields from a previously saved model."""
-    if not listing.raw_description and existing_model.raw_description:
+    if (listing.skip_detail or not listing.raw_description) and existing_model.raw_description:
         listing.raw_description = existing_model.raw_description
     if listing.finish_condition == FinishCondition.NIEOKRESLONY and (
         fc := _enum_or_none(FinishCondition, existing_model.finish_condition)
@@ -195,6 +223,10 @@ class Coordinates(BaseModel):
 
 
 class FilterResult(BaseModel):
+    llm_json: dict[str, Any] | None = None
+    llm_model: str | None = None
+    llm_prompt_version: str | None = None
+    llm_skip_reason: str | None = None
     is_qualified: bool
     status: QualificationStatus
     score: float = 0.0
@@ -207,6 +239,7 @@ class FilterResult(BaseModel):
     discrepancies: list[str] = Field(default_factory=list)
     is_corner: bool = False
     has_parking_or_garage: bool = False
+    spatial_applied: bool = False
     matched_whitelist_area: str | None = None
     finish_condition: FinishCondition = FinishCondition.NIEOKRESLONY
     has_visualisations: bool = False
@@ -337,6 +370,9 @@ class ListingSchema(BaseModel):
     profile_name: str | None = None
     year_built: int | None = None
     raw_description: str = ""
+    detail_fetched_at: datetime | None = None
+    spatial_audited_at: datetime | None = None
+    is_exact_coords: bool = False
     main_image_url: str | None = None
     gallery_images: list[str] = Field(default_factory=list)
     physical_fingerprint: str | None = None

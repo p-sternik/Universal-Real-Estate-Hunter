@@ -97,6 +97,11 @@ class Stage1Filter:
             return True
         return bool(self.RE_TRANSIT_PREFIX.search(prefix))
 
+    @staticmethod
+    def _term_pattern(term: str) -> re.Pattern[str]:
+        """Word-bounded pattern tolerating up to two inflection characters (e.g. 'Zalesie' -> 'Zalesiu')."""
+        return re.compile(rf"(?<!\w){re.escape(term.lower())}\w{{0,2}}(?!\w)", re.IGNORECASE)
+
     def check_blacklist(self, listing: ListingSchema, blacklist_words: list[str] | None = None) -> str | None:
         """Check if any blacklisted term is present in title, location, or description with negation awareness."""
         words = blacklist_words if blacklist_words is not None else self.blacklist
@@ -108,12 +113,12 @@ class Stage1Filter:
         desc_text = listing.raw_description.lower()
 
         for term in words:
-            t = term.lower()
-            escaped = re.escape(t)
-            pattern = re.compile(rf"\b{escaped}\b", re.IGNORECASE)
+            if not term or not term.strip():
+                continue
+            pattern = self._term_pattern(term.strip())
 
             # 1. Location fields (address, district, raw location): hard match
-            if pattern.search(location_fields_text) or t in location_fields_text:
+            if pattern.search(location_fields_text):
                 return term
 
             # 2. Title: check match with negation/transit check
@@ -121,23 +126,9 @@ class Stage1Filter:
             if m_title and not self._is_negated_or_transit(title_text, m_title.start(), m_title.end()):
                 return term
 
-            # 3. Description: check all matches and ensure they are not negated or transit references
-            spans: list[tuple[int, int]] = []
+            # 3. Description: every match must be a negated or transit reference to be ignored
             for m in pattern.finditer(desc_text):
-                spans.append((m.start(), m.end()))
-            if not spans and t in desc_text:
-                idx = desc_text.find(t)
-                while idx != -1:
-                    spans.append((idx, idx + len(t)))
-                    idx = desc_text.find(t, idx + 1)
-
-            if spans:
-                has_real_violation = False
-                for start_idx, end_idx in spans:
-                    if not self._is_negated_or_transit(desc_text, start_idx, end_idx):
-                        has_real_violation = True
-                        break
-                if has_real_violation:
+                if not self._is_negated_or_transit(desc_text, m.start(), m.end()):
                     return term
 
         return None
@@ -170,7 +161,7 @@ class Stage1Filter:
                 reasons.append("Odrzucono: strefa zagrożenia osuwiskowego SOPO (PIG-PIB)")
         if reject_hv:
             hv = str(listing.power_lines_risk or "").upper()
-            if any(k in hv for k in ("LINIA", "400KV", "220KV", "110KV", "WN", "WYSOKIEGO NAPIĘCIA")):
+            if re.search(r"LINIA|400KV|220KV|110KV|\bWN\b|WYSOKIEGO NAPIĘCIA", hv):
                 reasons.append("Odrzucono: bezpośrednie sąsiedztwo napowietrznej linii wysokiego napięcia")
         front_f = self._parse_front(listing.parcel_front_width_m)
         if min_front_f and min_front_f > 0 and front_f is not None and front_f < min_front_f:
@@ -181,11 +172,15 @@ class Stage1Filter:
         """
         Check if listing matches prioritized whitelist areas.
         Returns the matching whitelist area name or None.
+
+        Title/location fields match directly; description mentions only count when they are
+        not transit or negated references to a neighbouring place.
         """
-        combined_text = (
-            f"{listing.title} {listing.location_raw} {listing.street or ''} "
-            f"{listing.district or ''} {listing.raw_description}"
-        ).lower()
+        location_text = (
+            f"{listing.title} {listing.location_raw} {listing.street or ''} {listing.district or ''}".lower()
+        )
+        desc_text = (listing.raw_description or "").lower()
+        combined_text = f"{location_text} {desc_text}"
 
         wl_areas = areas if areas is not None else self.whitelist_areas
         for area in wl_areas:
@@ -197,9 +192,14 @@ class Stage1Filter:
                 continue
 
             for kw in keywords:
-                escaped = re.escape(kw.lower())
-                if re.search(rf"\b{escaped}\b", combined_text) or kw.lower() in combined_text:
+                if not kw or not kw.strip():
+                    continue
+                pattern = self._term_pattern(kw.strip())
+                if pattern.search(location_text):
                     return area_name
+                for m in pattern.finditer(desc_text):
+                    if not self._is_negated_or_transit(desc_text, m.start(), m.end()):
+                        return area_name
 
         return None
 
@@ -305,8 +305,8 @@ class Stage1Filter:
             if l_market not in ("nieokreślony", market_type):
                 reasons.append(f"Rynek '{l_market}' niezgodny z wymaganym '{market_type}'")
 
-        # 4b. Year built check (houses)
-        if category == "dom" and listing.year_built:
+        # 4b. Year built check (residential properties)
+        if category in ("dom", "mieszkanie") and listing.year_built:
             if min_year and listing.year_built < min_year:
                 reasons.append(f"Rok budowy {listing.year_built} wcześniejszy niż wymagane min. {min_year}")
             if max_year and listing.year_built > max_year:
@@ -456,7 +456,7 @@ class Stage1Filter:
             if l_market not in ("nieokreślony", market_type):
                 return []
 
-        if category == "dom" and listing.year_built:
+        if category in ("dom", "mieszkanie") and listing.year_built:
             if min_year and listing.year_built < min_year:
                 year_floor = min_year - 5
                 if listing.year_built >= year_floor:

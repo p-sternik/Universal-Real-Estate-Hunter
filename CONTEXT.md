@@ -64,7 +64,7 @@ The finish condition is strictly governed by the **Living Quarters Principle**: 
 - `BLIZNIAK`: Semi-detached house.
 - `SZEREGOWIEC`: Terraced house / row house.
   - `SKRAJNY`: Corner/end segment (larger plot, fewer direct neighbours).
-  - `SRODKOWY`: Middle segment (smaller plot, neighbours on both sides). Minimum plot threshold rule: middle segments with plot < 250 m² are flagged or rejected unless compensated.
+  - `SRODKOWY`: Middle segment (smaller plot, neighbours on both sides). Minimum plot threshold rule: houses with plot < 200 m² are rejected (Stage 1 absolute floor; Stage 2 applies the same floor to middle segments and to plots extracted from the description).
   - `NIEOKRESLONY`: Subtype not specified in title/metadata, resolved semantically from description.
 
 ### Access Road Types ([`src.models.enums.RoadType`](file:///C:/Users/User/WebstormProjects/apartments-scrapper/src/models/enums.py))

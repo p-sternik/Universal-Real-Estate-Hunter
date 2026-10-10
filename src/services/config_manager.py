@@ -1,10 +1,11 @@
 import json
+import math
 import os
 import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from loguru import logger
 from pydantic import BaseModel, Field, model_validator
@@ -202,8 +203,8 @@ def slugify_city(text: str) -> str:
 
 class ScraperConfig(BaseModel):
     enabled: bool = True
-    max_pages: int = 2
-    delay_seconds: float = 1.0
+    max_pages: int = Field(default=2, ge=1, le=50)
+    delay_seconds: float = Field(default=1.0, ge=0, le=30, allow_inf_nan=False)
 
 
 class ScrapersSettings(BaseModel):
@@ -298,7 +299,7 @@ class SearchProfile(BaseModel):
     id: str = "default"
     name: str = "Domy Rzeszów"
     enabled: bool = True
-    category: str = "dom"  # "dom", "mieszkanie", "dzialka"
+    category: Literal["dom", "mieszkanie", "dzialka"] = "dom"
     city: str = "Rzeszów"
     distance_radius: int | None = 15
     min_price: float | None = 0.0
@@ -333,6 +334,50 @@ class SearchProfile(BaseModel):
     reject_high_voltage: bool = False
     min_parcel_front_m: float | None = None
 
+    @model_validator(mode="before")
+    @classmethod
+    def category_defaults(cls, data: Any) -> Any:
+        if isinstance(data, dict) and data.get("category") in ("mieszkanie", "dzialka"):
+            data = dict(data)
+            # A new apartment/land profile must not inherit house area limits.
+            for field in ("min_area_home", "max_area_home", "min_area_plot", "max_area_plot"):
+                data.setdefault(field, None)
+        return data
+
+    @model_validator(mode="after")
+    def clear_inapplicable_filters(self) -> "SearchProfile":
+        """Keep criteria for one property category from filtering another."""
+        if self.category != "dom":
+            self.building_types = []
+            self.reject_septic_tank = False
+        if self.category == "mieszkanie":
+            self.min_area_plot = self.max_area_plot = self.min_parcel_front_m = None
+        else:
+            self.min_rooms = self.max_rooms = self.min_floor = self.max_floor = None
+        if self.category == "dzialka":
+            self.min_area_home = self.max_area_home = None
+            self.min_year_built = self.max_year_built = None
+            self.market_type = "all"
+            self.allowed_finish_conditions = ["all"]
+            self.allowed_heating_types = ["all"]
+        for suffix in ("price", "price_per_m2", "area_home", "area_plot", "rooms", "floor", "year_built"):
+            minimum = getattr(self, f"min_{suffix}")
+            maximum = getattr(self, f"max_{suffix}")
+            for value in (minimum, maximum):
+                if value is not None and (not math.isfinite(value) or (suffix != "floor" and value < 0)):
+                    raise ValueError(f"Nieprawidłowy zakres: {suffix}")
+            if minimum is not None and maximum is not None and minimum > maximum:
+                raise ValueError(f"Wartość od nie może przekraczać wartości do: {suffix}")
+        if self.distance_radius is not None and self.distance_radius < 0:
+            raise ValueError("Promień nie może być ujemny")
+        if self.min_parcel_front_m is not None and (
+            not math.isfinite(self.min_parcel_front_m) or self.min_parcel_front_m < 0
+        ):
+            raise ValueError("Front działki musi być nieujemną, skończoną liczbą")
+        if not self.id.strip() or not self.name.strip() or not self.city.strip():
+            raise ValueError("Identyfikator, nazwa profilu i miasto są wymagane")
+        return self
+
     @property
     def city_slug(self) -> str:
         return slugify_city(self.city)
@@ -343,7 +388,7 @@ class SearchProfile(BaseModel):
         cat = {"dom": "dom", "mieszkanie": "mieszkanie", "dzialka": "dzialka"}.get(self.category, "dom")
         base = f"https://www.otodom.pl/pl/wyniki/sprzedaz/{cat}/{path}"
 
-        radius = self.distance_radius or 15
+        radius = self.distance_radius if self.distance_radius is not None else 15
         params = [f"distanceRadius={radius}", "limit=36"]
         if self.min_price is not None and self.min_price > 0:
             params.append(f"priceMin={int(self.min_price)}")
@@ -390,7 +435,7 @@ class SearchProfile(BaseModel):
         cat = {"dom": "domy", "mieszkanie": "mieszkania", "dzialka": "dzialki"}.get(self.category, "domy")
         base = f"https://www.olx.pl/nieruchomosci/{cat}/sprzedaz/{slug}/"
 
-        radius = self.distance_radius or 15
+        radius = self.distance_radius if self.distance_radius is not None else 15
         params = [f"search%5Bdist%5D={radius}"]
         if self.min_price is not None and self.min_price > 0:
             params.append(f"search%5Bfilter_float_price%3Afrom%5D={int(self.min_price)}")
@@ -528,6 +573,9 @@ class SearchConfig(BaseModel):
 
     @model_validator(mode="after")
     def _normalize_local_llm_url(self) -> "SearchConfig":
+        profile_ids = [profile.id for profile in self.profiles]
+        if len(profile_ids) != len(set(profile_ids)):
+            raise ValueError("Identyfikatory profili muszą być unikalne")
         if self.local_llm_preset == "ollama" and (not self.local_llm_base_url or ":1234" in self.local_llm_base_url):
             self.local_llm_base_url = self.ollama_base_url or settings.OLLAMA_BASE_URL
         return self

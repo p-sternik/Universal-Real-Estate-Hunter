@@ -468,9 +468,14 @@ class NieruchomosciOnlineScraper(BaseScraper):
             html = await self.fetch_detail_html(listing.url)
         if html:
             try:
-                self._apply_detail(listing, self._parse_detail(html))
+                detail = self._parse_detail(html)
+                if detail:
+                    self._apply_detail(listing, detail)
+                    if detail.get("description"):
+                        listing.detail_fetched_at = datetime.now(UTC)
             except Exception as err:
                 logger.debug(f"[{self.name}] Failed to enrich detail for {listing.url}: {err}")
+        listing.skip_detail = listing.detail_fetched_at is None
         return listing
 
     async def scrape(self) -> list[ListingSchema]:

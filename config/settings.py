@@ -59,6 +59,10 @@ class Settings(BaseSettings):
     # Database (kept under data/ to avoid committing live DB from repo root)
     DATABASE_URL: str = "sqlite+aiosqlite:///data/listings.db"
 
+    # Optional HTTP Basic authentication for remote dashboard access.
+    DASHBOARD_USERNAME: str = ""
+    DASHBOARD_PASSWORD: str = ""
+
     # Notifiers
     DISCORD_WEBHOOK_URL: str | None = None
     TELEGRAM_BOT_TOKEN: str | None = None

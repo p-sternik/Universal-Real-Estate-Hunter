@@ -571,12 +571,12 @@
     </div>
 
     <!-- ===== CONFIG MODAL ===== -->
-    <div id="configModal" onclick="closeConfigModal(event)" role="dialog" aria-modal="true" aria-label="Konfiguracja wyszukiwania i scraperów">
+    <div id="configModal" onclick="closeConfigModal(event)" role="dialog" aria-modal="true" aria-labelledby="settingsTitle" aria-describedby="settingsDescription">
         <div class="config-card" onclick="event.stopPropagation()">
             <div class="config-header">
                 <div>
-                    <h2 class="config-title">Konfiguracja wyszukiwania i scraperów</h2>
-                    <div class="config-subtitle">Zarządzanie profilami (domy, mieszkania, działki) oraz portalami</div>
+                    <h2 class="config-title" id="settingsTitle">Ustawienia</h2>
+                    <div class="config-subtitle" id="settingsDescription">Profile określają, czego szukasz. Pozostałe ustawienia dotyczą całej aplikacji.</div>
                 </div>
                 <button class="btn btn-ghost btn-sm config-close-btn" onclick="closeConfigModal(null)" aria-label="Zamknij">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -592,12 +592,12 @@
                         <polyline points="15 18 9 12 15 6"></polyline>
                     </svg>
                 </button>
-                <div class="config-tabs" id="configTabsBar">
+                <div class="config-tabs" id="configTabsBar" role="tablist" aria-label="Sekcje ustawień">
                     <button type="button" class="config-tab-btn active" id="tabBtnOverview" onclick="switchConfigTab('overview')">Podsumowanie</button>
                     <button type="button" class="config-tab-btn" id="tabBtnProfiles" onclick="switchConfigTab('profiles')">Profile wyszukiwania</button>
-                    <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty (CAPEX)</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnCapex" onclick="switchConfigTab('capex')">Koszty zakupu</button>
                     <button type="button" class="config-tab-btn" id="tabBtnCommute" onclick="switchConfigTab('commute')">Dojazdy</button>
-                    <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Scrapery i portale</button>
+                    <button type="button" class="config-tab-btn" id="tabBtnScrapers" onclick="switchConfigTab('scrapers')">Portale ogłoszeń</button>
                     <button type="button" class="config-tab-btn" id="tabBtnScheduler" onclick="switchConfigTab('scheduler')">Harmonogram</button>
                     <button type="button" class="config-tab-btn" id="tabBtnAi" onclick="switchConfigTab('ai')">Analiza AI</button>
                     <button type="button" class="config-tab-btn" id="tabBtnNotifications" onclick="switchConfigTab('notifications')">Powiadomienia</button>
@@ -616,8 +616,21 @@
                     <div id="configOverviewBody">
                         <div style="text-align: center; padding: 32px; color: var(--text-muted);">Ładowanie podsumowania…</div>
                     </div>
+                    <details class="settings-maintenance"><summary>Zarządzanie danymi</summary><p>Usunięcie ofert jest trwałe i obejmuje historię cen, notatki oraz statusy.</p><div class="config-field"><label for="cfgResetScope">Zakres usuwania:</label><select id="cfgResetScope"></select></div>
+                <div class="config-actions-danger">
+                    <button type="button" class="btn btn-reset-db" onclick="resetDatabaseData()">
+                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M3 6h18"></path>
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
+                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
+                        <span>Usuń oferty z bazy</span>
+                    </button>
+                </div>
+                    </details>
                 </div>
                 <div id="configTabProfiles" style="display:none;">
+                    <div class="settings-section-intro"><h3>Profile wyszukiwania</h3><p>Każdy profil ma własny typ nieruchomości, lokalizację i kryteria. Zmiany we wszystkich profilach zapiszesz jednym przyciskiem.</p></div>
                     <div class="config-profile-bar">
                         <div class="config-profile-select-wrap">
                             <label for="cfgProfileSelect" class="config-profile-label">Profil:</label>
@@ -648,6 +661,7 @@
                         </div>
                     </div>
 
+                    <div class="settings-section-heading"><h4>Profil i typ nieruchomości</h4></div>
                     <div class="config-row2">
                         <div class="config-field">
                             <label for="cfgProfileName">Nazwa profilu:</label>
@@ -665,23 +679,24 @@
 
                     <label class="check-item" style="margin-bottom:12px;">
                         <input type="checkbox" id="cfgProfileEnabled" style="width:auto;">
-                        <span>Włączony w automatycznym cyklu scrapingu</span>
+                        <span>Uwzględniaj profil w automatycznym wyszukiwaniu</span>
                     </label>
 
+                    <div class="settings-section-heading"><h4>Lokalizacja</h4></div>
                     <div class="config-field" style="margin-bottom:12px;">
                         <label for="cfgCity">Lokalizacja / Miasto:</label>
                         <input type="text" id="cfgCity" placeholder="np. Rzeszów, Kraków, Warszawa, Siedlce...">
                         <div class="city-chips">
-                            <span class="chip" onclick="setCfgCity('Rzeszów')">Rzeszów</span>
-                            <span class="chip" onclick="setCfgCity('Kraków')">Kraków</span>
-                            <span class="chip" onclick="setCfgCity('Warszawa')">Warszawa</span>
-                            <span class="chip" onclick="setCfgCity('Wrocław')">Wrocław</span>
-                            <span class="chip" onclick="setCfgCity('Siedlce')">Siedlce</span>
-                            <span class="chip" onclick="setCfgCity('Lublin')">Lublin</span>
-                            <span class="chip" onclick="setCfgCity('Katowice')">Katowice</span>
-                            <span class="chip" onclick="setCfgCity('Poznań')">Poznań</span>
-                            <span class="chip" onclick="setCfgCity('Gdańsk')">Gdańsk</span>
-                            <span class="chip" onclick="setCfgCity('Łańcut')">Łańcut</span>
+                            <button type="button" class="chip" onclick="setCfgCity('Rzeszów')">Rzeszów</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Kraków')">Kraków</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Warszawa')">Warszawa</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Wrocław')">Wrocław</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Siedlce')">Siedlce</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Lublin')">Lublin</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Katowice')">Katowice</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Poznań')">Poznań</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Gdańsk')">Gdańsk</button>
+                            <button type="button" class="chip" onclick="setCfgCity('Łańcut')">Łańcut</button>
                         </div>
                     </div>
 
@@ -697,7 +712,7 @@
                                 <option value="50">+50 km</option>
                             </select>
                         </div>
-                        <div class="config-field">
+                        <div class="config-field" data-profile-categories="dom mieszkanie">
                             <label for="cfgMarket">Rynek:</label>
                             <select id="cfgMarket">
                                 <option value="all">Wszystkie</option>
@@ -720,6 +735,7 @@
                         <div></div>
                     </div>
 
+                    <div class="settings-section-heading"><h4>Budżet i powierzchnia</h4><p>Puste pole oznacza brak limitu. Dla domu obowiązuje minimum 200 m² działki.</p></div>
                     <div class="config-row2">
                         <div class="config-field">
                             <label for="cfgMinPrice">Cena min. (PLN):</label>
@@ -733,7 +749,7 @@
 
                     <!-- Dynamic Category Containers -->
                     <!-- Dom specific -->
-                    <div id="catBoxDom">
+                    <div id="catBoxDom" data-profile-categories="dom">
                         <div class="config-row2">
                             <div class="config-field">
                                 <label for="cfgMinAreaHome">Metraż domu od (m²):</label>
@@ -757,7 +773,7 @@
                     </div>
 
                     <!-- Mieszkanie specific -->
-                    <div id="catBoxMieszkanie" style="display:none;">
+                    <div id="catBoxMieszkanie" data-profile-categories="mieszkanie" style="display:none;">
                         <div class="config-row2">
                             <div class="config-field">
                                 <label for="cfgMinAreaApt">Metraż mieszkania od (m²):</label>
@@ -791,7 +807,7 @@
                     </div>
 
                     <!-- Dzialka specific -->
-                    <div id="catBoxDzialka" style="display:none;">
+                    <div id="catBoxDzialka" data-profile-categories="dzialka" style="display:none;">
                         <div class="config-row2">
                             <div class="config-field">
                                 <label for="cfgMinAreaPlotOnly">Powierzchnia działki od (m²):</label>
@@ -815,7 +831,8 @@
                         </div>
                     </div>
 
-                    <div class="config-row2">
+                    <div class="settings-section-heading" data-profile-categories="dom mieszkanie"><h4>Budynek i standard</h4></div>
+                    <div class="config-row2" data-profile-categories="dom mieszkanie">
                         <div class="config-field">
                             <label for="cfgMinYearBuilt">Rok budowy od:</label>
                             <input type="number" id="cfgMinYearBuilt" placeholder="np. 2015">
@@ -826,7 +843,7 @@
                         </div>
                     </div>
 
-                    <div class="config-field">
+                    <div class="config-field" data-profile-categories="dom mieszkanie">
                         <label>Stan wykończenia (zaznacz dopuszczalne; nic = brak filtra):</label>
                         <div class="checkbox-group">
                             <label class="check-item"><input type="checkbox" class="cfg-finish" value="do zamieszkania"> Do zamieszkania</label>
@@ -838,7 +855,7 @@
                         </div>
                     </div>
 
-                    <div class="config-field">
+                    <div class="config-field" data-profile-categories="dom">
                         <label>Typ budynku (zaznacz dopuszczalne; nic = brak filtra):</label>
                         <div class="checkbox-group">
                             <label class="check-item"><input type="checkbox" class="cfg-building" value="wolnostojący"> Wolnostojący</label>
@@ -848,7 +865,7 @@
                         </div>
                     </div>
 
-                    <div class="config-field">
+                    <div class="config-field" data-profile-categories="dom mieszkanie">
                         <label>Ogrzewanie (zaznacz dopuszczalne; nic = brak filtra):</label>
                         <div class="checkbox-group">
                             <label class="check-item"><input type="checkbox" class="cfg-heating" value="pompa ciepła"> Pompa ciepła</label>
@@ -860,7 +877,7 @@
                     </div>
 
                     <div class="config-row2">
-                        <div class="config-field">
+                        <div class="config-field" data-profile-categories="dom">
                             <label class="check-item">
                                 <input type="checkbox" id="cfgRejectSeptic"> Odrzucaj oferty ze szambem
                             </label>
@@ -872,6 +889,7 @@
                         </div>
                     </div>
 
+                    <div class="settings-section-heading"><h4>Otoczenie i bezpieczeństwo</h4><p>Odrzucenie następuje na podstawie dostępnych danych rejestrów; brak danych nie oznacza braku ryzyka.</p></div>
                     <div class="config-field">
                         <label>Filtry bezpieczeństwa — rejestry publiczne (twarde odrzucenie):</label>
                         <div class="checkbox-group">
@@ -881,7 +899,7 @@
                         </div>
                     </div>
 
-                    <div class="config-row2">
+                    <div class="config-row2" data-profile-categories="dom dzialka">
                         <div class="config-field">
                             <label for="cfgMinFront">Min. front działki (m, np. 16):</label>
                             <input type="number" id="cfgMinFront" placeholder="Bez limitu" step="0.5" min="0">
@@ -889,11 +907,22 @@
                         <div></div>
                     </div>
 
+                    <div class="settings-section-heading"><h4>Dodatkowe kryteria</h4></div>
                     <div class="config-field">
-                        <label for="cfgBlacklist">Wykluczone słowa (Blacklist, oddzielone przecinkami):</label>
+                        <label for="cfgBlacklist">Wykluczone słowa (oddziel przecinkami):</label>
                         <textarea id="cfgBlacklist" rows="2" placeholder="Wpisz opcjonalne słowa do wykluczenia (np. zalewowe, tory... - domyślnie puste)"></textarea>
                     </div>
 
+                    <div class="config-field">
+                        <label>Portale dla tego profilu:</label>
+                        <p class="settings-hint">Brak zaznaczenia oznacza wszystkie portale włączone w ustawieniach aplikacji.</p>
+                        <div class="checkbox-group">
+                            <label class="check-item"><input type="checkbox" class="cfg-profile-portal" value="otodom"> Otodom</label>
+                            <label class="check-item"><input type="checkbox" class="cfg-profile-portal" value="olx"> OLX</label>
+                            <label class="check-item"><input type="checkbox" class="cfg-profile-portal" value="nieruchomosci_online"> Nieruchomości-online</label>
+                            <label class="check-item"><input type="checkbox" class="cfg-profile-portal" value="morizon"> Morizon</label>
+                        </div>
+                    </div>
                     <div class="config-field">
                         <label for="cfgDiscordWebhook">Dedykowany Webhook Discord (opcjonalny dla profilu):</label>
                         <input type="url" id="cfgDiscordWebhook" placeholder="https://discord.com/api/webhooks/...">
@@ -902,6 +931,7 @@
 
                 <!-- TAB: CAPEX ASSUMPTIONS -->
                 <div id="configTabCapex" style="display:none;">
+                    <div class="settings-section-intro"><h3>Koszty zakupu</h3><p>Założenia kalkulatora kosztów dla wszystkich profili. Stawki dotyczą prac we wnętrzu; nie stanowią wyceny wykonawcy.</p></div>
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
                         Założenia kalkulatora kosztów całkowitych (CAPEX). Stosowane do wszystkich ofert
                         w raporcie Due Diligence (Drawer) oraz na kartach (CAPEX ~…).
@@ -954,6 +984,7 @@
 
                 <!-- TAB: COMMUTE MATRIX -->
                 <div id="configTabCommute" style="display:none;">
+                    <div class="settings-section-intro"><h3>Dojazdy</h3><p>Zapisane miejsca docelowe są wspólne dla wszystkich profili.</p></div>
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
                         Twoje cele dojazdów (np. praca, szkoła dzieci, dom rodziców). Dla każdego punktu
                         system dolicza realny czas dojazdu OSRM z każdej oferty i pokazuje go w Due Diligence
@@ -973,6 +1004,7 @@
 
                 <!-- TAB 2: SCRAPERS -->
                 <div id="configTabScrapers" style="display:none;">
+                    <div class="settings-section-intro"><h3>Portale ogłoszeń</h3><p>Wybierz źródła ofert i intensywność wyszukiwania.</p></div>
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
                         Sterowanie pracą scraperów poszczególnych portali (włączanie, limity stron oraz opóźnienia zapytań).
                     </div>
@@ -985,6 +1017,7 @@
                         <div class="portal-pages">
                             <label for="cfgPagesOtodom">Maks. stron:</label>
                             <input type="number" id="cfgPagesOtodom" min="1" max="50" value="5">
+                            <label for="cfgDelayOtodom">Przerwa (s):</label><input type="number" id="cfgDelayOtodom" min="0" max="30" step="0.1" value="1">
                         </div>
                     </div>
 
@@ -996,6 +1029,7 @@
                         <div class="portal-pages">
                             <label for="cfgPagesOlx">Maks. stron:</label>
                             <input type="number" id="cfgPagesOlx" min="1" max="50" value="5">
+                            <label for="cfgDelayOlx">Przerwa (s):</label><input type="number" id="cfgDelayOlx" min="0" max="30" step="0.1" value="1">
                         </div>
                     </div>
 
@@ -1007,6 +1041,7 @@
                         <div class="portal-pages">
                             <label for="cfgPagesNieruchomosci">Maks. stron:</label>
                             <input type="number" id="cfgPagesNieruchomosci" min="1" max="50" value="5">
+                            <label for="cfgDelayNieruchomosci">Przerwa (s):</label><input type="number" id="cfgDelayNieruchomosci" min="0" max="30" step="0.1" value="1">
                         </div>
                     </div>
 
@@ -1018,17 +1053,16 @@
                         <div class="portal-pages">
                             <label for="cfgPagesMorizon">Maks. stron:</label>
                             <input type="number" id="cfgPagesMorizon" min="1" max="50" value="5">
+                            <label for="cfgDelayMorizon">Przerwa (s):</label><input type="number" id="cfgDelayMorizon" min="0" max="30" step="0.1" value="1">
                         </div>
                     </div>
 
-                    <div class="config-field" style="margin-top:16px;">
-                        <label for="cfgRequestDelay">Opóźnienie między żądaniami (sekundy):</label>
-                        <input type="number" id="cfgRequestDelay" step="0.5" min="0" value="1.0">
-                    </div>
+                    <p class="settings-hint">Limit stron i przerwa między zapytaniami dotyczą każdego portalu osobno. Większa przerwa zmniejsza obciążenie portalu.</p>
                 </div>
 
                 <!-- TAB 3: SCHEDULER -->
                 <div id="configTabScheduler" style="display:none;">
+                    <div class="settings-section-intro"><h3>Harmonogram</h3><p>Ustal częstotliwość automatycznego wyszukiwania. Godziny nocne mogą obejmować północ.</p></div>
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
                         Ustawienia automatycznego przeszukiwania portali w trybie ciągłym (daemon <code>python main.py run</code> lub dashboard z flagą <code>--with-scheduler</code>).
                     </div>
@@ -1095,6 +1129,7 @@
 
                 <!-- TAB 4: AI ANALYSIS -->
                 <div id="configTabAi" style="display:none;">
+                    <div class="settings-section-intro"><h3>Analiza AI</h3><p>Ustawienia analizy opisów i zdjęć dla wszystkich profili. Test połączenia sprawdza konfigurację silnika.</p></div>
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:14px;">
                         Ustawienia analizy AI ogłoszeń (LLM) — synteza oferty, pytania do agenta, dane kontaktowe.
                     </div>
@@ -1298,6 +1333,7 @@
 
                 <!-- TAB: NOTIFICATIONS -->
                 <div id="configTabNotifications" style="display:none;">
+                    <div class="settings-section-intro"><h3>Powiadomienia</h3><p>Wybierz kanały, zdarzenia i godziny ciszy. Zmiany dotyczą wszystkich profili.</p></div>
                     <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px;">
                         Zarządzanie kanałami powiadomień (Telegram Bot, Discord Webhook), filtrami scoringu oraz zdarzeniami rynkowymi.
                     </div>
@@ -1397,7 +1433,7 @@
 
                         <div class="config-row2" style="margin-top:14px;">
                             <div class="config-field">
-                                <label for="cfgNotifyMinScore">Minimalny Score oferty dla alertu (0-100):</label>
+                                <label for="cfgNotifyMinScore">Minimalna ocena oferty dla powiadomienia (0–100):</label>
                                 <input type="number" id="cfgNotifyMinScore" min="0" max="100" step="1" value="0" placeholder="0 = wszystkie zakwalifikowane">
                             </div>
                         </div>
@@ -1429,20 +1465,11 @@
             </div>
 
             <div class="config-actions">
-                <div class="config-actions-danger">
-                    <button type="button" class="btn btn-reset-db" onclick="resetDatabaseData()">
-                        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                            <path d="M3 6h18"></path>
-                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6"></path>
-                            <path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                        </svg>
-                        <span>Resetuj bazę danych</span>
-                    </button>
-                </div>
+                <div class="settings-save-status" id="settingsSaveStatus" role="status" aria-live="polite">Brak niezapisanych zmian</div>
                 <div class="config-actions-main">
                     <div class="config-actions-secondary">
                         <button type="button" class="btn btn-cancel" onclick="closeConfigModal(null)">
-                            Anuluj
+                            Zamknij
                         </button>
                         <button type="button" class="btn btn-save-cfg" onclick="saveConfiguration(false)">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
@@ -1450,7 +1477,7 @@
                                 <path d="M17 21v-8H7v8"></path>
                                 <path d="M7 3v5h8"></path>
                             </svg>
-                            <span>Zapisz konfigurację</span>
+                            <span>Zapisz zmiany</span>
                         </button>
                     </div>
                     <button type="button" class="btn btn-primary btn-save-sync" onclick="saveConfiguration(true)">

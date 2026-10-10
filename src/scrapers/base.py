@@ -38,6 +38,7 @@ class BaseScraper(ABC):
         self._session: AsyncSession | None = None
         self._session_lock = asyncio.Lock()
         self._throttle_multiplier = 1.0
+        self.request_delay_seconds: float | None = None
 
     def _get_session(self) -> AsyncSession:
         """Persistent session reused across requests (keep-alive, cookies)."""
@@ -61,7 +62,9 @@ class BaseScraper(ABC):
 
     def delay(self, base_delay: float) -> float:
         """Effective politeness delay including adaptive throttle multiplier."""
-        return base_delay * self._throttle_multiplier
+        return (
+            self.request_delay_seconds if self.request_delay_seconds is not None else base_delay
+        ) * self._throttle_multiplier
 
     @property
     def is_cancelled(self) -> bool:

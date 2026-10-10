@@ -402,7 +402,7 @@ def main():
 
     # Live Preview Web Server (dynamic, direct DB connection)
     dash_parser = subparsers.add_parser("dashboard", help="Start real-time Live Preview Web Server")
-    dash_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
+    dash_parser.add_argument("--host", default="127.0.0.1", help="Host to listen on (default: 127.0.0.1)")
     dash_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     dash_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
     dash_parser.add_argument(
@@ -414,7 +414,7 @@ def main():
     )
 
     server_parser = subparsers.add_parser("server", help="Alias for dashboard")
-    server_parser.add_argument("--host", default="0.0.0.0", help="Host to listen on (default: 0.0.0.0)")
+    server_parser.add_argument("--host", default="127.0.0.1", help="Host to listen on (default: 127.0.0.1)")
     server_parser.add_argument("--port", type=int, default=8080, help="Port to listen on (default: 8080)")
     server_parser.add_argument("--no-open", action="store_true", help="Do not automatically open browser")
     server_parser.add_argument(
@@ -465,7 +465,7 @@ def main():
     elif cmd in ("dashboard", "server"):
         from src.services.live_dashboard import LiveDashboardServer
 
-        host = getattr(args, "host", "0.0.0.0")
+        host = getattr(args, "host", "127.0.0.1")
         with_scheduler = getattr(args, "with_scheduler", False)
         srv = LiveDashboardServer(host=host, port=args.port, with_scheduler=with_scheduler)
         try:

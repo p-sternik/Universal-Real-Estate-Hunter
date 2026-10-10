@@ -10,15 +10,18 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from src.storage import SpatialCacheModel, get_session
+from src.storage import SpatialCacheModel, get_session, safe_commit
 
-_memory_cache: dict[str, Any] = {}
+_memory_cache: dict[str, tuple[datetime | None, Any]] = {}
 
 
 async def get_spatial_cache(key: str) -> Any | None:
     """Memory-first lookup with DB fallback; None on miss, expiry, or error."""
     if key in _memory_cache:
-        return _memory_cache[key]
+        expires, value = _memory_cache[key]
+        if expires is None or expires > datetime.now(UTC):
+            return value
+        del _memory_cache[key]
     try:
         async with get_session() as session:
             item = await session.get(SpatialCacheModel, key)
@@ -29,7 +32,7 @@ async def get_spatial_cache(key: str) -> Any | None:
                     exp = exp.replace(tzinfo=UTC)
                 if exp is None or exp > now:
                     val = json.loads(item.data_json)
-                    _memory_cache[key] = val
+                    _memory_cache[key] = (exp, val)
                     return val
     except Exception:
         pass
@@ -38,17 +41,20 @@ async def get_spatial_cache(key: str) -> Any | None:
 
 async def set_spatial_cache(key: str, value: Any, ttl_days: int = 30) -> None:
     """Upserts a cache entry in memory and DB; silently no-ops on error."""
-    _memory_cache[key] = value
+    exp = datetime.now(UTC) + timedelta(days=ttl_days)
+    if len(_memory_cache) >= 10000:
+        _memory_cache.pop(next(iter(_memory_cache)))
+    _memory_cache[key] = (exp, value)
     try:
         data_str = json.dumps(value, ensure_ascii=False)
         exp = datetime.now(UTC) + timedelta(days=ttl_days)
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             existing = await session.get(SpatialCacheModel, key)
             if existing:
                 existing.data_json = data_str
                 existing.expires_at = exp
             else:
                 session.add(SpatialCacheModel(cache_key=key, data_json=data_str, expires_at=exp))
-            await session.commit()
+            await safe_commit(session)
     except Exception:
         pass

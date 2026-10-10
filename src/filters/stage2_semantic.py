@@ -1,7 +1,9 @@
 import re
+from datetime import datetime
 from typing import Any, NamedTuple
 
 from src.models.enums import (
+    BuildingType,
     FinishCondition,
     HeatingType,
     MarketType,
@@ -43,12 +45,16 @@ class Stage2SemanticFilter:
     7. Utilities & Infrastructure: Sewerage (city vs septic), Heating (heat pump, gas, solid fuel), Fiber.
     """
 
+    _SEGMENT_NOUN = r"(?:segment\w*|szereg\w*|lokal\w*|zabudow\w*|dom\w*|bliźniak\w*)"
     RE_CORNER = re.compile(
-        r"\b(skrajn[yae]|skrajn\w*|narożn[yae]|narozn\w*|ostatni\s+w\s+rzędzie|ostatni\s+w\s+rzedzie)\b",
+        rf"(?<!\w)(?:(?:skrajn\w*|narożn\w*|narozn\w*)\s+{_SEGMENT_NOUN}|{_SEGMENT_NOUN}\s+(?:skrajn\w*|narożn\w*|narozn\w*)"
+        r"|ostatni\s+w\s+rz[eę]dzie)(?!\w)",
         re.IGNORECASE,
     )
     RE_MIDDLE = re.compile(
-        r"\b(środkow[yae]|srodkow\w*|wewnętrzn[yae]|wewnetrzn\w*)\b",
+        rf"(?<!\w)(?:(?:środkow\w*|srodkow\w*|wewnętrzn\w*|wewnetrzn\w*)\s+{_SEGMENT_NOUN}"
+        rf"|{_SEGMENT_NOUN}\s+(?:środkow\w*|srodkow\w*|wewnętrzn\w*|wewnetrzn\w*)"
+        r"|w\s+środku\s+szeregu)(?!\w)",
         re.IGNORECASE,
     )
 
@@ -63,23 +69,46 @@ class Stage2SemanticFilter:
     )
 
     RE_GARAGE = re.compile(
-        r"(garaż|garaz|w\s+bryle\s+budynku|wiata\s+garażowa|wiata\s+na\s+samochód)",
+        r"(garaż|garaz|wiata\s+garażowa|wiata\s+na\s+samochód)",
         re.IGNORECASE,
     )
     RE_PARKING = re.compile(
-        r"(2\s+miejsc|dwa\s+miejsc|dwustanowiskow|podjazd\s+na\s+(?:dwa|2)\s+aut|parking\s+na\s+2|miejsca\s+postojowe)",
+        r"((?<![\d.,])2\s+miejsc|dwa\s+miejsc|dwustanowiskow|podjazd\s+na\s+(?:dwa|2)\s+aut|parking\s+na\s+2|miejsca\s+postojowe)",
         re.IGNORECASE,
     )
 
     RE_TERRAIN_SLOPE_CLAY = re.compile(
-        r"(spad(?:ek|ku)\s+terenu|strom[aey]|teren\s+nachylony|na\s+skarpie|skarp[aęie]|gliniast[aey]|podłoż[ue]\s+gliniast|podmokł[yae]|osuwisk[oa])",
+        r"(spad(?:ek|ku)\s+terenu|strom\w*\s+(?:skarp\w*|zbocz\w*|teren\w*|działk\w*)|teren\s+nachylony|na\s+skarpie|\bskarp(?:a|ę|ie)\b|gliniast[aey]|podłoż[ue]\s+gliniast|podmokł[yae]|osuwisk[oa])",
+        re.IGNORECASE,
+    )
+    RE_TERRAIN_HAZARD = re.compile(r"osuwisk|strom\w*\s+skarp", re.IGNORECASE)
+
+    RE_PLOT_EXTRACTION = re.compile(
+        r"(?:działk[aię]|powierzchni[aą]\s+działki|posesj[ai])\s*(?:o\s+(?:powierzchni|pow\.?))?\s*(?:ok\.?)?\s*(?:wynosi\s+)?(?:to\s+)?(\d+(?:[.,]\d+)?)\s*(ar[oó]w|ar[ay]?|a\b|m2|m²)",
         re.IGNORECASE,
     )
 
-    RE_PLOT_EXTRACTION = re.compile(
-        r"(?:działk[aię]|powierzchni[aą]\s+działki|ogród|ogrod(?:u|em)?|posesj[ai])\s*(?:o\s+(?:powierzchni|pow\.?))?\s*(?:ok\.?)?\s*(?:wynosi\s+)?(?:to\s+)?(\d+(?:[.,]\d+)?)\s*(ar[oó]w|ar[ay]?|a\b|m2|m²)",
+    RE_NEGATION_BEFORE = re.compile(
+        r"(?:(?<!\w)(?:nie|brak)(?!\w)(?:\s+\w+){0,3}|(?<!\w)bez)\s*$",
         re.IGNORECASE,
     )
+
+    @classmethod
+    def _is_negated(cls, text: str, start: int) -> bool:
+        """True when the match at `start` is preceded by a negation within the same clause."""
+        prefix = text[max(0, start - 40) : start]
+        clause = re.split(r"[,;.!?\n]", prefix)[-1]
+        return bool(cls.RE_NEGATION_BEFORE.search(clause))
+
+    @classmethod
+    def _has(cls, pattern: re.Pattern[str], text: str) -> bool:
+        """Search `pattern` in `text`, ignoring negated mentions ('nie wymaga remontu', 'brak osuwisk')."""
+        return cls._first(pattern, text) is not None
+
+    @classmethod
+    def _first(cls, pattern: re.Pattern[str], text: str) -> re.Match[str] | None:
+        """First non-negated match of `pattern`, or None."""
+        return next((m for m in pattern.finditer(text) if not cls._is_negated(text, m.start())), None)
 
     RE_FINISH_DO_ZAMIESZKANIA = re.compile(
         r"(pod\s+klucz|wykończon\w*\s+pod\s+klucz|do\s+zamieszkania|do\s+wprowadzenia|w\s+pełni\s+wykończon\w*|gotow\w*\s+do\s+zamieszkania|po\s+remoncie|wysoki\s+standard\s+wykończenia)",
@@ -90,9 +119,21 @@ class Stage2SemanticFilter:
         re.IGNORECASE,
     )
     RE_FINISH_UNDER_CONSTRUCTION = re.compile(
-        r"(w\s+trakcie\s+budowy|w\s+trakcie\s+realizacji|rozpoczęcie\s+budowy|planowany\s+termin\s+(?:oddania|zakończenia)|termin\s+(?:oddania|ukończenia|zakończenia|odbioru)|odbiór\s+w\s+(?:I|II|III|IV|\d)\s+kwartale|odbiór\s+budynku|zakończenie\s+inwestycji|zakończenie\s+prac\s+budowlanych|przewidywany\s+termin\s+oddania|oddanie\s+do\s+użytku\s+w\s+(?:202[5-9]|203\d))",
+        r"(w\s+trakcie\s+budowy|w\s+trakcie\s+realizacji|rozpoczęcie\s+budowy|planowany\s+termin\s+(?:oddania|zakończenia)|termin\s+(?:oddania|ukończenia|zakończenia|odbioru)|odbiór\s+w\s+(?:I|II|III|IV|\d)\s+kwartale|zakończenie\s+inwestycji|zakończenie\s+prac\s+budowlanych|przewidywany\s+termin\s+oddania)",
         re.IGNORECASE,
     )
+    RE_DELIVERY_YEAR = re.compile(
+        r"oddanie\s+do\s+użytku\s+w\s+(?:[IV]+\s+kwartale\s+|\w+\s+kwartale\s+)?(20\d{2})",
+        re.IGNORECASE,
+    )
+
+    @classmethod
+    def _is_under_construction(cls, text: str) -> bool:
+        if cls._has(cls.RE_FINISH_UNDER_CONSTRUCTION, text):
+            return True
+        current_year = datetime.now().year
+        return any(int(m.group(1)) >= current_year for m in cls.RE_DELIVERY_YEAR.finditer(text))
+
     RE_FINISH_OPTION_UNDER_KEY = re.compile(
         r"(możliwość\s+wykończenia\s+pod\s+klucz|opcja\s+wykończenia\s+pod\s+klucz|za\s+dopłatą\s+pod\s+klucz|dopłat[aą]\s+do\s+stanu\s+pod\s+klucz|do\s+własnej\s+aranżacji|możliwość\s+doprowadzenia\s+do\s+stanu\s+pod\s+klucz)",
         re.IGNORECASE,
@@ -102,7 +143,7 @@ class Stage2SemanticFilter:
         re.IGNORECASE,
     )
     RE_FINISH_ANCILLARY_ITEM = re.compile(
-        r"\b(?:taras\w*|ogr[oó]d\w*|elewacj\w*|poddasz\w*|podjazd\w*|ogrodzeni\w*|"
+        r"\b(?:taras\w*|ogr[oó]d\w*|elewacj\w*|poddasz\w*|podjazd\w*|ogrodzeni\w*|garaż\w*|garaz\w*|piwnic\w*|strych\w*|balkon\w*|altan\w*|wiata\w*|"
         r"kostk\w*\s+brukow\w*)\b",
         re.IGNORECASE,
     )
@@ -148,7 +189,7 @@ class Stage2SemanticFilter:
         re.IGNORECASE,
     )
     RE_SEWERAGE_MIEJSKA = re.compile(
-        r"(kanalizacj[aey]\s+miejsk\w*|kanalizacj[aey]\s+gminn\w*|kanalizacj[aey]\s+sieciow\w*|sieć\s+kanalizacyjn\w*|podłączon\w*\s+do\s+kanalizacji|pełne\s+media\s+wraz\s+z\s+kanalizacją|\bkanalizacja\b)",
+        r"(kanalizacj[aey]\s+miejsk\w*|kanalizacj[aey]\s+gminn\w*|kanalizacj[aey]\s+sieciow\w*|sieć\s+kanalizacyjn\w*|podłączon\w*\s+do\s+kanalizacji|pełne\s+media\s+wraz\s+z\s+kanalizacją|\bkanalizacja\b(?!\s+(?:w\s+planach|w\s+drodze|w\s+ulicy|do\s+podłączenia|planowan\w*)))",
         re.IGNORECASE,
     )
 
@@ -169,7 +210,7 @@ class Stage2SemanticFilter:
         re.IGNORECASE,
     )
     RE_FIBER = re.compile(
-        r"(światłowód|swiatlowod|internet\s+światłowodowy|łącze\s+światłowodowe)",
+        r"(światłowód(?!\s+(?:w\s+planach|w\s+drodze|w\s+ulicy|planowan\w*))|swiatlowod|internet\s+światłowodowy|łącze\s+światłowodowe)",
         re.IGNORECASE,
     )
     RE_BALCONY_TERRACE = re.compile(
@@ -187,29 +228,29 @@ class Stage2SemanticFilter:
 
     def detect_sewerage(self, text: str, existing: SewerageType = SewerageType.NIEZNANA) -> SewerageType:
         """Detect sewerage type from text, prioritizing explicit szambo/oczyszczalnia markers."""
-        if self.RE_SEWERAGE_SZAMBO.search(text):
+        if self._has(self.RE_SEWERAGE_SZAMBO, text):
             return SewerageType.SZAMBO
-        if self.RE_SEWERAGE_OCZYSZCZALNIA.search(text):
+        if self._has(self.RE_SEWERAGE_OCZYSZCZALNIA, text):
             return SewerageType.OCZYSZCZALNIA
-        if self.RE_SEWERAGE_MIEJSKA.search(text):
+        if self._has(self.RE_SEWERAGE_MIEJSKA, text):
             return SewerageType.MIEJSKA
         return existing
 
     def detect_heating(self, text: str, existing: HeatingType = HeatingType.NIEZNANE) -> HeatingType:
         """Detect heating system from text, prioritizing heat pump and gas."""
-        if self.RE_HEATING_HEAT_PUMP.search(text):
+        if self._has(self.RE_HEATING_HEAT_PUMP, text):
             return HeatingType.POMPA_CIEPLA
-        if self.RE_HEATING_GAS.search(text):
+        if self._has(self.RE_HEATING_GAS, text):
             return HeatingType.GAZOWE
-        if self.RE_HEATING_SOLID.search(text):
+        if self._has(self.RE_HEATING_SOLID, text):
             return HeatingType.PELLET_WEGIEL
-        if self.RE_HEATING_ELECTRIC.search(text):
+        if self._has(self.RE_HEATING_ELECTRIC, text):
             return HeatingType.ELEKTRYCZNE
         return existing
 
     def detect_fiber(self, text: str, existing: bool = False) -> bool:
         """Detect fiber optic internet availability."""
-        return existing or bool(self.RE_FIBER.search(text))
+        return existing or self._has(self.RE_FIBER, text)
 
     def detect_finish_condition(
         self, text: str, existing_finish: FinishCondition = FinishCondition.NIEOKRESLONY
@@ -221,20 +262,20 @@ class Stage2SemanticFilter:
         subject_text = self.RE_FINISH_OTHER_UNIT_CLAIM.sub(" ", subject_text)
 
         # 1. Raw states
-        if self.RE_FINISH_SUROWY_OTWARTY.search(subject_text):
+        if self._has(self.RE_FINISH_SUROWY_OTWARTY, subject_text):
             return FinishCondition.SUROWY_OTWARTY
-        if self.RE_FINISH_SUROWY_ZAMKNIETY.search(subject_text):
+        if self._has(self.RE_FINISH_SUROWY_ZAMKNIETY, subject_text):
             return FinishCondition.SUROWY_ZAMKNIETY
 
         # 2. Renovation needed
-        if self.RE_FINISH_DO_REMONTU.search(subject_text):
+        if self._has(self.RE_FINISH_DO_REMONTU, subject_text):
             return FinishCondition.DO_REMONTU
 
         # 3. Explicit developer state or unfinished or under construction / option for turnkey
-        is_dev = bool(self.RE_FINISH_DEWELOPERSKI.search(subject_text))
+        is_dev = self._has(self.RE_FINISH_DEWELOPERSKI, subject_text)
         is_to_finish = False
         for clause in re.split(r"[,;.!?\n]+", subject_text):
-            if not self.RE_FINISH_DO_WYKONCZENIA.search(clause):
+            if not self._has(self.RE_FINISH_DO_WYKONCZENIA, clause):
                 continue
             # Unfinished terrace, garden, facade, paving, etc. does not make
             # completed living quarters uninhabitable. Only ignore the phrase
@@ -243,8 +284,8 @@ class Stage2SemanticFilter:
                 continue
             is_to_finish = True
             break
-        is_option_turnkey = bool(self.RE_FINISH_OPTION_UNDER_KEY.search(subject_text))
-        is_under_construction = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(subject_text))
+        is_option_turnkey = self._has(self.RE_FINISH_OPTION_UNDER_KEY, subject_text)
+        is_under_construction = self._is_under_construction(subject_text)
 
         if is_to_finish:
             return FinishCondition.DO_WYKONCZENIA
@@ -252,14 +293,14 @@ class Stage2SemanticFilter:
             return FinishCondition.DEWELOPERSKI
 
         # 4. Ready to use / turnkey (only if NOT overridden by developer/construction markers)
-        if self.RE_FINISH_DO_ZAMIESZKANIA.search(subject_text):
+        if self._has(self.RE_FINISH_DO_ZAMIESZKANIA, subject_text):
             return FinishCondition.DO_ZAMIESZKANIA
 
         return existing_finish
 
     def detect_visualisations(self, text: str) -> bool:
         """Detect if description or title indicates 3D renders or conceptual visualizations."""
-        return bool(self.RE_VISUALISATIONS.search(text))
+        return self._has(self.RE_VISUALISATIONS, text)
 
     def extract_plot_from_description(self, text: str) -> float | None:
         """Try to extract plot area from text if missing from header."""
@@ -308,8 +349,8 @@ class Stage2SemanticFilter:
             if self.RE_ELEVATOR.search(desc):
                 pros.append("Winda w budynku")
 
-            has_garage = bool(self.RE_GARAGE.search(desc))
-            has_spaces = bool(self.RE_PARKING.search(desc))
+            has_garage = self._has(self.RE_GARAGE, desc)
+            has_spaces = self._has(self.RE_PARKING, desc)
             has_parking_or_garage = has_garage or has_spaces
             if has_parking_or_garage:
                 pros.append("Miejsce postojowe / garaż / komórka")
@@ -325,7 +366,7 @@ class Stage2SemanticFilter:
             if re.search(r"(kanalizacj|ściek)", desc_lower):
                 pros.append("Kanalizacja")
 
-            bad_road_match = self.RE_BAD_ROAD.search(desc)
+            bad_road_match = self._first(self.RE_BAD_ROAD, desc)
             if bad_road_match or listing.access_road_type == RoadType.POLNA:
                 found_str = bad_road_match.group(0) if bad_road_match else "droga polna"
                 cons.append(f"Nieutwardzony dojazd: '{found_str}'")
@@ -335,8 +376,9 @@ class Stage2SemanticFilter:
         else:
             # House checks (dom)
             # 1. Segment subtype analysis
-            is_corner = bool(self.RE_CORNER.search(desc))
-            is_middle = bool(self.RE_MIDDLE.search(desc))
+            is_detached = getattr(listing, "building_type", None) == BuildingType.WOLNOSTOJACY
+            is_corner = not is_detached and bool(self.RE_CORNER.search(desc))
+            is_middle = not is_detached and bool(self.RE_MIDDLE.search(desc))
 
             if is_corner:
                 detected_subtype = SegmentSubtype.SKRAJNY
@@ -352,6 +394,11 @@ class Stage2SemanticFilter:
                     effective_plot = extracted_plot
                     listing.area_plot = extracted_plot
                     pros.append(f"Wykryto metraż działki z opisu: ok. {effective_plot:.0f} m²")
+                    max_plot = getattr(profile, "max_area_plot", None) if profile else None
+                    if max_plot and extracted_plot > max_plot:
+                        rejection_reasons.append(
+                            f"Działka z opisu {extracted_plot:.0f} m² większa niż dopuszczalne max. {max_plot} m²"
+                        )
                 else:
                     cons.append("Brak jednoznacznej informacji o powierzchni działki w ogłoszeniu")
 
@@ -367,7 +414,7 @@ class Stage2SemanticFilter:
                 )
 
             # 2. Road access check
-            bad_road_match = self.RE_BAD_ROAD.search(desc)
+            bad_road_match = self._first(self.RE_BAD_ROAD, desc)
             if bad_road_match or listing.access_road_type == RoadType.POLNA:
                 found_str = bad_road_match.group(0) if bad_road_match else "droga polna"
                 rejection_reasons.append(f"Nieodpowiedni standard dojazdu: wykryto '{found_str}'")
@@ -378,8 +425,8 @@ class Stage2SemanticFilter:
                 pros.append("Dojazd drogą utwardzoną")
 
             # 3. Parking & Garage check
-            has_garage = bool(self.RE_GARAGE.search(desc))
-            has_2_spaces = bool(self.RE_PARKING.search(desc))
+            has_garage = self._has(self.RE_GARAGE, desc)
+            has_2_spaces = self._has(self.RE_PARKING, desc)
             has_parking_or_garage = has_garage or has_2_spaces
 
             if has_garage and has_2_spaces:
@@ -392,13 +439,14 @@ class Stage2SemanticFilter:
                 cons.append("Brak bezpośredniej wzmianki o garażu lub min. 2 miejscach postojowych")
 
             # 4. Terrain slope & soil check
-            terrain_match = self.RE_TERRAIN_SLOPE_CLAY.search(desc)
-            if terrain_match:
-                term = terrain_match.group(0)
-                if any(k in term.lower() for k in ["osuwisk", "stromej skarp"]):
-                    rejection_reasons.append(f"Zagrożenie geologiczne terenu: '{term}'")
-                else:
-                    cons.append(f"Weryfikacja ukształtowania terenu: wzmianka o '{term}'")
+            terrain_matches = [
+                m for m in self.RE_TERRAIN_SLOPE_CLAY.finditer(desc) if not self._is_negated(desc, m.start())
+            ]
+            hazard = next((m for m in terrain_matches if self.RE_TERRAIN_HAZARD.search(m.group(0))), None)
+            if hazard:
+                rejection_reasons.append(f"Zagrożenie geologiczne terenu: '{hazard.group(0)}'")
+            elif terrain_matches:
+                cons.append(f"Weryfikacja ukształtowania terenu: wzmianka o '{terrain_matches[0].group(0)}'")
 
         # Additional equipment & quality features
         if re.search(r"(fotowoltaik|panele\s+pv)", desc_lower):
@@ -419,7 +467,7 @@ class Stage2SemanticFilter:
 
         # Check gallery image URLs for visualization clues
         if not has_visualisations and getattr(listing, "gallery_images", None):
-            render_url_indicators = ("render", "wizualizac", "visualis", "koncepcj", "rzut", "projekt-3d")
+            render_url_indicators = ("render", "wizualizac", "visualis", "koncepcj", "projekt-3d")
             for u in listing.gallery_images:
                 if any(ind in u.lower() for ind in render_url_indicators):
                     has_visualisations = True
@@ -428,8 +476,8 @@ class Stage2SemanticFilter:
         # Correlation check: Primary market + under construction / future delivery -> visualisations
         is_primary = getattr(listing, "market", None) == MarketType.PIERWOTNY
         year_built = getattr(listing, "year_built", None)
-        is_future_or_current = year_built is not None and year_built >= 2025
-        has_construction_marker = bool(self.RE_FINISH_UNDER_CONSTRUCTION.search(desc))
+        is_future_or_current = year_built is not None and year_built >= datetime.now().year
+        has_construction_marker = self._is_under_construction(desc)
         if (
             is_primary
             and (is_future_or_current or has_construction_marker)

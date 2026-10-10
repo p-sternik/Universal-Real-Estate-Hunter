@@ -38,7 +38,7 @@ services:
       db:
         condition: service_healthy
     ports:
-      - "8080:8080"
+      - "${DASHBOARD_BIND_ADDRESS:-127.0.0.1}:8080:8080"
     environment:
       - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-estate}:${POSTGRES_PASSWORD:-estate_hunter_secret_pass}@db:5432/${POSTGRES_DB:-estate_hunter}
       - SEARCH_CONFIG_PATH=/app/data/search_config.json

@@ -1,5 +1,6 @@
 import re
 import time
+from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -65,11 +66,45 @@ class QualificationEngine:
         # Reason the LLM was skipped for the most recently evaluated listing:
         # None (ran or skipped via caller cache) | "provider_error".
         # No per-cycle budget: every listing that passes Stage I+II is analyzed.
-        self.last_skip_reason: str | None = None
+        self._call_metadata: ContextVar[dict[str, Any]] = ContextVar("qualification_metadata")
+        self._call_metadata.set({})
+        self.last_skip_reason = None
         # Metadata of the last successful LLM call (model/prompt version/raw JSON).
-        self.last_llm_model: str | None = None
-        self.last_llm_prompt_version: str | None = None
-        self.last_llm_json: dict[str, Any] | None = None
+        self.last_llm_model = None
+        self.last_llm_prompt_version = None
+        self.last_llm_json = None
+
+    @property
+    def last_skip_reason(self) -> str | None:
+        return self._call_metadata.get({}).get("last_skip_reason")
+
+    @last_skip_reason.setter
+    def last_skip_reason(self, value: str | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_skip_reason": value})
+
+    @property
+    def last_llm_model(self) -> str | None:
+        return self._call_metadata.get({}).get("last_llm_model")
+
+    @last_llm_model.setter
+    def last_llm_model(self, value: str | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_llm_model": value})
+
+    @property
+    def last_llm_prompt_version(self) -> str | None:
+        return self._call_metadata.get({}).get("last_llm_prompt_version")
+
+    @last_llm_prompt_version.setter
+    def last_llm_prompt_version(self, value: str | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_llm_prompt_version": value})
+
+    @property
+    def last_llm_json(self) -> dict[str, Any] | None:
+        return self._call_metadata.get({}).get("last_llm_json")
+
+    @last_llm_json.setter
+    def last_llm_json(self, value: dict[str, Any] | None) -> None:
+        self._call_metadata.set({**self._call_metadata.get({}), "last_llm_json": value})
 
     def reset_llm_counters(self) -> None:
         self.llm_calls = 0
@@ -310,9 +345,7 @@ class QualificationEngine:
                 pros.append(f"🟢 Płaski, bezpieczny teren (spadek {listing.terrain_slope_pct:.1f}%)")
 
         # High Voltage Power lines
-        if listing.power_lines_risk and any(
-            k in listing.power_lines_risk.upper() for k in ("LINIA", "400KV", "220KV", "110KV", "WN")
-        ):
+        if listing.power_lines_risk and re.search(r"LINIA|400KV|220KV|110KV|\bWN\b", listing.power_lines_risk.upper()):
             cons.append(
                 f"⚡ Sąsiedztwo napowietrznej linii wysokiego napięcia ({listing.power_lines_risk}): "
                 "Pas technologiczny, pole elektromagnetyczne i obniżona wartość rynkowa"
@@ -338,7 +371,9 @@ class QualificationEngine:
             or (listing.air_smog_days is not None and listing.air_smog_days >= 35)
         ):
             avg_str = (
-                f"średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³" if listing.air_pm25_heating_avg else ""
+                f"średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³"
+                if listing.air_pm25_heating_avg is not None
+                else ""
             )
             days_str = f", {listing.air_smog_days} dni smogowych w roku" if listing.air_smog_days else ""
             cons.append(
@@ -350,7 +385,9 @@ class QualificationEngine:
             listing.air_pm25_heating_avg is not None and listing.air_pm25_heating_avg >= 25.0
         ):
             avg_str = (
-                f"średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³" if listing.air_pm25_heating_avg else ""
+                f"średnia zima PM2.5: {listing.air_pm25_heating_avg:.1f} µg/m³"
+                if listing.air_pm25_heating_avg is not None
+                else ""
             )
             cons.append(
                 f"⚠️ Podwyższone stężenie pyłów w sezonie grzewczym ({avg_str}): "
@@ -393,7 +430,7 @@ class QualificationEngine:
                         )
                     ):
                         cons.append(f"⚠️ Geoportal: {r}")
-                if any("Ba" in r or "Bi" in r or "Tk" in r for r in risks):
+                if any(re.search(r"\((?:Ba|Bi|Tk)\)", r) for r in risks):
                     score -= 25.0
 
             p_num = geo_audit.get("main_parcel_number")
@@ -420,8 +457,9 @@ class QualificationEngine:
             )
             score -= 10.0
         vision_discrepancy = getattr(listing, "vision_discrepancy_note", None)
-        if vision_discrepancy and vision_discrepancy not in cons:
-            cons.append(f"🔍 [Vision AI] {vision_discrepancy}")
+        vision_con = f"🔍 [Vision AI] {vision_discrepancy}" if vision_discrepancy else None
+        if vision_con and vision_con not in cons:
+            cons.append(vision_con)
             score -= 15.0
         for defect in list(getattr(listing, "vision_defects", None) or [])[:3]:
             cons.append(f"🔧 [Vision AI] Wada wizualna: {defect}")
@@ -462,6 +500,23 @@ class QualificationEngine:
 
         return score, pros, cons
 
+    def precheck_stage2(self, listing: ListingSchema, profile: Any | None = None) -> bool:
+        """Return True when Stage 2 hard-rejects the listing (so costly audits can be skipped)."""
+        p = profile
+        if not p and getattr(listing, "profile_name", None):
+            from src.services.config_manager import config_manager
+
+            p = config_manager.get_profile(listing.profile_name)
+        res2 = self.stage2.analyze(listing.model_copy(deep=True), profile=p)
+        if res2.passed:
+            return False
+        finish_only = (
+            res2.detected_finish == FinishCondition.DO_REMONTU
+            and bool(res2.rejection_reasons)
+            and all(r.startswith("Stan wykończenia") for r in res2.rejection_reasons)
+        )
+        return not finish_only
+
     async def evaluate_listing(
         self,
         listing: ListingSchema,
@@ -469,6 +524,28 @@ class QualificationEngine:
         skip_llm: bool = False,
         geo_audit: dict[str, Any] | None = None,
         market_median_m2: float | None = None,
+        cached_llm_insights: dict[str, Any] | None = None,
+    ) -> FilterResult:
+        # Each task owns its metadata; failures and early rejection cannot reuse
+        # the JSON of a previous listing. Return it with the actual result.
+        self._call_metadata.set({})
+        result = await self._evaluate_listing(
+            listing, profile, skip_llm, geo_audit, market_median_m2, cached_llm_insights
+        )
+        result.llm_json = self.last_llm_json
+        result.llm_model = self.last_llm_model
+        result.llm_prompt_version = self.last_llm_prompt_version
+        result.llm_skip_reason = self.last_skip_reason
+        return result
+
+    async def _evaluate_listing(
+        self,
+        listing: ListingSchema,
+        profile: Any | None = None,
+        skip_llm: bool = False,
+        geo_audit: dict[str, Any] | None = None,
+        market_median_m2: float | None = None,
+        cached_llm_insights: dict[str, Any] | None = None,
     ) -> FilterResult:
         """
         Runs the multi-stage qualification pipeline on a single listing.
@@ -572,34 +649,39 @@ class QualificationEngine:
         contact_phone = None
         contact_person = None
 
-        if not skip_llm:
+        replay_cached = skip_llm and bool(cached_llm_insights)
+        if not skip_llm or replay_cached:
             from src.services.progress import global_tracker
 
-            logger.info(f"🤖 [AI Audit] Weryfikacja LLM dla: '{listing.title[:45]}'")
-            global_tracker.add_log(
-                f"🤖 [AI Audit] Weryfikacja LLM dla: {listing.title[:32]}...",
-                level="info",
-                category="ai",
-            )
             t_llm_start = time.perf_counter()
-            self.llm_calls += 1
-            llm_insights = await self.llm.analyze_description(listing, market_median_m2=market_median_m2)
-            if llm_insights:
-                self.llm_successes += 1
+            llm_insights: dict[str, Any] | None = None
+            if replay_cached:
+                llm_insights = dict(cached_llm_insights or {})
             else:
-                self.llm_failures += 1
-                self.last_skip_reason = "provider_error"
-                logger.warning(
-                    f"🤖 [AI Audit] Provider nie zwrócił analizy dla: '{listing.title[:45]}' "
-                    f"(sprawdź klucz API / Ollama; licznik prób: {self.llm_calls})"
+                logger.info(f"🤖 [AI Audit] Weryfikacja LLM dla: '{listing.title[:45]}'")
+                global_tracker.add_log(
+                    f"🤖 [AI Audit] Weryfikacja LLM dla: {listing.title[:32]}...",
+                    level="info",
+                    category="ai",
                 )
-            if llm_insights:
-                llm_meta = getattr(self.llm, "last_model", None)
-                llm_pv = getattr(self.llm, "last_prompt_version", None)
-                llm_raw = getattr(self.llm, "last_result_json", None)
-                self.last_llm_model = str(llm_meta) if llm_meta else None
-                self.last_llm_prompt_version = str(llm_pv) if llm_pv else None
-                self.last_llm_json = dict(llm_raw) if isinstance(llm_raw, dict) else dict(llm_insights)
+                self.llm_calls += 1
+                llm_insights = await self.llm.analyze_description(listing, market_median_m2=market_median_m2)
+                if llm_insights:
+                    self.llm_successes += 1
+                else:
+                    self.llm_failures += 1
+                    self.last_skip_reason = "provider_error"
+                    logger.warning(
+                        f"🤖 [AI Audit] Provider nie zwrócił analizy dla: '{listing.title[:45]}' "
+                        f"(sprawdź klucz API / Ollama; licznik prób: {self.llm_calls})"
+                    )
+                if llm_insights:
+                    llm_meta = getattr(self.llm, "last_model", None)
+                    llm_pv = getattr(self.llm, "last_prompt_version", None)
+                    llm_raw = getattr(self.llm, "last_result_json", None)
+                    self.last_llm_model = str(llm_meta) if llm_meta else None
+                    self.last_llm_prompt_version = str(llm_pv) if llm_pv else None
+                    self.last_llm_json = dict(llm_raw) if isinstance(llm_raw, dict) else dict(llm_insights)
             t_llm_sec = time.perf_counter() - t_llm_start
             if llm_insights:
                 v_tag = (
@@ -607,12 +689,15 @@ class QualificationEngine:
                     if llm_insights.get("worth_interest") is True
                     else ("nie warty" if llm_insights.get("worth_interest") is False else "zakończono")
                 )
-                logger.info(f"🤖 [AI Audit] Gotowe dla: '{listing.title[:45]}' ({t_llm_sec:.1f}s, werdykt: {v_tag})")
-                global_tracker.add_log(
-                    f"🤖 [AI Audit] Gotowe dla {listing.title[:28]} ({t_llm_sec:.1f}s, werdykt: {v_tag})",
-                    level="info",
-                    category="ai",
-                )
+                if not replay_cached:
+                    logger.info(
+                        f"🤖 [AI Audit] Gotowe dla: '{listing.title[:45]}' ({t_llm_sec:.1f}s, werdykt: {v_tag})"
+                    )
+                    global_tracker.add_log(
+                        f"🤖 [AI Audit] Gotowe dla {listing.title[:28]} ({t_llm_sec:.1f}s, werdykt: {v_tag})",
+                        level="info",
+                        category="ai",
+                    )
                 if llm_insights.get("is_corner") is True:
                     is_corner = True
                     listing.segment_subtype = SegmentSubtype.SKRAJNY
@@ -627,7 +712,9 @@ class QualificationEngine:
                     cons.append("⚠️ [LLM] Wykryto ryzyko ukształtowania terenu (skarpa / osuwisko / podmokłość)")
                 if llm_insights.get("extracted_plot_m2") and not listing.area_plot:
                     try:
-                        listing.area_plot = float(llm_insights["extracted_plot_m2"])
+                        listing.area_plot = (
+                            float(p) if 0 < (p := float(llm_insights["extracted_plot_m2"])) <= 100_000 else None
+                        )
                     except (ValueError, TypeError):
                         pass
 
@@ -642,6 +729,16 @@ class QualificationEngine:
                 }
                 if finish_raw in finish_map:
                     new_condition = finish_map[finish_raw]
+                    if (
+                        listing.finish_condition != FinishCondition.NIEOKRESLONY
+                        and listing.finish_condition != new_condition
+                    ):
+                        conflict = (
+                            f"Skorygowano stan wykończenia: portal podaje '{listing.finish_condition.value}', "
+                            f"ale analiza LLM wykazuje stan '{new_condition.value}'"
+                        )
+                        if conflict not in listing.discrepancies:
+                            listing.discrepancies.append(conflict)
                     if (
                         new_condition == FinishCondition.DO_ZAMIESZKANIA
                         and listing.finish_condition != FinishCondition.DO_ZAMIESZKANIA
@@ -688,12 +785,12 @@ class QualificationEngine:
                     if discrepancy and discrepancy not in listing.discrepancies:
                         listing.discrepancies.append(discrepancy)
                     cons.append(f"🔍 [LLM] Rozbieżność portal vs opis: {d}")
-                for p in llm_insights.get("pros", []):
-                    if p not in pros:
-                        pros.append(f"[LLM] {p}")
-                for c in llm_insights.get("cons", []):
-                    if c not in cons:
-                        cons.append(f"[LLM] {c}")
+                for llm_pro in llm_insights.get("pros", []):
+                    if f"[LLM] {llm_pro}" not in pros and llm_pro not in pros:
+                        pros.append(f"[LLM] {llm_pro}")
+                for llm_con in llm_insights.get("cons", []):
+                    if f"[LLM] {llm_con}" not in cons and llm_con not in cons:
+                        cons.append(f"[LLM] {llm_con}")
 
                 # AI Due Diligence fields
                 ai_summary = llm_insights.get("summary") or None
@@ -736,7 +833,7 @@ class QualificationEngine:
         # Fallback: regex extraction for Polish phone numbers if LLM didn't find one
         if not contact_phone and listing.raw_description:
             phone_match = re.search(
-                r"(?:\+?48[\s-]?)?([5-8]\d{2})[\s-]?(\d{3})[\s-]?(\d{3})",
+                r"(?<![\d.,])(?:\+?48[\s-]?)?([5-8]\d{2})[\s-]?(\d{3})[\s-]?(\d{3})(?![\d.,]?\d)",
                 listing.raw_description,
             )
             if phone_match:
@@ -886,22 +983,19 @@ class QualificationEngine:
 
         score = min(100.0, max(0.0, score))
 
+        plot_required = listing.category != PropertyCategory.MIESZKANIE
         if matched_wl:
             status = QualificationStatus.QUALIFIED_WHITELIST
-        elif (
-            listing.area_plot is None
-            or listing.area_plot == 0
-            or (
-                listing.finish_condition == FinishCondition.NIEOKRESLONY
-                and listing.sewerage == SewerageType.NIEZNANA
-                and listing.heating == HeatingType.NIEZNANE
-            )
+        elif (plot_required and not listing.area_plot) or (
+            listing.finish_condition == FinishCondition.NIEOKRESLONY
+            and listing.sewerage == SewerageType.NIEZNANA
+            and listing.heating == HeatingType.NIEZNANE
         ):
             status = QualificationStatus.NEEDS_REVIEW
         else:
             status = QualificationStatus.QUALIFIED
 
-        return self._build_filter_result(
+        result = self._build_filter_result(
             listing,
             is_qualified=True,
             status=status,
@@ -925,6 +1019,8 @@ class QualificationEngine:
             documents_to_obtain=documents_to_obtain,
             structured_risks=structured_risks,
         )
+        result.spatial_applied = True
+        return result
 
 
 __all__ = [

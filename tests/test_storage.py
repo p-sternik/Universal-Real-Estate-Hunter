@@ -109,6 +109,7 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 area_home=100,
                 raw_description="pełny opis",
                 last_scraped_at=now,
+                detail_fetched_at=now,
             ),
             ListingModel(
                 portal="Otodom",
@@ -119,7 +120,8 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 price_per_m2=1,
                 area_home=100,
                 raw_description="pełny opis",
-                last_scraped_at=now - timedelta(hours=48),
+                last_scraped_at=now,
+                detail_fetched_at=now - timedelta(hours=48),
             ),
             ListingModel(
                 portal="OLX",
@@ -131,6 +133,7 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 area_home=100,
                 raw_description="pełny opis",
                 last_scraped_at=now,
+                detail_fetched_at=now,
             ),
             ListingModel(
                 portal="Otodom",
@@ -142,6 +145,7 @@ async def test_get_fresh_urls(async_session: AsyncSession):
                 area_home=100,
                 raw_description="",
                 last_scraped_at=now,
+                detail_fetched_at=now,
             ),
         ]
     )

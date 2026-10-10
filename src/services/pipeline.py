@@ -1,6 +1,7 @@
 import asyncio
 import time
-from datetime import UTC, datetime
+from copy import copy
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -26,16 +27,31 @@ from src.services.telegram_notifier import TelegramNotifier
 from src.storage import ListingModel, ListingRepository, get_session, init_db, safe_commit
 
 
+def _is_price_drop(previous_price: float | None, new_price: float | None) -> bool:
+    """True when the price fell by at least 1 PLN compared with the stored one."""
+    if not previous_price or not new_price:
+        return False
+    return new_price <= previous_price - 1.0
+
+
 def _should_notify(
     *,
     is_qualified: bool,
     is_new: bool,
     price_changed: bool,
     score: float = 0.0,
+    pending: bool = False,
 ) -> bool:
+    """Decide whether to alert about a qualified listing.
+
+    `price_changed` must mean a real price *drop*. `pending` marks a listing that was
+    never notified; it is then treated like a new qualified offer so alerts suppressed
+    earlier (quiet hours, score threshold, delivery failure) are retried.
+    """
     if not is_qualified:
         return False
-    if not (is_new or price_changed):
+    effective_new = is_new or (pending and not price_changed)
+    if not (effective_new or price_changed):
         return False
 
     try:
@@ -50,9 +66,9 @@ def _should_notify(
                 return False
             if score < notif.min_score_threshold:
                 return False
-            if is_new and not notif.notify_on_new_qualified:
+            if effective_new and not notif.notify_on_new_qualified:
                 return False
-            if price_changed and not is_new and not notif.notify_on_price_drop:
+            if price_changed and not effective_new and not notif.notify_on_price_drop:
                 return False
     except Exception as e:
         logger.debug(f"[Pipeline] Error checking notification settings: {e}")
@@ -94,6 +110,8 @@ async def audit_and_apply_spatial_data(target: Any, client: httpx.AsyncClient | 
     from src.services.developer_verifier import developer_verifier
     from src.services.geoportal import geoportal_service
     from src.services.gunb import gunb_service
+
+    target.spatial_audited_at = datetime.now(UTC)
 
     category = getattr(target, "category", "dom")
     if hasattr(category, "value"):
@@ -397,21 +415,23 @@ class ScraperPipeline:
 
         # 1. Look up existing record in database
         existing_model = await repo.get_by_url(listing.url) or await repo.get_by_portal_id(listing.portal, listing.id)
+        previous_price: float | None = (
+            float(existing_model.price) if existing_model is not None and existing_model.price else None
+        )
 
         # 1.1 Compute physical fingerprint & check duplicate / re-listing
-        if not listing.physical_fingerprint:
-            listing.physical_fingerprint = generate_physical_fingerprint(
-                area_home=listing.area_home,
-                area_plot=listing.area_plot,
-                rooms=listing.rooms,
-                street=listing.street,
-                district=listing.district,
-                city=listing.city,
-                location_raw=listing.location_raw,
-                title=listing.title,
-                category=listing.category,
-            )
-
+        listing.physical_fingerprint = generate_physical_fingerprint(
+            area_home=listing.area_home,
+            area_plot=listing.area_plot,
+            rooms=listing.rooms,
+            street=listing.street,
+            district=listing.district,
+            city=listing.city,
+            location_raw=listing.location_raw,
+            title=listing.title,
+            category=listing.category,
+            require_precise=True,
+        )
         if listing.physical_fingerprint and not existing_model:
             relist_model = await repo.find_relist_by_physical_fingerprint(
                 listing.physical_fingerprint,
@@ -422,6 +442,7 @@ class ScraperPipeline:
                 listing.initial_price = relist_model.initial_price or relist_model.price
                 listing.relist_count = (relist_model.relist_count or 0) + 1
                 listing.listing_status = "RELISTED"
+                result["relisted"] = True
                 logger.info(
                     f"[Pipeline] 🔁 Wykryto re-listing dla '{listing.title[:40]}' "
                     f"(pierwotnie ID #{relist_model.id} z {relist_model.portal}, "
@@ -439,7 +460,7 @@ class ScraperPipeline:
             restore_cached_details(listing, existing_model)
 
         # 1.5. Stage 1 pre-check & Geoportal spatial audit before LLM
-        is_exact_coords = True
+        is_exact_coords = listing.is_exact_coords
         try:
             s1_res = self.engine.precheck_stage1(listing, profile=profile)
             stage1_passed = bool(s1_res[0])
@@ -447,8 +468,18 @@ class ScraperPipeline:
             logger.debug(f"[Pipeline] Stage 1 pre-check error: {e}")
             stage1_passed = True
 
-        geo_audit = None
+        stage2_rejected = False
         if stage1_passed:
+            try:
+                precheck_stage2 = getattr(self.engine, "precheck_stage2", None)
+                if callable(precheck_stage2):
+                    res2_chk = precheck_stage2(listing, profile=profile)
+                    stage2_rejected = (await res2_chk if asyncio.iscoroutine(res2_chk) else res2_chk) is True
+            except Exception as e:
+                logger.debug(f"[Pipeline] Stage 2 pre-check error: {e}")
+
+        geo_audit = None
+        if stage1_passed and not stage2_rejected:
             # Resolve coordinates if missing (skip if already resolved in existing_model)
             if not listing.coordinates:
                 from src.services.geocoder import geocoder
@@ -469,7 +500,11 @@ class ScraperPipeline:
                         level="info",
                         category="geo",
                     )
-            elif existing_model and existing_model.is_exact_coords is not None:
+            elif (
+                existing_model
+                and existing_model.is_exact_coords is not None
+                and listing.coordinates == (existing_model.latitude, existing_model.longitude)
+            ):
                 is_exact_coords = bool(existing_model.is_exact_coords)
 
             # Audit location in Geoportal if coords are exact and spatial metrics missing
@@ -488,7 +523,13 @@ class ScraperPipeline:
                     and getattr(listing, "vision_finish_condition", None) is None
                 )
             )
-            if listing.coordinates and is_exact_coords and needs_spatial_audit:
+            audited_at = listing.spatial_audited_at or (
+                getattr(existing_model, "spatial_audited_at", None) if existing_model else None
+            )
+            if audited_at and audited_at.tzinfo is None:
+                audited_at = audited_at.replace(tzinfo=UTC)
+            audit_due = audited_at is None or audited_at < datetime.now(UTC) - timedelta(days=1)
+            if listing.coordinates and is_exact_coords and needs_spatial_audit and audit_due:
                 try:
                     geo_audit = await audit_and_apply_spatial_data(listing, client=client)
                     if geo_audit:
@@ -549,24 +590,31 @@ class ScraperPipeline:
                 getattr(listing.category, "value", listing.category),
                 override_medians=market_medians,
             )
+        cached_raw = (
+            getattr(existing_model, "llm_json_data", None)
+            if skip_llm and self.llm_analysis_enabled and existing_model is not None
+            else None
+        )
+        cached_llm_insights = cached_raw if isinstance(cached_raw, dict) else None
         filter_result = await self.engine.evaluate_listing(
             listing,
             profile=profile,
             skip_llm=skip_llm,
             geo_audit=geo_audit,
             market_median_m2=local_median,
+            cached_llm_insights=cached_llm_insights,
         )
         # The engine may fail to get an answer from the provider — propagate that
         # so cycle summaries stay honest.
-        engine_skip_reason = getattr(self.engine, "last_skip_reason", None)
+        engine_skip_reason = filter_result.llm_skip_reason
         if engine_skip_reason == "provider_error":
             result["llm_skipped"] = True
             result["llm_skip_reason"] = engine_skip_reason
-        last_json = getattr(self.engine, "last_llm_json", None)
+        last_json = filter_result.llm_json
         estimate_fn = getattr(self.engine, "estimate_tokens", None)
         if not skip_llm and isinstance(last_json, dict):
-            result["llm_model"] = getattr(self.engine, "last_llm_model", None)
-            result["llm_prompt_version"] = getattr(self.engine, "last_llm_prompt_version", None)
+            result["llm_model"] = filter_result.llm_model
+            result["llm_prompt_version"] = filter_result.llm_prompt_version
             result["llm_json"] = last_json
             result["desc_hash"] = current_desc_hash
             if callable(estimate_fn):
@@ -599,9 +647,13 @@ class ScraperPipeline:
             if filter_result.worth_interest is None and getattr(existing_model, "worth_interest", None) is not None:
                 filter_result.worth_interest = existing_model.worth_interest
 
-        # Apply spatial findings if not already reflected on qualified result
-        # (e.g. when engine is mocked in tests or evaluate_listing was bypassed)
-        if filter_result.is_qualified and not filter_result.mpzp_zone and (geo_audit or listing.mpzp_zone):
+        # Apply spatial findings only if the engine did not already reflect them
+        # (e.g. when engine is mocked in tests or evaluate_listing was bypassed).
+        if (
+            filter_result.is_qualified
+            and not getattr(filter_result, "spatial_applied", False)
+            and (geo_audit or listing.mpzp_zone)
+        ):
             new_score, new_pros, new_cons = self.engine.apply_spatial_findings(
                 listing=listing,
                 score=filter_result.score,
@@ -612,6 +664,7 @@ class ScraperPipeline:
             filter_result.score = min(100.0, max(0.0, new_score))
             filter_result.pros = new_pros
             filter_result.cons = new_cons
+            filter_result.spatial_applied = True
             copy_spatial_fields(filter_result, listing)
             filter_result.mpzp_zone = listing.mpzp_zone
             filter_result.flood_risk_zone = listing.flood_risk_zone
@@ -659,6 +712,7 @@ class ScraperPipeline:
                 "filter_result": filter_result,
                 "is_exact_coords": is_exact_coords,
                 "llm": llm_bundle,
+                "previous_price": previous_price,
             }
             return result
 
@@ -668,15 +722,17 @@ class ScraperPipeline:
         result["is_new"] = is_new
         result["price_changed"] = price_changed
 
-        # 5. Dispatch notification if qualified and unnotified
+        # 5. Dispatch notification if qualified and unnotified (or on a real price drop)
+        profile_result = await repo.get_profile_result(db_model.id, listing.profile_id)
         should_notify = _should_notify(
             is_qualified=filter_result.is_qualified,
             is_new=is_new,
-            price_changed=price_changed,
+            price_changed=_is_price_drop(previous_price, listing.price),
             score=filter_result.score,
+            pending=profile_result is None or profile_result.notified_at is None,
         )
 
-        if should_notify and db_model.notified_at is None:
+        if should_notify:
             if market_medians is None:
                 market_medians = await repo.get_market_medians()
             valuation_intel = valuation_engine.evaluate(
@@ -693,7 +749,7 @@ class ScraperPipeline:
                 client=client,
             )
             if notified:
-                await repo.mark_as_notified(db_model.id)
+                await repo.mark_as_notified(db_model.id, listing.profile_id)
                 result["notified"] = True
 
         return result
@@ -713,7 +769,7 @@ class ScraperPipeline:
         the batch commit.
         """
         notify_jobs: list[dict[str, Any]] = []
-        async with get_session() as session:
+        async with get_session(write=True) as session:
             repo = ListingRepository(session)
             medians = market_medians if market_medians is not None else await repo.get_market_medians()
             for _item, res in pending:
@@ -722,21 +778,31 @@ class ScraperPipeline:
                     continue
                 listing = bundle["listing"]
                 filt = bundle["filter_result"]
-                db_model, is_new, price_changed = await repo.save_or_update(
-                    listing,
-                    filt,
-                    is_exact_coords=bundle["is_exact_coords"],
-                    llm_cache=bundle.get("llm"),
-                )
+                try:
+                    async with session.begin_nested():
+                        db_model, is_new, price_changed = await repo.save_or_update(
+                            listing,
+                            filt,
+                            is_exact_coords=bundle["is_exact_coords"],
+                            llm_cache=bundle.get("llm"),
+                        )
+                except Exception as error:
+                    res["qualified"] = False
+                    res["processing_error"] = str(error)
+                    logger.exception("[Pipeline] Failed to persist {}: {}", listing.url, error)
+                    continue
                 res["is_new"] = is_new
                 res["price_changed"] = price_changed
+                price_dropped = _is_price_drop(bundle.get("previous_price"), listing.price)
+                profile_result = await repo.get_profile_result(db_model.id, listing.profile_id)
                 should_notify = _should_notify(
                     is_qualified=filt.is_qualified,
                     is_new=is_new,
-                    price_changed=price_changed,
+                    price_changed=price_dropped,
                     score=filt.score,
+                    pending=profile_result is None or profile_result.notified_at is None,
                 )
-                if should_notify and db_model.notified_at is None:
+                if should_notify:
                     valuation_intel = valuation_engine.evaluate(
                         listing=listing,
                         filter_result=filt,
@@ -751,6 +817,7 @@ class ScraperPipeline:
                             "advice": advice,
                             "webhook_url": getattr(profile, "discord_webhook_url", None),
                             "db_id": db_model.id,
+                            "profile_id": listing.profile_id,
                         }
                     )
         if not notify_jobs:
@@ -761,18 +828,22 @@ class ScraperPipeline:
                     job["listing"], job["filt"], job["advice"], webhook_url=job["webhook_url"], client=client
                 )
                 for job in notify_jobs
-            ]
+            ],
+            return_exceptions=True,
         )
-        marked_ids: list[int] = []
+        marked_ids: list[tuple[int, str | None]] = []
         for job, ok in zip(notify_jobs, sent, strict=True):
+            if isinstance(ok, BaseException):
+                logger.warning("[Pipeline] Notification failed for {}: {}", job["db_id"], ok)
+                continue
             if ok:
                 job["res"]["notified"] = True
-                marked_ids.append(job["db_id"])
+                marked_ids.append((job["db_id"], job["profile_id"]))
         if marked_ids:
-            async with get_session() as session:
+            async with get_session(write=True) as session:
                 repo = ListingRepository(session)
-                for listing_id in marked_ids:
-                    await repo.mark_as_notified(listing_id)
+                for listing_id, profile_id in marked_ids:
+                    await repo.mark_as_notified(listing_id, profile_id)
 
     async def _send_listing_notifications(
         self,
@@ -799,17 +870,22 @@ class ScraperPipeline:
         except Exception:
             pass
 
-        discord_ok = False
-        telegram_ok = False
+        jobs = []
         if send_discord:
-            discord_ok = await self.discord.send_notification(
-                listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice, client=client
+            jobs.append(
+                self.discord.send_notification(
+                    listing, filter_result, webhook_url=webhook_url, negotiation_advice=advice, client=client
+                )
             )
         if send_telegram:
-            telegram_ok = await self.telegram.send_notification(
-                listing, filter_result, negotiation_advice=advice, client=client
+            jobs.append(
+                self.telegram.send_notification(listing, filter_result, negotiation_advice=advice, client=client)
             )
-        return bool(discord_ok or telegram_ok)
+        results = await asyncio.gather(*jobs, return_exceptions=True)
+        for result in results:
+            if isinstance(result, BaseException):
+                logger.warning("[Pipeline] Notification channel failed: {}", result)
+        return any(not isinstance(result, BaseException) and bool(result) for result in results)
 
     async def run_cycle(self, target_profile: str | None = None) -> dict:
         """Run a complete scraping and processing cycle across active profiles with inter-process lock protection."""
@@ -901,12 +977,15 @@ class ScraperPipeline:
         total_notified = 0
         total_llm_skipped = 0
         total_llm_failed = 0
+        total_processing_errors = 0
 
+        delist_profile_ids: list[str] | None = None
         if self._custom_scrapers:
             execution_plan: list[tuple[SearchProfile | None, list[BaseScraper]]] = [(None, self.scrapers)]
             fresh_urls: set = set()
         else:
             profiles = cfg.get_active_profiles(target_profile)
+            delist_profile_ids = [p.id for p in profiles]
             if not profiles:
                 logger.warning("[Pipeline] No active search profiles found to scrape.")
                 return {
@@ -955,6 +1034,14 @@ class ScraperPipeline:
                             max_pages=cfg.scrapers.morizon.max_pages, profile=prof, skip_detail_urls=fresh_urls
                         )
                     )
+                portal_settings = {
+                    OtodomScraper: cfg.scrapers.otodom,
+                    OLXScraper: cfg.scrapers.olx,
+                    NieruchomosciOnlineScraper: cfg.scrapers.nieruchomosci_online,
+                    MorizonScraper: cfg.scrapers.morizon,
+                }
+                for scraper in scs:
+                    scraper.request_delay_seconds = portal_settings[type(scraper)].delay_seconds
                 execution_plan.append((prof, scs))
 
         flat_scrapers = []
@@ -1065,16 +1152,21 @@ class ScraperPipeline:
                     async with sem:
                         if global_tracker.is_cancelled():
                             return item, cancel_res
-                        async with get_session() as session:
-                            repo = ListingRepository(session)
-                            res = await self.process_listing(
-                                item,
-                                repo,
-                                profile=prof,
-                                market_medians=medians,
-                                defer_save=True,
-                                client=http_client,
-                            )
+                        try:
+                            async with get_session() as session:
+                                repo = ListingRepository(session)
+                                res = await self.process_listing(
+                                    item,
+                                    repo,
+                                    profile=prof,
+                                    market_medians=medians,
+                                    defer_save=True,
+                                    client=http_client,
+                                )
+                        except Exception as error:
+                            logger.exception("[Pipeline] Failed to process {}: {}", item.url, error)
+                            global_tracker.add_log(f"Błąd analizy {item.title[:40]}: {error}", level="error")
+                            return item, {**cancel_res, "processing_error": str(error)}
                         processed += 1
                         if processed % 5 == 0 or processed == total_listings:
                             global_tracker.set_processing_fraction(_step_idx, _total_steps, processed, total_listings)
@@ -1086,13 +1178,14 @@ class ScraperPipeline:
                         break
                     batch = listings[start : start + concurrency]
                     batch_results = await asyncio.gather(*(safe_process(item) for item in batch))
+                    await self._persist_batch(list(batch_results), prof, cycle_medians, client=http_client)
                     results.extend(batch_results)
 
-                # Bound task creation while retaining a single commit per profile batch.
-                # Per-item sessions above are effectively read-only + geocoder cache.
-                await self._persist_batch(list(results), prof, cycle_medians, client=http_client)
+                # Each bounded batch is durable before the next one starts.
+                # Per-item sessions above are read-only apart from separate cache writes.
 
                 for _item, res in results:
+                    total_processing_errors += int(bool(res.get("processing_error")))
                     if res["is_new"]:
                         total_new += 1
                     if res["price_changed"]:
@@ -1105,11 +1198,14 @@ class ScraperPipeline:
                         total_llm_skipped += 1
                         if res.get("llm_skip_reason") == "provider_error":
                             total_llm_failed += 1
+                    is_duplicate = bool(res.get("relisted"))
+                    if is_duplicate:
+                        total_duplicates += 1
 
                     global_tracker.record_items(
-                        count=1,
+                        count=0,
                         qualified=1 if res["qualified"] and res["is_new"] else 0,
-                        duplicates=0,
+                        duplicates=1 if is_duplicate else 0,
                     )
 
                 global_tracker.set_processing_fraction(step_idx, total_steps, 1, 1)
@@ -1130,18 +1226,18 @@ class ScraperPipeline:
         # Passive delisting sweep: mark listings not seen on portals for > 7 days as DELISTED
         if not global_tracker.is_cancelled():
             try:
-                async with get_session() as session:
+                async with get_session(write=True) as session:
                     delist_repo = ListingRepository(session)
                     delisted_cnt = await delist_repo.mark_passive_delisted(
                         inactive_days=7,
-                        profile_id=target_profile,
+                        profile_id=delist_profile_ids,
                     )
                     if delisted_cnt > 0:
                         logger.info(
-                            f"[Pipeline] Pasywnie oznaczono {delisted_cnt} ofert jako wycofane/zakończone (brak na portalu >7 dni)."
+                            f"[Pipeline] Oznaczono {delisted_cnt} ofert jako dawno niewidziane (brak na portalu >7 dni)."
                         )
                         global_tracker.add_log(
-                            f"📉 [Płynność] Oznaczono {delisted_cnt} nieaktywnych ofert jako wycofane/sprzedane",
+                            f"📉 [Płynność] Oznaczono {delisted_cnt} nieaktywnych ofert jako dawno niewidziane",
                             level="info",
                             category="info",
                         )
@@ -1169,6 +1265,7 @@ class ScraperPipeline:
             "llm_skipped": total_llm_skipped,
             "llm_failed": total_llm_failed,
             "llm_enabled": self.llm_analysis_enabled,
+            "processing_errors": total_processing_errors,
             "cancelled": global_tracker.is_cancelled(),
         }
 
@@ -1275,6 +1372,10 @@ class ScraperPipeline:
                 ListingModel.longitude.isnot(None),
                 ListingModel.is_exact_coords.is_(True),
                 (
+                    ListingModel.spatial_audited_at.is_(None)
+                    | (ListingModel.spatial_audited_at < datetime.now(UTC) - timedelta(days=1))
+                ),
+                (
                     ListingModel.broadband_status.is_(None)
                     | ListingModel.parcel_front_width_m.is_(None)
                     | ListingModel.terrain_slope_pct.is_(None)
@@ -1293,6 +1394,7 @@ class ScraperPipeline:
                     )
                 ),
             )
+            .order_by(ListingModel.spatial_audited_at.asc().nullsfirst(), ListingModel.id)
             .limit(limit)
         )
         res = await session.execute(stmt)
@@ -1313,18 +1415,67 @@ class ScraperPipeline:
             global_tracker._sync_shared_status()
 
             try:
+                previous = copy(item)
+                old_delta, old_pros, old_cons = self.engine.apply_spatial_findings(
+                    listing=previous, score=0.0, pros=[], cons=[], geo_audit={}
+                )
                 geo_audit = await audit_and_apply_spatial_data(item, client=client) or {}
 
-                score, item.pros, item.cons = self.engine.apply_spatial_findings(
+                # Compute spatial findings in isolation (from a zero base), then merge them
+                # into the stored result only once. Re-applying them to an already-adjusted
+                # score on every cycle would stack penalties.
+                delta, fresh_pros, fresh_cons = self.engine.apply_spatial_findings(
                     listing=item,
-                    score=float(item.qualification_score or 50.0),
-                    pros=list(item.pros or []),
-                    cons=list(item.cons or []),
+                    score=0.0,
+                    pros=[],
+                    cons=[],
                     geo_audit=geo_audit,
                 )
+                stored_pros = list(item.pros or [])
+                stored_cons = list(item.cons or [])
+                had_old = (
+                    bool(old_pros or old_cons)
+                    and all(p in stored_pros for p in old_pros)
+                    and all(c in stored_cons for c in old_cons)
+                )
+                item.pros = list(dict.fromkeys([p for p in stored_pros if p not in old_pros] + fresh_pros))
+                item.cons = list(dict.fromkeys([c for c in stored_cons if c not in old_cons] + fresh_cons))
                 if item.qualification_score is not None:
-                    item.qualification_score = min(100.0, max(0.0, score))
+                    item.qualification_score = min(
+                        100.0, max(0.0, float(item.qualification_score) - (old_delta if had_old else 0) + delta)
+                    )
+                # Apply the same evidence delta to every independent profile result.
+                from src.storage.models import ListingProfileModel
 
+                profile_rows = (
+                    (
+                        await session.execute(
+                            select(ListingProfileModel).where(ListingProfileModel.listing_id == item.id)
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
+                import json
+
+                for row in profile_rows:
+                    payload = row.result
+                    old_score = float(payload.get("qualification_score") or 0)
+                    payload_pros, payload_cons = payload.get("pros") or [], payload.get("cons") or []
+                    profile_had_old = (
+                        bool(old_pros or old_cons)
+                        and all(p in payload_pros for p in old_pros)
+                        and all(c in payload_cons for c in old_cons)
+                    )
+                    payload["qualification_score"] = min(
+                        100.0, max(0.0, old_score - (old_delta if profile_had_old else 0) + delta)
+                    )
+                    payload["pros"] = list(dict.fromkeys([p for p in payload_pros if p not in old_pros] + fresh_pros))
+                    payload["cons"] = list(dict.fromkeys([c for c in payload_cons if c not in old_cons] + fresh_cons))
+                    row.result_json = json.dumps(payload, ensure_ascii=False)
+                    row.updated_at = datetime.now(UTC)
+
+                item.spatial_audited_at = datetime.now(UTC)
                 item.updated_at = datetime.now(UTC)
                 updated_count += 1
                 await safe_commit(session)

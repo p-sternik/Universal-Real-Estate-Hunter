@@ -184,7 +184,7 @@ class NominatimGeocoder:
     ) -> None:
         self._mem_cache[query_key] = (lat, lon, display_name)
         try:
-            async with get_session() as write_session:
+            async with get_session(write=True) as write_session:
                 existing = await write_session.get(GeocacheModel, query_key)
                 if existing:
                     existing.latitude = lat
@@ -257,6 +257,24 @@ class NominatimGeocoder:
 
         return None
 
+    @staticmethod
+    def _is_building_match(street: str, city: str, data: dict[str, Any]) -> bool:
+        from src.filters.fingerprint import normalize_text
+
+        number = re.search(r"\b(\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?)\b", street)
+        address = data.get("address") or {}
+        if not number or normalize_text(str(address.get("house_number", ""))) != normalize_text(number[1]):
+            return False
+        returned_city = address.get("city") or address.get("town") or address.get("village")
+        road = address.get("road") or address.get("pedestrian")
+        street_name = re.sub(r"\b\d+[a-zA-Z]?(?:/\d+[a-zA-Z]?)?\b", "", street)
+        return bool(
+            returned_city
+            and normalize_text(str(returned_city)) == normalize_text(city)
+            and road
+            and normalize_text(str(road)) == normalize_text(street_name)
+        )
+
     async def geocode(
         self,
         session: AsyncSession | None = None,
@@ -280,19 +298,20 @@ class NominatimGeocoder:
         if street and city_name:
             clean_street = street.replace("ul.", "").replace("ulica", "").strip()
             query = f"{clean_street}, {city_name}, Polska"
-            query_key = f"street:{query}".lower()
+            query_key = f"street-v2:{query}".lower()
 
             cached = await self.get_cached(session, query_key)
             if cached:
-                return (cached[0], cached[1], True)
+                return (cached[0], cached[1], cached[2].startswith("exact:"))
 
             data = await self._rate_limited_query(query)
             if data:
                 lat = float(data["lat"])
                 lon = float(data["lon"])
                 display = data.get("display_name", "")
-                await self.set_cache(session, query_key, lat, lon, display)
-                return (lat, lon, True)
+                exact = self._is_building_match(clean_street, city_name, data)
+                await self.set_cache(session, query_key, lat, lon, ("exact:" if exact else "approx:") + display)
+                return (lat, lon, exact)
 
         # 2. Try District + City on Nominatim
         if district or city_name:

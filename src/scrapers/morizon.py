@@ -437,6 +437,7 @@ class MorizonScraper(BaseScraper):
                             det = await self.fetch_listing_detail(item.url)
                             if det:
                                 if det.get("description"):
+                                    item.detail_fetched_at = datetime.now(UTC)
                                     item.raw_description = det["description"]
                                 if det.get("finish_condition"):
                                     item.finish_condition = det["finish_condition"]
@@ -457,6 +458,7 @@ class MorizonScraper(BaseScraper):
                             logger.debug(f"[{self.name}] Detail enrichment failed for {item.url}: {err}")
                 elif item.url in self.skip_detail_urls:
                     item.skip_detail = True
+                item.skip_detail = item.detail_fetched_at is None
                 return item
 
             results = await asyncio.gather(*[process_card(card) for card in valid_cards])
