@@ -6,6 +6,27 @@ The changelog is maintained automatically by the release workflow.
 
 <!-- version list -->
 
+## v1.21.0 (2026-10-10)
+
+### Bug Fixes
+
+- Improve pipeline data integrity and dashboard reliability
+  ([#38](https://github.com/p-sternik/Universal-Real-Estate-Hunter/pull/38),
+  [`a8d3285`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/a8d3285c74f08acc14c74894a7377c0ded0979a2))
+
+### Chores
+
+- **docker**: Enable in-process scheduler in minimal compose
+  ([#37](https://github.com/p-sternik/Universal-Real-Estate-Hunter/pull/37),
+  [`ba0f8fa`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/ba0f8fadc64e3b7d7cc94dc66f7370f22941d45b))
+
+### Features
+
+- Improve search profiles and settings UX
+  ([#38](https://github.com/p-sternik/Universal-Real-Estate-Hunter/pull/38),
+  [`a8d3285`](https://github.com/p-sternik/Universal-Real-Estate-Hunter/commit/a8d3285c74f08acc14c74894a7377c0ded0979a2))
+
+
 ## v1.20.2 (2026-10-09)
 
 ### Bug Fixes
